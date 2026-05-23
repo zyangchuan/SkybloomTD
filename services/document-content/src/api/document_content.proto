@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package document_content.v1;
+
+service DocumentContentService {
+  rpc GetSubChapter(GetSubChapterRequest) returns (GetSubChapterResponse);
+}
+
+message GetSubChapterRequest {
+  string user_id = 1;
+  string sub_chapter_id = 2;
+  int32 max_chars = 3;
+}
+
+message SubChapterContent {
+  string normalized_user_id = 1;
+  string requested_user_id = 2;
+  string sub_chapter_id = 3;
+  string document_id = 4;
+  string chapter_id = 5;
+  int32 sub_chapter_index = 6;
+  string title = 7;
+  int32 start_line = 8;
+  int32 end_line = 9;
+  string source_text = 10;
+  repeated string source_chunk_ids = 11;
+  int32 chunk_count = 12;
+  int32 candidate_chunk_count = 13;
+  string chunk_lookup_strategy = 14;
+  int32 source_char_count = 15;
+  bool source_truncated = 16;
+  bool markdown_cache_hit = 17;
+  string markdown_cache_key = 18;
+  string source_content_hash = 19;
+}
+
+message GetSubChapterResponse {
+  SubChapterContent sub_chapter = 1;
+}

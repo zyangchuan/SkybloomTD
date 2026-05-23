@@ -1,0 +1,92 @@
+services:
+  document-content-api:
+    container_name: document-content-api
+    command: uvicorn main:app --reload --host 0.0.0.0 --port 8000
+    build:
+      context: ./src/api
+      dockerfile: Dockerfile
+    image: document-content-api:latest
+    ports:
+      - "8001:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./src/api:/app
+      - ./temp:/temp
+    depends_on:
+      redis:
+        condition: service_healthy
+      document-content-worker:
+        condition: service_healthy
+
+  document-content-grpc:
+    container_name: document-content-grpc
+    command: python grpc_server.py
+    build:
+      context: ./src/api
+      dockerfile: Dockerfile
+    image: document-content-api:latest
+    ports:
+      - "50051:50051"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CONTENT_GRPC_HOST=0.0.0.0
+      - CONTENT_GRPC_PORT=50051
+    volumes:
+      - ./src/api:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+  
+  document-content-worker:
+    container_name: document-content-worker
+    hostname: document-content-worker
+    build:
+      context: ./src/worker
+      dockerfile: Dockerfile
+    image: document-content-worker:latest
+    command: celery -A app.celery_app:celery_app worker --loglevel=info --pool=solo --concurrency=1
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./src/worker:/app
+      - ./output:/output
+      - ./temp:/temp
+      - models:/root/.paddlex
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery --broker=redis://redis:6379/0 inspect ping --destination=celery@document-content-worker --timeout=10 | grep -q pong"]
+      interval: 15s
+      timeout: 15s
+      retries: 20
+      start_period: 180s
+
+  redis:
+    container_name: document-content-redis-server
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  models:
