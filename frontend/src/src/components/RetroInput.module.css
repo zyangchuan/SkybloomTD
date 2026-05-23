@@ -1,0 +1,10 @@
+.retroInputContainer {
+    display: flex;
+    align-items: center;
+    border: 10px solid transparent;
+    border-image-source: url('../../public/gui/buttons_text/ButtonText_Blank_TextInput.svg');
+    border-image-slice: 50 fill;
+    border-image-repeat: stretch;
+    height: 48px;
+    width: 100%;
+}

@@ -1,0 +1,7 @@
+.orangeSquare {
+    border: 20px solid transparent;
+    border-image-source: url('../../public/gui/boxes_banners/Box_Orange_Square.svg');
+    border-image-slice: 80 fill;
+    border-image-repeat: stretch;
+}
+        

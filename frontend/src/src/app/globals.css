@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+:root {
+    --background: #ffffff;
+    --sky-background: linear-gradient(
+    180deg,
+    #008df2 0%,
+    #65d1ff 100%
+    );
+    --foreground: #171717;
+}
+
+@theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --font-sans: var(--font-concert-one);
+}
+
+html {
+    min-height: 100%;
+}
+
+body {
+    background: var(--sky-background);
+    background-attachment: fixed;
+    color: var(--foreground);
+    min-height: 100%;
+    position: relative;
+}
+
+body > :not(.sky-clouds) {
+    position: relative;
+    z-index: 1;
+}
+
+.sky-clouds {
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    position: fixed;
+    z-index: 0;
+}
+
+.cloud {
+    --rotation: 0deg;
+    --scale: 1;
+    background-image: url("/clouds.png");
+    background-repeat: no-repeat;
+    background-size: 1536px 1024px;
+    display: block;
+    position: absolute;
+    transform: scale(var(--scale)) rotate(var(--rotation));
+    transform-origin: center;
+    /* Infinite right-to-left linear scroll */
+    animation: float-loop 40s linear infinite;
+    will-change: transform;
+}
+
+@keyframes float-loop {
+    0% {
+        transform: translate3d(100vw, 0, 0) scale(var(--scale)) rotate(var(--rotation));
+    }
+    100% {
+        transform: translate3d(-120vw, 0, 0) scale(var(--scale)) rotate(var(--rotation));
+    }
+}
+
+.cloud-1 {
+    background-position: -88px -70px;
+    height: 128px;
+    width: 318px;
+    --rotation: -2deg;
+    --scale: 0.72;
+    animation-duration: 320s;
+    animation-delay: -90s;
+}
+
+.cloud-2 {
+    background-position: -430px -84px;
+    height: 104px;
+    width: 260px;
+    --rotation: 1deg;
+    --scale: 0.58;
+    animation-duration: 220s;
+    animation-delay: -150s;
+}
+
+.cloud-3 {
+    background-position: -760px -99px;
+    height: 82px;
+    width: 176px;
+    --rotation: -1deg;
+    --scale: 0.74;
+    animation-duration: 380s;
+    animation-delay: -50s;
+}
+
+.cloud-4 {
+    background-position: -990px -436px;
+    height: 65px;
+    width: 254px;
+    --rotation: 1deg;
+    --scale: 0.86;
+    animation-duration: 280s;
+    animation-delay: -180s;
+}
+
+.cloud-5 {
+    background-position: -45px -590px;
+    height: 62px;
+    width: 270px;
+    --rotation: -1deg;
+    --scale: 0.82;
+    animation-duration: 300s;
+    animation-delay: -110s;
+}
+
+.cloud-6 {
+    background-position: -60px -745px;
+    height: 80px;
+    width: 262px;
+    --rotation: 2deg;
+    --scale: 0.54;
+    animation-duration: 200s;
+    animation-delay: -70s;
+}
+
+.cloud-7 {
+    background-position: -1016px -750px;
+    height: 70px;
+    width: 210px;
+    --rotation: -2deg;
+    --scale: 0.72;
+    animation-duration: 260s;
+    animation-delay: -190s;
+}

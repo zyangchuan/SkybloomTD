@@ -1,0 +1,10 @@
+.buttonWhite {
+    appearance: none;
+    border: 20px solid transparent;
+    border-image-source: url('../../public/gui/buttons_text/ButtonText_Large_Blank_Square.svg');
+    border-image-slice: 100 fill;
+    border-image-repeat: stretch;
+    color: inherit;
+    font: inherit;
+}
+        

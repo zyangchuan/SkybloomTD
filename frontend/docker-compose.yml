@@ -1,0 +1,16 @@
+services:
+  frontend:
+    container_name: frontend
+    image: skybloomtd-frontend:latest
+    command: npm run dev
+    build:
+      context: ./src
+    env_file:
+      - path: .env.local
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app
+      - /app/node_modules
+      - /app/.next
+    restart: unless-stopped

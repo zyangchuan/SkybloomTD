@@ -1,0 +1,9 @@
+.buttonOrange {
+    appearance: none;
+    border: 12px solid transparent;
+    border-image-source: url('../../public/gui/buttons_text/ButtonText_Large_Orange_Square.svg');
+    border-image-slice: 80 fill;
+    border-image-repeat: stretch;
+    color: inherit;
+    font: inherit;
+}
