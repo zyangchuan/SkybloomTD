@@ -1,0 +1,570 @@
+openapi: 3.1.0
+info:
+  title: SkyBloomTD Edge API
+  version: 0.1.0
+  description: |
+    Public API exposed through the Nginx reverse proxy.
+
+    Only the reverse proxy publishes a host port. Backend services are private
+    Docker-network services and should be accessed through these paths.
+
+    Protected backend routes require a Supabase JWT in the `Authorization`
+    header. Nginx verifies the token through `user-service /auth/verify` and
+    forwards trusted identity headers to private services.
+servers:
+  - url: http://localhost
+    description: Local Docker Compose reverse proxy
+tags:
+  - name: System
+    description: Public health and documentation endpoints.
+  - name: Auth
+    description: Authentication verification endpoints.
+  - name: Users
+    description: User profile persistence backed by `private.users`.
+  - name: Document Content
+    description: PDF/document upload and OCR workflow entrypoints.
+  - name: Level Generator
+    description: Level generation workflow entrypoints.
+
+paths:
+  /nginx-health:
+    get:
+      tags: [System]
+      summary: Check reverse proxy health
+      operationId: getNginxHealth
+      security: []
+      responses:
+        "200":
+          description: Reverse proxy is healthy.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: ok
+
+  /openapi.yaml:
+    get:
+      tags: [System]
+      summary: Download this OpenAPI document
+      operationId: getOpenApiDocument
+      security: []
+      responses:
+        "200":
+          description: OpenAPI YAML document.
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /api/user-service/health:
+    get:
+      tags: [System]
+      summary: Check user-service process health
+      operationId: getUserServiceHealth
+      security: []
+      responses:
+        "200":
+          description: Service process is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/user-service/ready:
+    get:
+      tags: [System]
+      summary: Check user-service database readiness
+      operationId: getUserServiceReadiness
+      security: []
+      responses:
+        "200":
+          description: Service can reach PostgreSQL.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyResponse"
+        "503":
+          description: Database is unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/user-service/auth/verify:
+    get:
+      tags: [Auth]
+      summary: Verify a Supabase JWT
+      description: |
+        Stateless token verification endpoint used by Nginx `auth_request`.
+        Clients generally do not need to call this directly.
+      operationId: verifySupabaseJwt
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Token is valid.
+          headers:
+            X-User-Id:
+              description: Authenticated Supabase user id from the JWT `sub` claim.
+              schema:
+                type: string
+                format: uuid
+            X-User-Email:
+              description: User email from the JWT, when present.
+              schema:
+                type: string
+                format: email
+        "401":
+          description: Token is missing, invalid, expired, or misconfigured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/users:
+    post:
+      tags: [Users]
+      summary: Create or update the authenticated user profile
+      description: |
+        Stores the authenticated Supabase user in `private.users`. The database
+        user id is always taken from the JWT `sub` claim. If `id` is included in
+        the body, it must match the JWT subject.
+      operationId: upsertUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertUserRequest"
+            example:
+              user_name: Ada
+              email: ada@example.com
+              metadata:
+                avatar_url: https://example.com/avatar.png
+      responses:
+        "200":
+          description: User profile was created or updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Request body id does not match authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/users/me:
+    post:
+      tags: [Users]
+      summary: Create or update the authenticated user profile
+      description: Alias of `POST /api/users`.
+      operationId: upsertCurrentUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertUserRequest"
+      responses:
+        "200":
+          description: User profile was created or updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Request body id does not match authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/upload-file:
+    post:
+      tags: [Document Content]
+      summary: Upload a document for OCR and indexing
+      description: |
+        Shortcut route for `POST /api/document-content/upload-file`.
+
+        The authenticated user id is taken from the Supabase JWT. Do not send a
+        `user_id` field; client-supplied user ids are ignored by the backend.
+      operationId: uploadDocumentShortcut
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadDocumentRequest"
+      responses:
+        "200":
+          description: OCR/indexing workflow was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadDocumentResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Uploaded file exceeds proxy size limit.
+
+  /api/document-content/upload-file:
+    post:
+      tags: [Document Content]
+      summary: Upload a document for OCR and indexing
+      operationId: uploadDocument
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadDocumentRequest"
+      responses:
+        "200":
+          description: OCR/indexing workflow was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadDocumentResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Uploaded file exceeds proxy size limit.
+
+  /api/generate_level:
+    get:
+      tags: [Level Generator]
+      summary: Queue level generation for a sub-chapter
+      description: Shortcut route for `GET /api/level-generator/generate_level`.
+      operationId: generateLevelShortcutGet
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SubChapterId"
+      responses:
+        "200":
+          description: Level generation workflow was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateLevelResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid sub-chapter id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FastApiValidationError"
+    post:
+      tags: [Level Generator]
+      summary: Queue level generation for a sub-chapter
+      description: Shortcut route for `POST /api/level-generator/generate_level`.
+      operationId: generateLevelShortcutPost
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SubChapterId"
+      responses:
+        "200":
+          description: Level generation workflow was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateLevelResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid sub-chapter id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FastApiValidationError"
+
+  /api/level-generator/health:
+    get:
+      tags: [Level Generator]
+      summary: Check level-generator API health through the protected proxy route
+      operationId: getLevelGeneratorHealth
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Level-generator API is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/level-generator/generate_level:
+    get:
+      tags: [Level Generator]
+      summary: Queue level generation for a sub-chapter
+      operationId: generateLevelGet
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SubChapterId"
+      responses:
+        "200":
+          description: Level generation workflow was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateLevelResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid sub-chapter id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FastApiValidationError"
+    post:
+      tags: [Level Generator]
+      summary: Queue level generation for a sub-chapter
+      operationId: generateLevelPost
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SubChapterId"
+      responses:
+        "200":
+          description: Level generation workflow was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateLevelResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid sub-chapter id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FastApiValidationError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Supabase JWT
+
+  parameters:
+    SubChapterId:
+      name: sub_chapter_id
+      in: query
+      required: true
+      description: UUID of the indexed sub-chapter to generate a level for.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ReadyResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ready
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: authentication required
+
+    FastApiValidationError:
+      type: object
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+                additionalProperties: true
+
+    UpsertUserRequest:
+      type: object
+      required: [user_name]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Optional. If provided, must match the JWT `sub` claim.
+        email:
+          type: string
+          format: email
+        user_name:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties: true
+
+    User:
+      type: object
+      required: [id, user_name, metadata, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        user_name:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UploadDocumentRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: Document file to OCR. PDFs are expected by the current worker flow.
+
+    UploadDocumentResponse:
+      type: object
+      required:
+        - message
+        - task_id
+        - ocr_task_id
+        - upload_task_id
+        - index_task_id
+        - user_id
+        - document_id
+      properties:
+        message:
+          type: string
+          example: Upload file success
+        task_id:
+          type: string
+          description: Celery chain result id.
+        ocr_task_id:
+          type: string
+        upload_task_id:
+          type: string
+        index_task_id:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+          description: Authenticated Supabase user id from the JWT.
+        document_id:
+          type: string
+          pattern: "^[a-f0-9]{32}$"
+          description: Generated document id for the queued OCR workflow.
+
+    GenerateLevelResponse:
+      type: object
+      required:
+        - message
+        - task_id
+        - fetch_task_id
+        - generate_task_id
+        - user_id
+        - sub_chapter_id
+      properties:
+        message:
+          type: string
+          example: Level generation started
+        task_id:
+          type: string
+          description: Celery chain result id.
+        fetch_task_id:
+          type: string
+        generate_task_id:
+          type: string
+        user_id:
+          type: string
+          format: uuid
+          description: Authenticated Supabase user id from the JWT.
+        sub_chapter_id:
+          type: string
+          format: uuid
