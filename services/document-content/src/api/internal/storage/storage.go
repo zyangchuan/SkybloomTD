@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -9,9 +9,11 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
+	"skybloom/document-content-api/internal/models"
 )
 
 type Storage struct {
@@ -20,7 +22,7 @@ type Storage struct {
 	prefix string
 }
 
-func NewStorageFromEnv() (*Storage, error) {
+func NewFromEnv() (*Storage, error) {
 	bucket := strings.TrimSpace(os.Getenv("AWS_S3_BUCKET"))
 	endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("AWS_S3_ENDPOINT_URL")), "/")
 	accessKey := strings.TrimSpace(os.Getenv("AWS_ACCESS_KEY_ID"))
@@ -45,11 +47,11 @@ func NewStorageFromEnv() (*Storage, error) {
 		prefix = joinKey(uriPrefix, prefix)
 	}
 
-	awsConfig, err := config.LoadDefaultConfig(
+	awsConfig, err := awsconfig.LoadDefaultConfig(
 		context.Background(),
-		config.WithRegion(region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-		config.WithEndpointResolverWithOptions(
+		awsconfig.WithRegion(region),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+		awsconfig.WithEndpointResolverWithOptions(
 			aws.EndpointResolverWithOptionsFunc(
 				func(service, region string, options ...any) (aws.Endpoint, error) {
 					return aws.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
@@ -74,7 +76,7 @@ func (s *Storage) UploadSource(
 	documentID string,
 	filename string,
 	contentType string,
-) (SourceRef, error) {
+) (models.SourceRef, error) {
 	key := joinKey(s.prefix, "users", userID, "documents", documentID, "source", filename)
 	input := &s3.PutObjectInput{
 		Bucket: &s.bucket,
@@ -85,9 +87,9 @@ func (s *Storage) UploadSource(
 		input.ContentType = &contentType
 	}
 	if _, err := s.client.PutObject(ctx, input); err != nil {
-		return SourceRef{}, err
+		return models.SourceRef{}, err
 	}
-	return SourceRef{
+	return models.SourceRef{
 		Type:        "s3",
 		Bucket:      s.bucket,
 		Key:         key,
@@ -105,4 +107,11 @@ func joinKey(parts ...string) string {
 		}
 	}
 	return strings.Join(clean, "/")
+}
+
+func envOrDefault(key string, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
 }
