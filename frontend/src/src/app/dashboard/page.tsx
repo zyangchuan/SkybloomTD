@@ -7,11 +7,8 @@ import type { Session } from '@supabase/supabase-js';
 import OrangeSquare from '@/components/OrangeSquare';
 import BlueSquare from '@/components/BlueSquare';
 import ButtonOrange from '@/components/ButtonOrange';
-<<<<<<< HEAD
-=======
 import ButtonGreen from '@/components/ButtonGreen';
 import UploadDocumentModal from '@/components/UploadDocumentModal';
->>>>>>> d9013ee (added upload document feature)
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 
 function getDisplayName(session: Session) {
@@ -50,10 +47,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-<<<<<<< HEAD
-=======
   const [isUploadOpen, setIsUploadOpen] = useState(false);
->>>>>>> d9013ee (added upload document feature)
 
   useEffect(() => {
     let isMounted = true;
@@ -168,8 +162,6 @@ export default function DashboardPage() {
         </BlueSquare>
 
         <div className="flex flex-col w-full gap-4 items-center">
-<<<<<<< HEAD
-=======
           <ButtonGreen
             className="h-12 w-64 text-2xl text-white drop-shadow-[0_1.5px_0_rgba(0,0,0,0.3)] hover:brightness-110 active:scale-95 transition-all duration-100"
             onClick={() => setIsUploadOpen(true)}
@@ -177,7 +169,6 @@ export default function DashboardPage() {
             Upload Document
           </ButtonGreen>
 
->>>>>>> d9013ee (added upload document feature)
           <ButtonOrange
             className="h-12 w-64 text-2xl text-white drop-shadow-[0_1.5px_0_rgba(0,0,0,0.3)] hover:brightness-110 active:scale-95 transition-all duration-100"
             disabled={isSubmitting}
@@ -193,14 +184,11 @@ export default function DashboardPage() {
           )}
         </div>
       </OrangeSquare>
-<<<<<<< HEAD
-=======
 
       <UploadDocumentModal 
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
       />
->>>>>>> d9013ee (added upload document feature)
     </div>
   );
 }

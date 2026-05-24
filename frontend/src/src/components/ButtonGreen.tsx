@@ -11,11 +11,7 @@ export default function ButtonGreen({
 }: ComponentProps) {
   return (
     <button
-<<<<<<< HEAD
-      className={`${styles.buttonGreen} ${className || ''} flex cursor-pointer items-center justify-center disabled:cursor-wait disabled:opacity-75`}
-=======
       className={`${styles.buttonGreen} ${className || ''} flex cursor-pointer items-center justify-center disabled:cursor-not-allowed disabled:opacity-75`}
->>>>>>> d9013ee (added upload document feature)
       type={type}
       {...props}
     >
