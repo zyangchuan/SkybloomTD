@@ -1,0 +1,176 @@
+name: skybloom-services
+
+services:
+  reverse-proxy:
+    container_name: reverse-proxy
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docs:/usr/share/nginx/html/docs:ro
+    depends_on:
+      - frontend
+      - user-service
+      - document-content-api
+      - level-generator-api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/nginx-health | grep -q ok"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - services-network
+
+  frontend:
+    container_name: frontend
+    image: skybloomtd-frontend:latest
+    command: npm run dev
+    build:
+      context: ./frontend/src
+    env_file:
+      - ./frontend/.env.local
+    expose:
+      - "3000"
+    volumes:
+      - ./frontend/src:/app
+      - /app/node_modules
+      - /app/.next
+    restart: unless-stopped
+    networks:
+      - services-network
+
+  document-content-api:
+    container_name: document-content-api
+    build:
+      context: ./services/document-content/src/api
+      dockerfile: Dockerfile
+    image: document-content-api:latest
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
+      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
+    volumes:
+      - ./services/document-content/temp:/temp
+    networks:
+      - services-network
+
+  document-content-grpc:
+    container_name: document-content-grpc
+    build:
+      context: ./services/document-content/src/grpc
+      dockerfile: Dockerfile
+    image: document-content-grpc:latest
+    expose:
+      - "50051"
+    env_file:
+      - .env
+    environment:
+      CONTENT_GRPC_HOST: 0.0.0.0
+      CONTENT_GRPC_PORT: 50051
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "nc -z 127.0.0.1 50051",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - services-network
+
+  document-content-worker:
+    profiles:
+      - local-worker
+    container_name: document-content-worker
+    hostname: document-content-worker
+    build:
+      context: ./services/document-content/src/worker
+      dockerfile: Dockerfile
+    image: document-content-worker:latest
+    command: python -m app.rabbitmq_worker
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
+      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    volumes:
+      - ./services/document-content/src/worker:/app
+      - ./services/document-content/output:/output
+      - ./services/document-content/temp:/temp
+      - models:/root/.paddlex
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    networks:
+      - services-network
+
+  level-generator-api:
+    container_name: level-generator-api
+    build:
+      context: ./services/level-generator/src/api
+      dockerfile: Dockerfile
+    image: level-generator-api:latest
+    expose:
+      - "8000"
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
+      LEVEL_GENERATOR_QUEUE: ${LEVEL_GENERATOR_QUEUE:-level.generate}
+    networks:
+      - services-network
+
+  level-generator-worker:
+    container_name: level-generator-worker
+    hostname: level-generator-worker
+    build:
+      context: ./services/level-generator/src/worker
+      dockerfile: Dockerfile
+    image: level-generator-worker:latest
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
+      LEVEL_GENERATOR_QUEUE: ${LEVEL_GENERATOR_QUEUE:-level.generate}
+      DOCUMENT_CONTENT_GRPC_ADDR: document-content-grpc:50051
+    depends_on:
+      document-content-grpc:
+        condition: service_healthy
+    networks:
+      - services-network
+
+  user-service:
+    container_name: user-service
+    build:
+      context: ./services/user-service
+      dockerfile: Dockerfile
+    image: user-service:latest
+    expose:
+      - "8080"
+    env_file:
+      - .env
+    environment:
+      USER_SERVICE_PORT: 8080
+      GIN_MODE: release
+    networks:
+      - services-network
+
+networks:
+  services-network:
+    name: skybloom-services-network
+
+volumes:
+  models:
