@@ -24,6 +24,23 @@ function getDisplayName(session: Session) {
   return session.user.email ?? 'Player';
 }
 
+<<<<<<< HEAD
+=======
+const authRedirectStorageKey = 'skybloom.auth.redirectPath';
+
+function getCurrentPath() {
+  return `${window.location.pathname}${window.location.search}`;
+}
+
+function rememberAuthRedirectPath() {
+  window.sessionStorage.setItem(authRedirectStorageKey, getCurrentPath());
+}
+
+function getAuthCallbackURL() {
+  return `${window.location.origin}/auth/callback`;
+}
+
+>>>>>>> d9013ee (added upload document feature)
 export default function AuthPanel() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
@@ -93,6 +110,10 @@ export default function AuthPanel() {
     setIsSubmitting(true);
     setAuthError(null);
     setSignUpSuccess(false);
+<<<<<<< HEAD
+=======
+    rememberAuthRedirectPath();
+>>>>>>> d9013ee (added upload document feature)
 
     if (authMode === 'signin') {
       const { error } = await supabase.auth.signInWithPassword({
@@ -109,7 +130,11 @@ export default function AuthPanel() {
         email,
         password,
         options: {
+<<<<<<< HEAD
           emailRedirectTo: window.location.origin,
+=======
+          emailRedirectTo: getAuthCallbackURL(),
+>>>>>>> d9013ee (added upload document feature)
         },
       });
 
@@ -137,11 +162,19 @@ export default function AuthPanel() {
     setIsSubmitting(true);
     setAuthError(null);
     setSignUpSuccess(false);
+<<<<<<< HEAD
+=======
+    rememberAuthRedirectPath();
+>>>>>>> d9013ee (added upload document feature)
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
+<<<<<<< HEAD
         redirectTo: window.location.origin,
+=======
+        redirectTo: getAuthCallbackURL(),
+>>>>>>> d9013ee (added upload document feature)
       },
     });
 
@@ -320,5 +353,8 @@ export default function AuthPanel() {
   );
 }
 
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> d9013ee (added upload document feature)
