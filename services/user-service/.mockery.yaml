@@ -1,0 +1,11 @@
+with-expecter: false
+issue-845-fix: true
+packages:
+  skybloom/user-service/internal/api:
+    config:
+      dir: internal/api/mocks
+      outpkg: mocks
+    interfaces:
+      UserStore:
+        config:
+          filename: user_store.go

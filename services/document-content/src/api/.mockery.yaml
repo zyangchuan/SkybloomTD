@@ -1,0 +1,14 @@
+with-expecter: false
+issue-845-fix: true
+packages:
+  skybloom/document-content-api/internal/api:
+    config:
+      dir: internal/api/mocks
+      outpkg: mocks
+    interfaces:
+      Publisher:
+        config:
+          filename: publisher.go
+      SourceUploader:
+        config:
+          filename: source_uploader.go

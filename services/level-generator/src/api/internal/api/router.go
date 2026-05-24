@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -11,17 +12,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"skybloom/level-generator-api/internal/messaging"
 	"skybloom/level-generator-api/internal/models"
 )
 
 var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type Server struct {
-	publisher *messaging.Publisher
+	publisher Publisher
 }
 
-func NewRouter(publisher *messaging.Publisher) *gin.Engine {
+type Publisher interface {
+	Publish(ctx context.Context, messageID string, value any) error
+}
+
+func NewRouter(publisher Publisher) *gin.Engine {
 	server := &Server{publisher: publisher}
 
 	router := gin.New()

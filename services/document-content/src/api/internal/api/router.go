@@ -16,9 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"skybloom/document-content-api/internal/config"
-	"skybloom/document-content-api/internal/messaging"
 	"skybloom/document-content-api/internal/models"
-	"skybloom/document-content-api/internal/storage"
 )
 
 const maxUploadBytes = 100 << 20
@@ -27,11 +25,26 @@ var safePathPartPattern = regexp.MustCompile(`[^A-Za-z0-9_.=-]+`)
 
 type Server struct {
 	config    config.Config
-	publisher *messaging.Publisher
-	storage   *storage.Storage
+	publisher Publisher
+	storage   SourceUploader
 }
 
-func NewRouter(cfg config.Config, publisher *messaging.Publisher, storageClient *storage.Storage) *gin.Engine {
+type Publisher interface {
+	Publish(ctx context.Context, messageID string, value any) error
+}
+
+type SourceUploader interface {
+	UploadSource(
+		ctx context.Context,
+		content []byte,
+		userID string,
+		documentID string,
+		filename string,
+		contentType string,
+	) (models.SourceRef, error)
+}
+
+func NewRouter(cfg config.Config, publisher Publisher, storageClient SourceUploader) *gin.Engine {
 	server := &Server{
 		config:    cfg,
 		publisher: publisher,

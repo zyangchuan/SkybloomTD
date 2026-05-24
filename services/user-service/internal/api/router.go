@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strings"
@@ -14,13 +15,17 @@ import (
 	"skybloom/user-service/internal/auth"
 	"skybloom/user-service/internal/config"
 	"skybloom/user-service/internal/models"
-	"skybloom/user-service/internal/repository"
 )
 
 type Server struct {
 	config     config.Config
-	users      *repository.UserRepository
+	users      UserStore
 	authParser *auth.Parser
+}
+
+type UserStore interface {
+	Ping(ctx context.Context) error
+	Upsert(ctx context.Context, user models.User) (models.User, error)
 }
 
 type UpsertUserRequest struct {
@@ -30,7 +35,7 @@ type UpsertUserRequest struct {
 	Metadata map[string]any `json:"metadata"`
 }
 
-func NewRouter(cfg config.Config, users *repository.UserRepository) *gin.Engine {
+func NewRouter(cfg config.Config, users UserStore) *gin.Engine {
 	server := &Server{
 		config: cfg,
 		users:  users,

@@ -1,0 +1,11 @@
+with-expecter: false
+issue-845-fix: true
+packages:
+  skybloom/level-generator-api/internal/api:
+    config:
+      dir: internal/api/mocks
+      outpkg: mocks
+    interfaces:
+      Publisher:
+        config:
+          filename: publisher.go

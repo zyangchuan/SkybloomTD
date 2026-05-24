@@ -32,9 +32,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("storage configuration error: %v", err)
 	}
+	var sourceUploader api.SourceUploader
+	if storageClient != nil {
+		sourceUploader = storageClient
+	}
 
 	// HTTP server router
-	router := api.NewRouter(cfg, publisher, storageClient)
+	router := api.NewRouter(cfg, publisher, sourceUploader)
 
 	addr := ":" + cfg.Port
 	log.Printf("document-content-api listening on %s", addr)

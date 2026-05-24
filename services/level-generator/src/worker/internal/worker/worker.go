@@ -16,16 +16,28 @@ import (
 
 type Worker struct {
 	config    config.Config
-	levels    *repository.LevelRepository
-	sources   *source.Client
-	generator *generator.Client
+	levels    LevelRepository
+	sources   SourceFetcher
+	generator LevelGenerator
+}
+
+type LevelRepository interface {
+	Insert(ctx context.Context, sourceContext source.SourceContext, generation generator.LevelGeneration, model string) (repository.SavedLevel, error)
+}
+
+type SourceFetcher interface {
+	FetchSubChapterContent(ctx context.Context, userID string, subChapterID string) (source.SourceContext, error)
+}
+
+type LevelGenerator interface {
+	GenerateLevel(ctx context.Context, sourceContext source.SourceContext) (generator.LevelGeneration, error)
 }
 
 func New(
 	cfg config.Config,
-	levels *repository.LevelRepository,
-	sources *source.Client,
-	generatorClient *generator.Client,
+	levels LevelRepository,
+	sources SourceFetcher,
+	generatorClient LevelGenerator,
 ) *Worker {
 	return &Worker{
 		config:    cfg,
@@ -67,7 +79,7 @@ func (w *Worker) Consume(ctx context.Context) error {
 			_ = delivery.Nack(false, false)
 			continue
 		}
-		if err := w.processJob(ctx, job); err != nil {
+		if err := w.ProcessJob(ctx, job); err != nil {
 			log.Printf("level job failed task_id=%s sub_chapter_id=%s: %v", job.TaskID, job.SubChapterID, err)
 			_ = delivery.Nack(false, false)
 			continue
@@ -77,7 +89,7 @@ func (w *Worker) Consume(ctx context.Context) error {
 	return nil
 }
 
-func (w *Worker) processJob(ctx context.Context, job models.LevelJob) error {
+func (w *Worker) ProcessJob(ctx context.Context, job models.LevelJob) error {
 	sourceContext, err := w.sources.FetchSubChapterContent(ctx, job.UserID, job.SubChapterID)
 	if err != nil {
 		return err
