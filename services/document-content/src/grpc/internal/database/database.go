@@ -2,19 +2,25 @@ package database
 
 import (
 	"context"
-	"database/sql"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
-func Open(ctx context.Context, databaseURL string) (*sql.DB, func() error, error) {
-	db, err := sql.Open("pgx", databaseURL)
+func Open(ctx context.Context, databaseURL string) (*gorm.DB, func() error, error) {
+	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+
+	sqlDB, err := db.DB()
+	if err != nil {
 		return nil, nil, err
 	}
-	return db, db.Close, nil
+	if err := sqlDB.PingContext(ctx); err != nil {
+		sqlDB.Close()
+		return nil, nil, err
+	}
+
+	return db, sqlDB.Close, nil
 }

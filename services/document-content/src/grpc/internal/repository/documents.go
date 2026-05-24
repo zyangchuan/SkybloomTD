@@ -2,11 +2,11 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -15,43 +15,41 @@ type DocumentRow struct {
 	SubChapterID    uuid.UUID
 	DocumentID      uuid.UUID
 	ChapterID       uuid.UUID
-	SubChapterIndex sql.NullInt32
-	Title           sql.NullString
-	StartLine       sql.NullInt32
-	EndLine         sql.NullInt32
-	S3Bucket        sql.NullString
-	S3Key           sql.NullString
+	SubChapterIndex *int32
+	Title           *string
+	StartLine       *int32
+	EndLine         *int32
+	S3Bucket        *string
+	S3Key           *string
 }
 
 type DocumentRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewDocumentRepository(db *sql.DB) *DocumentRepository {
+func NewDocumentRepository(db *gorm.DB) *DocumentRepository {
 	return &DocumentRepository{db: db}
 }
 
 func (r *DocumentRepository) LoadDocumentRow(ctx context.Context, subChapterID uuid.UUID, userID uuid.UUID) (DocumentRow, error) {
-	const query = `
-		SELECT sc.id, sc.document_id, sc.chapter_id, sc.sub_chapter_index,
-		       sc.title, sc.start_line, sc.end_line, d.s3_bucket, d.s3_key
-		FROM sub_chapters sc
-		JOIN documents d ON sc.document_id = d.id
-		WHERE sc.id = $1 AND d.user_id = $2
-	`
 	var row DocumentRow
-	err := r.db.QueryRowContext(ctx, query, subChapterID, userID).Scan(
-		&row.SubChapterID,
-		&row.DocumentID,
-		&row.ChapterID,
-		&row.SubChapterIndex,
-		&row.Title,
-		&row.StartLine,
-		&row.EndLine,
-		&row.S3Bucket,
-		&row.S3Key,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := r.db.WithContext(ctx).
+		Table("sub_chapters AS sc").
+		Select(`
+			sc.id AS sub_chapter_id,
+			sc.document_id,
+			sc.chapter_id,
+			sc.sub_chapter_index,
+			sc.title,
+			sc.start_line,
+			sc.end_line,
+			d.s3_bucket,
+			d.s3_key
+		`).
+		Joins("JOIN documents AS d ON sc.document_id = d.id").
+		Where("sc.id = ? AND d.user_id = ?", subChapterID, userID).
+		Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return DocumentRow{}, fmt.Errorf("%w: No sub_chapter found for the provided user_id and sub_chapter_id", ErrNotFound)
 	}
 	if err != nil {

@@ -73,14 +73,14 @@ func (s *Server) fetchSubChapterContent(ctx context.Context, requestedUserID str
 	if err != nil {
 		return models.SubChapterContent{}, err
 	}
-	if !row.S3Bucket.Valid || strings.TrimSpace(row.S3Bucket.String) == "" ||
-		!row.S3Key.Valid || strings.TrimSpace(row.S3Key.String) == "" {
+	if row.S3Bucket == nil || strings.TrimSpace(*row.S3Bucket) == "" ||
+		row.S3Key == nil || strings.TrimSpace(*row.S3Key) == "" {
 		return models.SubChapterContent{}, fmt.Errorf("%w: Document markdown S3 location is missing", errContentUnavailable)
 	}
 
-	startLine := row.StartLine.Int32
-	endLine := row.EndLine.Int32
-	markdown, err := s.loader.Download(ctx, row.S3Bucket.String, row.S3Key.String)
+	startLine := int32Value(row.StartLine)
+	endLine := int32Value(row.EndLine)
+	markdown, err := s.loader.Download(ctx, *row.S3Bucket, *row.S3Key)
 	if err != nil {
 		return models.SubChapterContent{}, err
 	}
@@ -101,8 +101,8 @@ func (s *Server) fetchSubChapterContent(ctx context.Context, requestedUserID str
 		SubChapterID:        row.SubChapterID.String(),
 		DocumentID:          row.DocumentID.String(),
 		ChapterID:           row.ChapterID.String(),
-		SubChapterIndex:     row.SubChapterIndex.Int32,
-		Title:               row.Title.String,
+		SubChapterIndex:     int32Value(row.SubChapterIndex),
+		Title:               stringValue(row.Title),
 		StartLine:           startLine,
 		EndLine:             endLine,
 		SourceText:          sourceText,
@@ -157,4 +157,18 @@ func indexedUserUUID(value string) uuid.UUID {
 func sha256Hex(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func int32Value(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

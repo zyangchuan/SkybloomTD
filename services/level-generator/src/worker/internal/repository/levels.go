@@ -2,18 +2,20 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
 
 	"skybloom/level-generator-worker/internal/generator"
+	"skybloom/level-generator-worker/internal/models"
 	"skybloom/level-generator-worker/internal/source"
 )
 
 type LevelRepository struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 type SavedLevel struct {
@@ -24,7 +26,7 @@ type SavedLevel struct {
 	Model        string
 }
 
-func NewLevelRepository(db *sql.DB) *LevelRepository {
+func NewLevelRepository(db *gorm.DB) *LevelRepository {
 	return &LevelRepository{db: db}
 }
 
@@ -72,32 +74,18 @@ func (r *LevelRepository) Insert(ctx context.Context, sourceContext source.Sourc
 		return SavedLevel{}, err
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return SavedLevel{}, err
+	level := models.Level{
+		ID:              levelID,
+		UserID:          &dbUserID,
+		DocumentID:      documentID,
+		ChapterID:       chapterID,
+		SubChapterID:    subChapterID,
+		SummaryMarkdown: generation.SummaryMarkdown,
+		SourceChunkIDs:  datatypes.JSON(chunkIDs),
+		SourceMetadata:  datatypes.JSON(sourceMetadata),
+		Model:           model,
 	}
-	defer tx.Rollback()
-
-	_, err = tx.ExecContext(
-		ctx,
-		`INSERT INTO levels (
-			id, user_id, document_id, chapter_id, sub_chapter_id,
-			summary_markdown, source_chunk_ids, source_metadata, model
-		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9)`,
-		levelID,
-		dbUserID,
-		documentID,
-		chapterID,
-		subChapterID,
-		generation.SummaryMarkdown,
-		string(chunkIDs),
-		string(sourceMetadata),
-		model,
-	)
-	if err != nil {
-		return SavedLevel{}, err
-	}
-
+	quizzes := make([]models.Quiz, 0, len(generation.Quizzes))
 	for index, quiz := range generation.Quizzes {
 		quizID, err := uuid.NewRandom()
 		if err != nil {
@@ -107,26 +95,27 @@ func (r *LevelRepository) Insert(ctx context.Context, sourceContext source.Sourc
 		if err != nil {
 			return SavedLevel{}, err
 		}
-		_, err = tx.ExecContext(
-			ctx,
-			`INSERT INTO quizzes (
-				id, level_id, quiz_index, quiz_type,
-				question_markdown, options_markdown, answer_index
-			) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
-			quizID,
-			levelID,
-			index,
-			quiz.QuizType,
-			quiz.QuestionMarkdown,
-			string(options),
-			quiz.AnswerIndex,
-		)
-		if err != nil {
-			return SavedLevel{}, err
-		}
+		quizzes = append(quizzes, models.Quiz{
+			ID:               quizID,
+			LevelID:          levelID,
+			QuizIndex:        index,
+			QuizType:         quiz.QuizType,
+			QuestionMarkdown: quiz.QuestionMarkdown,
+			OptionsMarkdown:  datatypes.JSON(options),
+			AnswerIndex:      quiz.AnswerIndex,
+		})
 	}
 
-	if err := tx.Commit(); err != nil {
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&level).Error; err != nil {
+			return err
+		}
+		if len(quizzes) > 0 {
+			return tx.Omit("Level").Create(&quizzes).Error
+		}
+		return nil
+	})
+	if err != nil {
 		return SavedLevel{}, err
 	}
 	return SavedLevel{

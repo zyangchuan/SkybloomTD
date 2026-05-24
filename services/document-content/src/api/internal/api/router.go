@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -13,7 +12,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"skybloom/document-content-api/internal/config"
 	"skybloom/document-content-api/internal/messaging"
@@ -31,57 +31,62 @@ type Server struct {
 	storage   *storage.Storage
 }
 
-func NewRouter(cfg config.Config, publisher *messaging.Publisher, storageClient *storage.Storage) http.Handler {
+func NewRouter(cfg config.Config, publisher *messaging.Publisher, storageClient *storage.Storage) *gin.Engine {
 	server := &Server{
 		config:    cfg,
 		publisher: publisher,
 		storage:   storageClient,
 	}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", server.health)
-	mux.HandleFunc("POST /upload-file", server.uploadFile)
-	return requestLogger(mux)
+	router := gin.New()
+	if err := router.SetTrustedProxies(nil); err != nil {
+		log.Fatalf("proxy configuration error: %v", err)
+	}
+	router.Use(gin.Logger(), gin.Recovery())
+
+	router.GET("/health", server.health)
+	router.POST("/upload-file", server.uploadFile)
+	return router
 }
 
-func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func (s *Server) health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
-	userID := strings.TrimSpace(r.Header.Get("X-Authenticated-User-Id"))
+func (s *Server) uploadFile(c *gin.Context) {
+	userID := strings.TrimSpace(c.GetHeader("X-Authenticated-User-Id"))
 	if userID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Authentication required"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 	userID = safePathPart(userID)
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart upload"})
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
+	if err := c.Request.ParseMultipartForm(maxUploadBytes); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid multipart upload"})
 		return
 	}
 
-	file, header, err := r.FormFile("file")
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "file is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 		return
 	}
 	defer file.Close()
 
 	content, err := io.ReadAll(file)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read upload"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read upload"})
 		return
 	}
 
 	documentID := randomHexID()
 	filename := safeFilename(header.Filename)
 	contentType := header.Header.Get("Content-Type")
-	source, err := s.sourceForUpload(r.Context(), content, userID, documentID, filename, contentType)
+	source, err := s.sourceForUpload(c.Request.Context(), content, userID, documentID, filename, contentType)
 	if err != nil {
 		log.Printf("source upload failed: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to store upload"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store upload"})
 		return
 	}
 
@@ -100,13 +105,13 @@ func (s *Server) uploadFile(w http.ResponseWriter, r *http.Request) {
 		Source:       source,
 	}
 
-	if err := s.publisher.Publish(r.Context(), job.TaskID, job); err != nil {
+	if err := s.publisher.Publish(c.Request.Context(), job.TaskID, job); err != nil {
 		log.Printf("rabbitmq publish failed: %v", err)
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "failed to enqueue document job"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to enqueue document job"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	c.JSON(http.StatusOK, gin.H{
 		"message":        "Upload file success",
 		"task_id":        job.TaskID,
 		"ocr_task_id":    ocrTaskID,
@@ -185,20 +190,4 @@ func randomHexID() string {
 		panic(fmt.Sprintf("random source unavailable: %v", err))
 	}
 	return hex.EncodeToString(b[:])
-}
-
-func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(value); err != nil {
-		log.Printf("write response failed: %v", err)
-	}
-}
-
-func requestLogger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start))
-	})
 }
