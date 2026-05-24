@@ -29,7 +29,7 @@ services:
     build:
       context: ./frontend/src
     env_file:
-      - ./frontend/.env.local
+      - ./frontend/src/.env.local
     expose:
       - "3000"
     volumes:

@@ -6,7 +6,7 @@ services:
     build:
       context: ./src
     env_file:
-      - path: .env.local
+      - path: ./src/.env.local
     ports:
       - "3000:3000"
     volumes:
