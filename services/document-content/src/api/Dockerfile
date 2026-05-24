@@ -1,10 +1,23 @@
-FROM python:3.10-slim
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
-
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+COPY go.mod go.sum* ./
+RUN go mod download
 
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /document-content-api .
+
+FROM alpine:3.20
+
+RUN adduser -D -H appuser
+
+WORKDIR /app
+
+COPY --from=builder /document-content-api /app/document-content-api
+
+EXPOSE 8000
+
+USER appuser
+
+CMD ["/app/document-content-api"]

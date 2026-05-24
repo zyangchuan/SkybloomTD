@@ -1,5 +1,4 @@
-celery
-redis
+pika
 boto3
 paddleocr
 paddlex[ocr]

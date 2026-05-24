@@ -1,6 +1,5 @@
 from pathlib import Path
 
-from ..celery_app import celery_app
 from ..ocr.output import document_output_paths, safe_path_part
 from .s3 import upload_output_to_s3
 
@@ -19,13 +18,6 @@ def upload_target_from_ids(user_id: str, document_id: str) -> tuple[str, str, Pa
     return user_id, document_id, output_paths.document_dir
 
 
-@celery_app.task(
-    name="worker.upload_ocr_output",
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_jitter=True,
-    retry_kwargs={"max_retries": 3},
-)
 def upload_ocr_output(ocr_result_or_user_id: dict | str, document_id: str | None = None):
     filename = None
     markdown_file = None

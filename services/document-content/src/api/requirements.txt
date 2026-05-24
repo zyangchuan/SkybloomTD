@@ -1,8 +1,0 @@
-fastapi[standard-no-fastapi-cloud-cli]
-celery
-redis
-boto3
-grpcio
-protobuf
-psycopg[binary]
-SQLAlchemy

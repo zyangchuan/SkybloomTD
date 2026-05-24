@@ -85,3 +85,9 @@ def upload_output_to_s3(document_output_dir: Path, user_id: str, document_id: st
 def download_text_from_s3(bucket: str, key: str) -> str:
     response = s3_client().get_object(Bucket=bucket, Key=key)
     return response["Body"].read().decode("utf-8")
+
+
+def download_file_from_s3(bucket: str, key: str, destination: Path) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    s3_client().download_file(bucket, key, str(destination))
+    return destination

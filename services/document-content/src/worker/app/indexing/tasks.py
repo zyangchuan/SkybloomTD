@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-from ..celery_app import celery_app
 from ..config import CHUNK_MAX_CHARS, CHUNK_OVERLAP_LINES, ENABLE_EMBEDDINGS
 from ..ocr.output import remove_document_output
 from ..uploads.s3 import download_text_from_s3
@@ -36,13 +35,6 @@ def read_markdown(upload_result: dict[str, Any], s3_bucket: str, s3_key: str) ->
     return download_text_from_s3(s3_bucket, s3_key)
 
 
-@celery_app.task(
-    name="worker.index_ocr_output",
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-    retry_jitter=True,
-    retry_kwargs={"max_retries": 3},
-)
 def index_ocr_output(upload_result: dict[str, Any]):
     if upload_result.get("status") != "uploaded":
         return {

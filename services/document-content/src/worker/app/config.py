@@ -2,8 +2,10 @@ import os
 from pathlib import Path
 from urllib.parse import quote_plus
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+RABBITMQ_URL = os.getenv("RABBITMQ_URL") or "amqp://guest:guest@rabbitmq:5672/"
+DOCUMENT_CONTENT_QUEUE = os.getenv("DOCUMENT_CONTENT_QUEUE", "document.process")
 
+INPUT_ROOT = Path(os.getenv("INPUT_ROOT", "/temp"))
 OUTPUT_ROOT = Path("/output")
 
 AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
