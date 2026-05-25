@@ -34,3 +34,21 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.module }}
         run: go test ./...
+
+  python-tests:
+    name: Python tests (${{ matrix.module }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - services/document-content/src/worker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run tests
+        working-directory: ${{ matrix.module }}
+        run: python3 -m unittest discover -s tests

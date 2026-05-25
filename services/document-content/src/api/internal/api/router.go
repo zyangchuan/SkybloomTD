@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -21,7 +22,12 @@ import (
 	"skybloom/document-content-api/internal/models"
 )
 
-const maxUploadBytes = 100 << 20
+const (
+	maxUploadBytes     = 100 << 20
+	maxGameNameLength  = 120
+	gameNameField      = "game_name"
+	gameNameMissingErr = "game_name is required"
+)
 
 var safePathPartPattern = regexp.MustCompile(`[^A-Za-z0-9_.=-]+`)
 
@@ -53,6 +59,8 @@ type SourceUploader interface {
 type DocumentStore interface {
 	CreateQueuedDocument(ctx context.Context, document models.Document) error
 	ListUserDocuments(ctx context.Context, userID uuid.UUID) ([]models.DocumentSummary, error)
+	ListDocumentChapters(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) ([]models.ChapterSummary, error)
+	ListChapterSubChapters(ctx context.Context, chapterID uuid.UUID, userID uuid.UUID) ([]models.SubChapterSummary, error)
 	LoadUserDocument(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) (models.Document, error)
 	DeleteDocumentCascade(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error
 }
@@ -103,7 +111,9 @@ func NewRouter(
 	router.GET("/health", server.health)
 	router.POST("/upload-file", server.uploadFile)
 	router.GET("/documents", server.listDocuments)
+	router.GET("/documents/:document_id/chapters", server.listDocumentChapters)
 	router.DELETE("/documents/:document_id", server.deleteDocument)
+	router.GET("/chapters/:chapter_id/sub-chapters", server.listChapterSubChapters)
 	router.GET("/tasks/:task_id/status", server.getTaskStatus)
 	return router
 }
@@ -147,6 +157,58 @@ func (s *Server) listDocuments(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.ListDocumentsResponse{Documents: documents})
+}
+
+func (s *Server) listDocumentChapters(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	documentID, err := uuid.Parse(strings.TrimSpace(c.Param("document_id")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document_id"})
+		return
+	}
+
+	chapters, err := s.documents.ListDocumentChapters(c.Request.Context(), documentID, models.DatabaseUUID(userID, "user"))
+	if errors.Is(err, models.ErrDocumentNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("chapter list failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to list chapters"})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.ListChaptersResponse{Chapters: chapters})
+}
+
+func (s *Server) listChapterSubChapters(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	chapterID, err := uuid.Parse(strings.TrimSpace(c.Param("chapter_id")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chapter_id"})
+		return
+	}
+
+	subChapters, err := s.documents.ListChapterSubChapters(c.Request.Context(), chapterID, models.DatabaseUUID(userID, "user"))
+	if errors.Is(err, models.ErrChapterNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chapter not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("sub-chapter list failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to list sub_chapters"})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.ListSubChaptersResponse{SubChapters: subChapters})
 }
 
 func (s *Server) deleteDocument(c *gin.Context) {
@@ -211,6 +273,16 @@ func (s *Server) uploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
+	gameName := normalizeGameName(c.Request.FormValue(gameNameField))
+	if gameName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gameNameMissingErr})
+		return
+	}
+	if utf8.RuneCountInString(gameName) > maxGameNameLength {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "game_name must be 120 characters or fewer"})
+		return
+	}
+
 	content, err := io.ReadAll(file)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read upload"})
@@ -228,7 +300,7 @@ func (s *Server) uploadFile(c *gin.Context) {
 		return
 	}
 
-	document, err := models.NewQueuedDocument(documentID, userID, taskID, filename, source)
+	document, err := models.NewQueuedDocument(documentID, userID, taskID, filename, gameName, source)
 	if err != nil {
 		log.Printf("document row build failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
@@ -279,6 +351,7 @@ func (s *Server) uploadFile(c *gin.Context) {
 		"index_task_id":  indexTaskID,
 		"user_id":        userID,
 		"document_id":    documentID,
+		"game_name":      gameName,
 		"is_ready":       false,
 	})
 }
@@ -359,6 +432,10 @@ func safeFilenameExt(value string) string {
 	return value
 }
 
+func normalizeGameName(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
 func randomHexID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -391,6 +468,14 @@ func (noopDocumentStore) CreateQueuedDocument(context.Context, models.Document) 
 
 func (noopDocumentStore) ListUserDocuments(context.Context, uuid.UUID) ([]models.DocumentSummary, error) {
 	return []models.DocumentSummary{}, nil
+}
+
+func (noopDocumentStore) ListDocumentChapters(context.Context, uuid.UUID, uuid.UUID) ([]models.ChapterSummary, error) {
+	return []models.ChapterSummary{}, nil
+}
+
+func (noopDocumentStore) ListChapterSubChapters(context.Context, uuid.UUID, uuid.UUID) ([]models.SubChapterSummary, error) {
+	return []models.SubChapterSummary{}, nil
 }
 
 func (noopDocumentStore) LoadUserDocument(context.Context, uuid.UUID, uuid.UUID) (models.Document, error) {

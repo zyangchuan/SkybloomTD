@@ -52,6 +52,72 @@ func (r *DocumentRepository) ListUserDocuments(ctx context.Context, userID uuid.
 	return summaries, nil
 }
 
+func (r *DocumentRepository) ListDocumentChapters(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) ([]models.ChapterSummary, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Model(&models.Document{}).
+		Where("id = ? AND user_id = ?", documentID, userID).
+		Count(&count).Error; err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, models.ErrDocumentNotFound
+	}
+
+	var chapters []models.ChapterSummary
+	if err := r.db.WithContext(ctx).
+		Table("chapters AS c").
+		Select(`
+			c.id AS chapter_id,
+			c.document_id,
+			c.chapter_index,
+			c.title,
+			c.start_line,
+			c.end_line,
+			c.created_at
+		`).
+		Where("c.document_id = ?", documentID).
+		Order("c.chapter_index ASC NULLS LAST, c.created_at ASC").
+		Find(&chapters).Error; err != nil {
+		return nil, err
+	}
+	return chapters, nil
+}
+
+func (r *DocumentRepository) ListChapterSubChapters(ctx context.Context, chapterID uuid.UUID, userID uuid.UUID) ([]models.SubChapterSummary, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("chapters AS c").
+		Joins("JOIN documents AS d ON d.id = c.document_id").
+		Where("c.id = ? AND d.user_id = ?", chapterID, userID).
+		Count(&count).Error; err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, models.ErrChapterNotFound
+	}
+
+	var subChapters []models.SubChapterSummary
+	if err := r.db.WithContext(ctx).
+		Table("sub_chapters AS sc").
+		Select(`
+			sc.id AS sub_chapter_id,
+			sc.document_id,
+			sc.chapter_id,
+			sc.sub_chapter_index,
+			sc.title,
+			sc.start_line,
+			sc.end_line,
+			sc.created_at
+		`).
+		Where("sc.chapter_id = ?", chapterID).
+		Order("sc.sub_chapter_index ASC NULLS LAST, sc.created_at ASC").
+		Find(&subChapters).Error; err != nil {
+		return nil, err
+	}
+	return subChapters, nil
+}
+
 func (r *DocumentRepository) DeleteDocumentCascade(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(

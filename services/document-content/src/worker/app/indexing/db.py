@@ -26,6 +26,10 @@ class Document(Base):
     s3_bucket: Mapped[str | None] = mapped_column(Text)
     s3_key: Mapped[str | None] = mapped_column(Text)
     filename: Mapped[str | None] = mapped_column(Text)
+    game_name: Mapped[str] = mapped_column(
+        Text,
+        server_default=sql_text("'Untitled Game'"),
+    )
     task_id: Mapped[str | None] = mapped_column(Text)
     is_ready: Mapped[bool] = mapped_column(
         Boolean,
@@ -155,6 +159,14 @@ def ensure_schema() -> None:
     Base.metadata.create_all(db_engine)
 
     statements = [
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS game_name TEXT",
+        """
+        UPDATE documents
+        SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(filename, ''), 'Untitled Game')
+        WHERE game_name IS NULL OR game_name = ''
+        """,
+        "ALTER TABLE documents ALTER COLUMN game_name SET DEFAULT 'Untitled Game'",
+        "ALTER TABLE documents ALTER COLUMN game_name SET NOT NULL",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS task_id TEXT",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_ready BOOLEAN DEFAULT false",
         "UPDATE documents SET is_ready = false WHERE is_ready IS NULL",
@@ -235,7 +247,10 @@ def insert_document_index(record: DocumentIndexRecord) -> dict[str, Any]:
 
             document = session.get(Document, document_id)
             if document is None:
-                document = Document(id=document_id)
+                document = Document(
+                    id=document_id,
+                    game_name=record.filename or "Untitled Game",
+                )
                 session.add(document)
             document.user_id = user_id
             document.s3_bucket = record.s3_bucket

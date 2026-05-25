@@ -81,6 +81,66 @@ func (_m *MockDocumentStore) ListUserDocuments(ctx context.Context, userID uuid.
 	return r0, r1
 }
 
+// ListDocumentChapters provides a mock function with given fields: ctx, documentID, userID
+func (_m *MockDocumentStore) ListDocumentChapters(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) ([]models.ChapterSummary, error) {
+	ret := _m.Called(ctx, documentID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListDocumentChapters")
+	}
+
+	var r0 []models.ChapterSummary
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) ([]models.ChapterSummary, error)); ok {
+		return rf(ctx, documentID, userID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) []models.ChapterSummary); ok {
+		r0 = rf(ctx, documentID, userID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.ChapterSummary)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, uuid.UUID) error); ok {
+		r1 = rf(ctx, documentID, userID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ListChapterSubChapters provides a mock function with given fields: ctx, chapterID, userID
+func (_m *MockDocumentStore) ListChapterSubChapters(ctx context.Context, chapterID uuid.UUID, userID uuid.UUID) ([]models.SubChapterSummary, error) {
+	ret := _m.Called(ctx, chapterID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListChapterSubChapters")
+	}
+
+	var r0 []models.SubChapterSummary
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) ([]models.SubChapterSummary, error)); ok {
+		return rf(ctx, chapterID, userID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) []models.SubChapterSummary); ok {
+		r0 = rf(ctx, chapterID, userID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]models.SubChapterSummary)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, uuid.UUID) error); ok {
+		r1 = rf(ctx, chapterID, userID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // LoadUserDocument provides a mock function with given fields: ctx, documentID, userID
 func (_m *MockDocumentStore) LoadUserDocument(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) (models.Document, error) {
 	ret := _m.Called(ctx, documentID, userID)

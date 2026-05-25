@@ -31,6 +31,8 @@ import (
 var hexIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var uuidIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+const defaultTestGameName = "Linear Algebra TD"
+
 func TestHealth(t *testing.T) {
 	router := newTestRouter(t, nil, nil)
 
@@ -110,6 +112,7 @@ func TestListDocumentsReturnsCurrentUserDocuments(t *testing.T) {
 		{
 			DocumentID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 			Filename:   "lesson.pdf",
+			GameName:   defaultTestGameName,
 			IsReady:    false,
 			TaskID:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			CreatedAt:  createdAt,
@@ -118,6 +121,7 @@ func TestListDocumentsReturnsCurrentUserDocuments(t *testing.T) {
 		{
 			DocumentID: uuid.MustParse("22222222-2222-2222-2222-222222222222"),
 			Filename:   "notes.pdf",
+			GameName:   "Calculus Arena",
 			IsReady:    true,
 			TaskID:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			CreatedAt:  createdAt.Add(-time.Hour),
@@ -170,6 +174,148 @@ func TestListDocumentsReturnsServiceUnavailableWhenRepositoryFails(t *testing.T)
 
 	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
 	assert.JSONEq(t, `{"error":"failed to list documents"}`, response.Body.String())
+}
+
+func TestListDocumentChaptersReturnsCurrentUserChapters(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	chapterIndex := 1
+	title := "Vectors"
+	startLine := 10
+	endLine := 80
+	expected := []models.ChapterSummary{
+		{
+			ChapterID:    uuid.MustParse("44444444-4444-4444-4444-444444444444"),
+			DocumentID:   documentID,
+			ChapterIndex: &chapterIndex,
+			Title:        &title,
+			StartLine:    &startLine,
+			EndLine:      &endLine,
+			CreatedAt:    time.Date(2026, 5, 25, 12, 30, 0, 0, time.UTC),
+		},
+	}
+
+	documents.
+		On("ListDocumentChapters", mock.Anything, documentID, userID).
+		Return(expected, nil).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	request := httptest.NewRequest(http.MethodGet, "/documents/"+documentID.String()+"/chapters", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var payload models.ListChaptersResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	assert.Equal(t, expected, payload.Chapters)
+}
+
+func TestListDocumentChaptersRejectsInvalidDocumentID(t *testing.T) {
+	router := newTestRouter(t, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/documents/not-a-uuid/chapters", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.JSONEq(t, `{"error":"invalid document_id"}`, response.Body.String())
+}
+
+func TestListDocumentChaptersReturnsNotFoundWhenDocumentDoesNotBelongToUser(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	documents.
+		On("ListDocumentChapters", mock.Anything, documentID, userID).
+		Return(nil, models.ErrDocumentNotFound).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	request := httptest.NewRequest(http.MethodGet, "/documents/"+documentID.String()+"/chapters", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNotFound, response.Code)
+	assert.JSONEq(t, `{"error":"document not found"}`, response.Body.String())
+}
+
+func TestListChapterSubChaptersReturnsCurrentUserSubChapters(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	chapterID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	subChapterIndex := 2
+	title := "Basis"
+	startLine := 20
+	endLine := 40
+	expected := []models.SubChapterSummary{
+		{
+			SubChapterID:    uuid.MustParse("55555555-5555-5555-5555-555555555555"),
+			DocumentID:      documentID,
+			ChapterID:       chapterID,
+			SubChapterIndex: &subChapterIndex,
+			Title:           &title,
+			StartLine:       &startLine,
+			EndLine:         &endLine,
+			CreatedAt:       time.Date(2026, 5, 25, 12, 45, 0, 0, time.UTC),
+		},
+	}
+
+	documents.
+		On("ListChapterSubChapters", mock.Anything, chapterID, userID).
+		Return(expected, nil).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	request := httptest.NewRequest(http.MethodGet, "/chapters/"+chapterID.String()+"/sub-chapters", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var payload models.ListSubChaptersResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	assert.Equal(t, expected, payload.SubChapters)
+}
+
+func TestListChapterSubChaptersRejectsInvalidChapterID(t *testing.T) {
+	router := newTestRouter(t, nil, nil)
+	request := httptest.NewRequest(http.MethodGet, "/chapters/not-a-uuid/sub-chapters", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.JSONEq(t, `{"error":"invalid chapter_id"}`, response.Body.String())
+}
+
+func TestListChapterSubChaptersReturnsNotFoundWhenChapterDoesNotBelongToUser(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	chapterID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	userID := models.DatabaseUUID("user-1", "user")
+	documents.
+		On("ListChapterSubChapters", mock.Anything, chapterID, userID).
+		Return(nil, models.ErrChapterNotFound).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	request := httptest.NewRequest(http.MethodGet, "/chapters/"+chapterID.String()+"/sub-chapters", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNotFound, response.Code)
+	assert.JSONEq(t, `{"error":"chapter not found"}`, response.Body.String())
 }
 
 func TestDeleteDocumentDeletesAssetsAndDatabaseRows(t *testing.T) {
@@ -366,6 +512,7 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 				return isUUID(document.ID.String()) &&
 					document.UserID == models.DatabaseUUID("user_123", "user") &&
 					document.Filename == "lesson_1.pdf" &&
+					document.GameName == defaultTestGameName &&
 					isHexID(document.TaskID) &&
 					!document.IsReady &&
 					document.SourceType == "s3" &&
@@ -448,6 +595,7 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 	assert.Equal(t, publishedJob.OCRTaskID, payload["ocr_task_id"])
 	assert.Equal(t, publishedJob.UploadTaskID, payload["upload_task_id"])
 	assert.Equal(t, publishedJob.IndexTaskID, payload["index_task_id"])
+	assert.Equal(t, defaultTestGameName, payload["game_name"])
 	assert.Equal(t, false, payload["is_ready"])
 	assert.Equal(t, storedDocument.ID.String(), publishedJob.DocumentID)
 	assert.Equal(t, storedDocument.TaskID, publishedJob.TaskID)
@@ -484,6 +632,20 @@ func TestUploadFileRequiresFile(t *testing.T) {
 	assert.JSONEq(t, `{"error":"file is required"}`, response.Body.String())
 }
 
+func TestUploadFileRequiresGameName(t *testing.T) {
+	router := newTestRouter(t, mocks.NewMockPublisher(t), mocks.NewMockSourceUploader(t))
+	body, contentType := multipartBodyWithFields(t, "lesson.pdf", "application/pdf", []byte("pdf bytes"), nil)
+	request := httptest.NewRequest(http.MethodPost, "/upload-file", body)
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.JSONEq(t, `{"error":"game_name is required"}`, response.Body.String())
+}
+
 func TestUploadFileReturnsServiceUnavailableWhenPublishFails(t *testing.T) {
 	publisher := mocks.NewMockPublisher(t)
 	uploader := mocks.NewMockSourceUploader(t)
@@ -500,6 +662,7 @@ func TestUploadFileReturnsServiceUnavailableWhenPublishFails(t *testing.T) {
 			return isUUID(document.ID.String()) &&
 				document.UserID == models.DatabaseUUID("user-1", "user") &&
 				document.Filename == "lesson.pdf" &&
+				document.GameName == defaultTestGameName &&
 				isHexID(document.TaskID) &&
 				!document.IsReady
 		})).
@@ -633,6 +796,7 @@ func TestUploadFileFallsBackToTempStorageWhenUploaderIsNil(t *testing.T) {
 		On("CreateQueuedDocument", mock.Anything, mock.MatchedBy(func(document models.Document) bool {
 			return isUUID(document.ID.String()) &&
 				document.SourceType == "local" &&
+				document.GameName == defaultTestGameName &&
 				stringValue(document.SourcePath) == filepath.Join(tempDir, "user-1", document.ID.String(), "input.txt") &&
 				!document.IsReady
 		})).
@@ -702,9 +866,25 @@ func newTestRouterWithDeps(
 
 func multipartBody(t *testing.T, filename string, contentType string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
+	return multipartBodyWithFields(t, filename, contentType, content, map[string]string{
+		"game_name": defaultTestGameName,
+	})
+}
+
+func multipartBodyWithFields(
+	t *testing.T,
+	filename string,
+	contentType string,
+	content []byte,
+	fields map[string]string,
+) (*bytes.Buffer, string) {
+	t.Helper()
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
+	for key, value := range fields {
+		require.NoError(t, writer.WriteField(key, value))
+	}
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Disposition", `form-data; name="file"; filename="`+filename+`"`)
 	header.Set("Content-Type", contentType)

@@ -241,7 +241,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "400":
-          description: Invalid multipart upload or missing `file` field.
+          description: Invalid multipart upload or missing `file`/`game_name` field.
           content:
             application/json:
               schema:
@@ -292,7 +292,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "400":
-          description: Invalid multipart upload or missing `file` field.
+          description: Invalid multipart upload or missing `file`/`game_name` field.
           content:
             application/json:
               schema:
@@ -379,6 +379,92 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Asset deletion or database deletion failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/documents/{document_id}/chapters:
+    get:
+      tags: [Document Content]
+      summary: List chapters for a document
+      description: |
+        Returns indexed chapters for a document owned by the authenticated user.
+        A document that is not ready yet may return an empty chapter list.
+      operationId: listDocumentChapters
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "200":
+          description: Document chapters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListChaptersResponse"
+        "400":
+          description: Invalid document id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Document was not found for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/chapters/{chapter_id}/sub-chapters:
+    get:
+      tags: [Document Content]
+      summary: List sub-chapters for a chapter
+      description: Returns indexed sub-chapters for a chapter owned by the authenticated user.
+      operationId: listChapterSubChapters
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ChapterId"
+      responses:
+        "200":
+          description: Chapter sub-chapters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSubChaptersResponse"
+        "400":
+          description: Invalid chapter id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Chapter was not found for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
           content:
             application/json:
               schema:
@@ -591,6 +677,14 @@ components:
       schema:
         type: string
         format: uuid
+    ChapterId:
+      name: chapter_id
+      in: path
+      required: true
+      description: Chapter id returned by the document chapters endpoint.
+      schema:
+        type: string
+        format: uuid
 
   schemas:
     HealthResponse:
@@ -670,12 +764,17 @@ components:
 
     UploadDocumentRequest:
       type: object
-      required: [file]
+      required: [file, game_name]
       properties:
         file:
           type: string
           format: binary
           description: Document file to OCR. PDFs are expected by the current worker flow.
+        game_name:
+          type: string
+          maxLength: 120
+          description: User-facing game name generated from this document.
+          example: Linear Algebra TD
 
     UploadDocumentResponse:
       type: object
@@ -687,6 +786,7 @@ components:
         - index_task_id
         - user_id
         - document_id
+        - game_name
         - is_ready
       properties:
         message:
@@ -713,6 +813,10 @@ components:
           type: string
           format: uuid
           description: Generated document id. The document row exists immediately with `is_ready = false`.
+        game_name:
+          type: string
+          description: User-facing game name stored on the document row.
+          example: Linear Algebra TD
         is_ready:
           type: boolean
           description: Durable document readiness flag. It is `false` until indexing succeeds.
@@ -733,6 +837,7 @@ components:
       required:
         - document_id
         - filename
+        - game_name
         - is_ready
         - task_id
         - created_at
@@ -744,6 +849,9 @@ components:
         filename:
           type: string
           example: lesson.pdf
+        game_name:
+          type: string
+          example: Linear Algebra TD
         is_ready:
           type: boolean
           description: Durable document readiness flag. `true` only after indexing succeeds.
@@ -755,6 +863,106 @@ components:
           type: string
           format: date-time
         updated_at:
+          type: string
+          format: date-time
+
+    ListChaptersResponse:
+      type: object
+      required:
+        - chapters
+      properties:
+        chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChapterSummary"
+
+    ChapterSummary:
+      type: object
+      required:
+        - chapter_id
+        - document_id
+        - chapter_index
+        - title
+        - start_line
+        - end_line
+        - created_at
+      properties:
+        chapter_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        chapter_index:
+          type:
+            - integer
+            - "null"
+        title:
+          type:
+            - string
+            - "null"
+          example: Linear transformations
+        start_line:
+          type:
+            - integer
+            - "null"
+        end_line:
+          type:
+            - integer
+            - "null"
+        created_at:
+          type: string
+          format: date-time
+
+    ListSubChaptersResponse:
+      type: object
+      required:
+        - sub_chapters
+      properties:
+        sub_chapters:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubChapterSummary"
+
+    SubChapterSummary:
+      type: object
+      required:
+        - sub_chapter_id
+        - document_id
+        - chapter_id
+        - sub_chapter_index
+        - title
+        - start_line
+        - end_line
+        - created_at
+      properties:
+        sub_chapter_id:
+          type: string
+          format: uuid
+        document_id:
+          type: string
+          format: uuid
+        chapter_id:
+          type: string
+          format: uuid
+        sub_chapter_index:
+          type:
+            - integer
+            - "null"
+        title:
+          type:
+            - string
+            - "null"
+          example: Matrix representation
+        start_line:
+          type:
+            - integer
+            - "null"
+        end_line:
+          type:
+            - integer
+            - "null"
+        created_at:
           type: string
           format: date-time
 

@@ -17,6 +17,7 @@ const (
 
 var ErrTaskStatusNotFound = errors.New("task status not found")
 var ErrDocumentNotFound = errors.New("document not found")
+var ErrChapterNotFound = errors.New("chapter not found")
 
 type SourceRef struct {
 	Type        string `json:"type"`
@@ -44,6 +45,7 @@ type Document struct {
 	S3Bucket          *string   `gorm:"type:text" json:"s3_bucket,omitempty"`
 	S3Key             *string   `gorm:"type:text" json:"s3_key,omitempty"`
 	Filename          string    `gorm:"type:text" json:"filename"`
+	GameName          string    `gorm:"type:text;not null;default:'Untitled Game'" json:"game_name"`
 	TaskID            string    `gorm:"type:text;index" json:"task_id"`
 	IsReady           bool      `gorm:"not null;default:false" json:"is_ready"`
 	SourceType        string    `gorm:"type:text" json:"source_type"`
@@ -58,6 +60,7 @@ type Document struct {
 type DocumentSummary struct {
 	DocumentID uuid.UUID `json:"document_id"`
 	Filename   string    `json:"filename"`
+	GameName   string    `json:"game_name"`
 	IsReady    bool      `json:"is_ready"`
 	TaskID     string    `json:"task_id"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -68,6 +71,35 @@ type ListDocumentsResponse struct {
 	Documents []DocumentSummary `json:"documents"`
 }
 
+type ChapterSummary struct {
+	ChapterID    uuid.UUID `json:"chapter_id"`
+	DocumentID   uuid.UUID `json:"document_id"`
+	ChapterIndex *int      `json:"chapter_index"`
+	Title        *string   `json:"title"`
+	StartLine    *int      `json:"start_line"`
+	EndLine      *int      `json:"end_line"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type ListChaptersResponse struct {
+	Chapters []ChapterSummary `json:"chapters"`
+}
+
+type SubChapterSummary struct {
+	SubChapterID    uuid.UUID `json:"sub_chapter_id"`
+	DocumentID      uuid.UUID `json:"document_id"`
+	ChapterID       uuid.UUID `json:"chapter_id"`
+	SubChapterIndex *int      `json:"sub_chapter_index"`
+	Title           *string   `json:"title"`
+	StartLine       *int      `json:"start_line"`
+	EndLine         *int      `json:"end_line"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type ListSubChaptersResponse struct {
+	SubChapters []SubChapterSummary `json:"sub_chapters"`
+}
+
 type TaskStatus struct {
 	TaskID     string    `json:"task_id"`
 	DocumentID string    `json:"document_id"`
@@ -76,7 +108,7 @@ type TaskStatus struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-func NewQueuedDocument(documentID string, userID string, taskID string, filename string, source any) (Document, error) {
+func NewQueuedDocument(documentID string, userID string, taskID string, filename string, gameName string, source any) (Document, error) {
 	parsedDocumentID, err := uuid.Parse(documentID)
 	if err != nil {
 		return Document{}, fmt.Errorf("parse document_id: %w", err)
@@ -86,6 +118,7 @@ func NewQueuedDocument(documentID string, userID string, taskID string, filename
 		ID:       parsedDocumentID,
 		UserID:   DatabaseUUID(userID, "user"),
 		Filename: filename,
+		GameName: gameName,
 		TaskID:   taskID,
 		IsReady:  false,
 	}
@@ -120,6 +153,7 @@ func NewDocumentSummary(document Document) DocumentSummary {
 	return DocumentSummary{
 		DocumentID: document.ID,
 		Filename:   document.Filename,
+		GameName:   document.GameName,
 		IsReady:    document.IsReady,
 		TaskID:     document.TaskID,
 		CreatedAt:  document.CreatedAt,

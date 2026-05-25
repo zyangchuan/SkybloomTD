@@ -17,7 +17,8 @@ http://localhost/docs
 All browser-facing API calls should go through the reverse proxy on port 80.
 Backend containers are private Docker-network services.
 
-Document uploads return a durable `document_id`, the main `task_id`, and
+Document uploads require multipart `file` and `game_name` fields. They return
+a durable `document_id`, the stored `game_name`, the main `task_id`, and
 `is_ready: false`. Clients can poll:
 
 ```text
@@ -36,4 +37,11 @@ To delete a document and its generated content:
 
 ```text
 DELETE /api/document-content/documents/{document_id}
+```
+
+To browse indexed document structure:
+
+```text
+GET /api/document-content/documents/{document_id}/chapters
+GET /api/document-content/chapters/{chapter_id}/sub-chapters
 ```
