@@ -16,6 +16,7 @@ const (
 )
 
 var ErrTaskStatusNotFound = errors.New("task status not found")
+var ErrDocumentNotFound = errors.New("document not found")
 
 type SourceRef struct {
 	Type        string `json:"type"`

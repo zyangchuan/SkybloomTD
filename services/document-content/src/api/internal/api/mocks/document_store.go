@@ -33,6 +33,24 @@ func (_m *MockDocumentStore) CreateQueuedDocument(ctx context.Context, document 
 	return r0
 }
 
+// DeleteDocumentCascade provides a mock function with given fields: ctx, documentID, userID
+func (_m *MockDocumentStore) DeleteDocumentCascade(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error {
+	ret := _m.Called(ctx, documentID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteDocumentCascade")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) error); ok {
+		r0 = rf(ctx, documentID, userID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // ListUserDocuments provides a mock function with given fields: ctx, userID
 func (_m *MockDocumentStore) ListUserDocuments(ctx context.Context, userID uuid.UUID) ([]models.DocumentSummary, error) {
 	ret := _m.Called(ctx, userID)
@@ -56,6 +74,34 @@ func (_m *MockDocumentStore) ListUserDocuments(ctx context.Context, userID uuid.
 
 	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID) error); ok {
 		r1 = rf(ctx, userID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// LoadUserDocument provides a mock function with given fields: ctx, documentID, userID
+func (_m *MockDocumentStore) LoadUserDocument(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) (models.Document, error) {
+	ret := _m.Called(ctx, documentID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoadUserDocument")
+	}
+
+	var r0 models.Document
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) (models.Document, error)); ok {
+		return rf(ctx, documentID, userID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) models.Document); ok {
+		r0 = rf(ctx, documentID, userID)
+	} else {
+		r0 = ret.Get(0).(models.Document)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, uuid.UUID) error); ok {
+		r1 = rf(ctx, documentID, userID)
 	} else {
 		r1 = ret.Error(1)
 	}

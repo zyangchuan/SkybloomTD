@@ -172,6 +172,165 @@ func TestListDocumentsReturnsServiceUnavailableWhenRepositoryFails(t *testing.T)
 	assert.JSONEq(t, `{"error":"failed to list documents"}`, response.Body.String())
 }
 
+func TestDeleteDocumentDeletesAssetsAndDatabaseRows(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	uploader := mocks.NewMockSourceUploader(t)
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	sourceBucket := "documents"
+	sourceKey := "dev/users/user-1/documents/33333333-3333-3333-3333-333333333333/source/lesson.pdf"
+	outputBucket := "documents"
+	outputKey := "dev/users/user-1/documents/33333333-3333-3333-3333-333333333333/output.md"
+	document := models.Document{
+		ID:           documentID,
+		UserID:       userID,
+		Filename:     "lesson.pdf",
+		TaskID:       "cccccccccccccccccccccccccccccccc",
+		SourceBucket: &sourceBucket,
+		SourceKey:    &sourceKey,
+		S3Bucket:     &outputBucket,
+		S3Key:        &outputKey,
+	}
+
+	documents.
+		On("LoadUserDocument", mock.Anything, documentID, userID).
+		Return(document, nil).
+		Once()
+	uploader.
+		On("DeleteDocumentAssets", mock.Anything, document).
+		Return(nil).
+		Once()
+	documents.
+		On("DeleteDocumentCascade", mock.Anything, documentID, userID).
+		Return(nil).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, uploader, documents, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNoContent, response.Code)
+	assert.Empty(t, response.Body.String())
+}
+
+func TestDeleteDocumentRequiresAuthentication(t *testing.T) {
+	router := newTestRouter(t, nil, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/documents/33333333-3333-3333-3333-333333333333", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	assert.JSONEq(t, `{"error":"Authentication required"}`, response.Body.String())
+}
+
+func TestDeleteDocumentRejectsInvalidDocumentID(t *testing.T) {
+	router := newTestRouter(t, nil, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/documents/not-a-uuid", nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusBadRequest, response.Code)
+	assert.JSONEq(t, `{"error":"invalid document_id"}`, response.Body.String())
+}
+
+func TestDeleteDocumentReturnsNotFoundWhenDocumentDoesNotBelongToUser(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	documents.
+		On("LoadUserDocument", mock.Anything, documentID, userID).
+		Return(models.Document{}, models.ErrDocumentNotFound).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusNotFound, response.Code)
+	assert.JSONEq(t, `{"error":"document not found"}`, response.Body.String())
+}
+
+func TestDeleteDocumentDoesNotDeleteRowsWhenAssetDeletionFails(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	uploader := mocks.NewMockSourceUploader(t)
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	sourceBucket := "documents"
+	sourceKey := "dev/users/user-1/documents/33333333-3333-3333-3333-333333333333/source/lesson.pdf"
+	document := models.Document{
+		ID:           documentID,
+		UserID:       userID,
+		Filename:     "lesson.pdf",
+		TaskID:       "cccccccccccccccccccccccccccccccc",
+		SourceBucket: &sourceBucket,
+		SourceKey:    &sourceKey,
+	}
+
+	documents.
+		On("LoadUserDocument", mock.Anything, documentID, userID).
+		Return(document, nil).
+		Once()
+	uploader.
+		On("DeleteDocumentAssets", mock.Anything, document).
+		Return(errors.New("s3 unavailable")).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, uploader, documents, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+	assert.JSONEq(t, `{"error":"failed to delete document assets"}`, response.Body.String())
+}
+
+func TestDeleteDocumentReturnsServiceUnavailableWhenDatabaseDeleteFails(t *testing.T) {
+	documents := mocks.NewMockDocumentStore(t)
+	uploader := mocks.NewMockSourceUploader(t)
+	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	userID := models.DatabaseUUID("user-1", "user")
+	document := models.Document{
+		ID:       documentID,
+		UserID:   userID,
+		Filename: "lesson.pdf",
+		TaskID:   "cccccccccccccccccccccccccccccccc",
+	}
+
+	documents.
+		On("LoadUserDocument", mock.Anything, documentID, userID).
+		Return(document, nil).
+		Once()
+	uploader.
+		On("DeleteDocumentAssets", mock.Anything, document).
+		Return(nil).
+		Once()
+	documents.
+		On("DeleteDocumentCascade", mock.Anything, documentID, userID).
+		Return(errors.New("database unavailable")).
+		Once()
+
+	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, uploader, documents, nil)
+	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
+	request.Header.Set("X-Authenticated-User-Id", "user-1")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusServiceUnavailable, response.Code)
+	assert.JSONEq(t, `{"error":"failed to delete document"}`, response.Body.String())
+}
+
 func TestUploadFilePublishesDocumentJob(t *testing.T) {
 	publisher := mocks.NewMockPublisher(t)
 	uploader := mocks.NewMockSourceUploader(t)

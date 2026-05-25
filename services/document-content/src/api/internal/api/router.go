@@ -29,6 +29,7 @@ type Server struct {
 	config     config.Config
 	publisher  Publisher
 	storage    SourceUploader
+	assets     DocumentAssetDeleter
 	documents  DocumentStore
 	taskStatus TaskStatusStore
 }
@@ -46,11 +47,18 @@ type SourceUploader interface {
 		filename string,
 		contentType string,
 	) (models.SourceRef, error)
+	DeleteDocumentAssets(ctx context.Context, document models.Document) error
 }
 
 type DocumentStore interface {
 	CreateQueuedDocument(ctx context.Context, document models.Document) error
 	ListUserDocuments(ctx context.Context, userID uuid.UUID) ([]models.DocumentSummary, error)
+	LoadUserDocument(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) (models.Document, error)
+	DeleteDocumentCascade(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error
+}
+
+type DocumentAssetDeleter interface {
+	DeleteDocumentAssets(ctx context.Context, document models.Document) error
 }
 
 type TaskStatusStore interface {
@@ -75,11 +83,13 @@ func NewRouter(
 	if taskStatus == nil {
 		taskStatus = noopTaskStatusStore{}
 	}
+	assetDeleter, _ := storageClient.(DocumentAssetDeleter)
 
 	server := &Server{
 		config:     cfg,
 		publisher:  publisher,
 		storage:    storageClient,
+		assets:     assetDeleter,
 		documents:  documents,
 		taskStatus: taskStatus,
 	}
@@ -93,6 +103,7 @@ func NewRouter(
 	router.GET("/health", server.health)
 	router.POST("/upload-file", server.uploadFile)
 	router.GET("/documents", server.listDocuments)
+	router.DELETE("/documents/:document_id", server.deleteDocument)
 	router.GET("/tasks/:task_id/status", server.getTaskStatus)
 	return router
 }
@@ -136,6 +147,49 @@ func (s *Server) listDocuments(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, models.ListDocumentsResponse{Documents: documents})
+}
+
+func (s *Server) deleteDocument(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+	dbUserID := models.DatabaseUUID(userID, "user")
+
+	documentID, err := uuid.Parse(strings.TrimSpace(c.Param("document_id")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid document_id"})
+		return
+	}
+
+	document, err := s.documents.LoadUserDocument(c.Request.Context(), documentID, dbUserID)
+	if errors.Is(err, models.ErrDocumentNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("document load failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to load document"})
+		return
+	}
+
+	if err := s.deleteDocumentAssets(c.Request.Context(), document); err != nil {
+		log.Printf("document asset deletion failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to delete document assets"})
+		return
+	}
+
+	if err := s.documents.DeleteDocumentCascade(c.Request.Context(), documentID, dbUserID); err != nil {
+		if errors.Is(err, models.ErrDocumentNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "document not found"})
+			return
+		}
+		log.Printf("document deletion failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to delete document"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 func (s *Server) uploadFile(c *gin.Context) {
@@ -255,6 +309,20 @@ func (s *Server) sourceForUpload(
 	return path, nil
 }
 
+func (s *Server) deleteDocumentAssets(ctx context.Context, document models.Document) error {
+	if s.assets != nil {
+		return s.assets.DeleteDocumentAssets(ctx, document)
+	}
+
+	if documentHasS3Assets(document) {
+		return fmt.Errorf("document asset deleter is not configured")
+	}
+	if document.SourcePath != nil && strings.TrimSpace(*document.SourcePath) != "" {
+		return os.RemoveAll(filepath.Dir(*document.SourcePath))
+	}
+	return nil
+}
+
 func safePathPart(value string) string {
 	cleaned := safePathPartPattern.ReplaceAllString(strings.TrimSpace(value), "_")
 	cleaned = strings.Trim(cleaned, "._")
@@ -308,12 +376,29 @@ func authenticatedUserID(c *gin.Context) (string, bool) {
 	return safePathPart(userID), true
 }
 
+func documentHasS3Assets(document models.Document) bool {
+	return nonEmptyString(document.SourceBucket) && nonEmptyString(document.SourceKey) ||
+		nonEmptyString(document.S3Bucket) && nonEmptyString(document.S3Key)
+}
+
+func nonEmptyString(value *string) bool {
+	return value != nil && strings.TrimSpace(*value) != ""
+}
+
 func (noopDocumentStore) CreateQueuedDocument(context.Context, models.Document) error {
 	return nil
 }
 
 func (noopDocumentStore) ListUserDocuments(context.Context, uuid.UUID) ([]models.DocumentSummary, error) {
 	return []models.DocumentSummary{}, nil
+}
+
+func (noopDocumentStore) LoadUserDocument(context.Context, uuid.UUID, uuid.UUID) (models.Document, error) {
+	return models.Document{}, models.ErrDocumentNotFound
+}
+
+func (noopDocumentStore) DeleteDocumentCascade(context.Context, uuid.UUID, uuid.UUID) error {
+	return nil
 }
 
 func (noopTaskStatusStore) Set(context.Context, models.TaskStatus) error {

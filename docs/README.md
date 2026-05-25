@@ -31,3 +31,9 @@ Clients can also list the authenticated user's documents:
 ```text
 GET /api/document-content/documents
 ```
+
+To delete a document and its generated content:
+
+```text
+DELETE /api/document-content/documents/{document_id}
+```
