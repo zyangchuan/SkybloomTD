@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"skybloom/document-content-api/internal/config"
 	"skybloom/document-content-api/internal/models"
@@ -24,9 +26,11 @@ const maxUploadBytes = 100 << 20
 var safePathPartPattern = regexp.MustCompile(`[^A-Za-z0-9_.=-]+`)
 
 type Server struct {
-	config    config.Config
-	publisher Publisher
-	storage   SourceUploader
+	config     config.Config
+	publisher  Publisher
+	storage    SourceUploader
+	documents  DocumentStore
+	taskStatus TaskStatusStore
 }
 
 type Publisher interface {
@@ -44,11 +48,40 @@ type SourceUploader interface {
 	) (models.SourceRef, error)
 }
 
-func NewRouter(cfg config.Config, publisher Publisher, storageClient SourceUploader) *gin.Engine {
+type DocumentStore interface {
+	CreateQueuedDocument(ctx context.Context, document models.Document) error
+	ListUserDocuments(ctx context.Context, userID uuid.UUID) ([]models.DocumentSummary, error)
+}
+
+type TaskStatusStore interface {
+	Set(ctx context.Context, status models.TaskStatus) error
+	Get(ctx context.Context, taskID string) (models.TaskStatus, error)
+}
+
+type noopDocumentStore struct{}
+
+type noopTaskStatusStore struct{}
+
+func NewRouter(
+	cfg config.Config,
+	publisher Publisher,
+	storageClient SourceUploader,
+	documents DocumentStore,
+	taskStatus TaskStatusStore,
+) *gin.Engine {
+	if documents == nil {
+		documents = noopDocumentStore{}
+	}
+	if taskStatus == nil {
+		taskStatus = noopTaskStatusStore{}
+	}
+
 	server := &Server{
-		config:    cfg,
-		publisher: publisher,
-		storage:   storageClient,
+		config:     cfg,
+		publisher:  publisher,
+		storage:    storageClient,
+		documents:  documents,
+		taskStatus: taskStatus,
 	}
 
 	router := gin.New()
@@ -59,6 +92,8 @@ func NewRouter(cfg config.Config, publisher Publisher, storageClient SourceUploa
 
 	router.GET("/health", server.health)
 	router.POST("/upload-file", server.uploadFile)
+	router.GET("/documents", server.listDocuments)
+	router.GET("/tasks/:task_id/status", server.getTaskStatus)
 	return router
 }
 
@@ -66,13 +101,48 @@ func (s *Server) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-func (s *Server) uploadFile(c *gin.Context) {
-	userID := strings.TrimSpace(c.GetHeader("X-Authenticated-User-Id"))
-	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+func (s *Server) getTaskStatus(c *gin.Context) {
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task_id is required"})
 		return
 	}
-	userID = safePathPart(userID)
+
+	status, err := s.taskStatus.Get(c.Request.Context(), taskID)
+	if errors.Is(err, models.ErrTaskStatusNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "task status not found"})
+		return
+	}
+	if err != nil {
+		log.Printf("redis task status read failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to read task status"})
+		return
+	}
+
+	c.JSON(http.StatusOK, status)
+}
+
+func (s *Server) listDocuments(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
+
+	documents, err := s.documents.ListUserDocuments(c.Request.Context(), models.DatabaseUUID(userID, "user"))
+	if err != nil {
+		log.Printf("document list failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to list documents"})
+		return
+	}
+
+	c.JSON(http.StatusOK, models.ListDocumentsResponse{Documents: documents})
+}
+
+func (s *Server) uploadFile(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		return
+	}
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
 	if err := c.Request.ParseMultipartForm(maxUploadBytes); err != nil {
@@ -93,7 +163,8 @@ func (s *Server) uploadFile(c *gin.Context) {
 		return
 	}
 
-	documentID := randomHexID()
+	documentID := uuid.NewString()
+	taskID := randomHexID()
 	filename := safeFilename(header.Filename)
 	contentType := header.Header.Get("Content-Type")
 	source, err := s.sourceForUpload(c.Request.Context(), content, userID, documentID, filename, contentType)
@@ -103,12 +174,30 @@ func (s *Server) uploadFile(c *gin.Context) {
 		return
 	}
 
+	document, err := models.NewQueuedDocument(documentID, userID, taskID, filename, source)
+	if err != nil {
+		log.Printf("document row build failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
+		return
+	}
+	if err := s.documents.CreateQueuedDocument(c.Request.Context(), document); err != nil {
+		log.Printf("document create failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
+		return
+	}
+
+	if err := s.taskStatus.Set(c.Request.Context(), models.NewTaskStatus(taskID, documentID, models.TaskStatusQueued, nil)); err != nil {
+		log.Printf("redis task status write failed: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to record task status"})
+		return
+	}
+
 	ocrTaskID := randomHexID()
 	uploadTaskID := randomHexID()
 	indexTaskID := randomHexID()
 	job := models.DocumentJob{
 		JobType:      "document.process",
-		TaskID:       indexTaskID,
+		TaskID:       taskID,
 		OCRTaskID:    ocrTaskID,
 		UploadTaskID: uploadTaskID,
 		IndexTaskID:  indexTaskID,
@@ -120,6 +209,10 @@ func (s *Server) uploadFile(c *gin.Context) {
 
 	if err := s.publisher.Publish(c.Request.Context(), job.TaskID, job); err != nil {
 		log.Printf("rabbitmq publish failed: %v", err)
+		errorMessage := err.Error()
+		if statusErr := s.taskStatus.Set(c.Request.Context(), models.NewTaskStatus(taskID, documentID, models.TaskStatusFailed, &errorMessage)); statusErr != nil {
+			log.Printf("redis task status failure write failed: %v", statusErr)
+		}
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to enqueue document job"})
 		return
 	}
@@ -132,6 +225,7 @@ func (s *Server) uploadFile(c *gin.Context) {
 		"index_task_id":  indexTaskID,
 		"user_id":        userID,
 		"document_id":    documentID,
+		"is_ready":       false,
 	})
 }
 
@@ -203,4 +297,29 @@ func randomHexID() string {
 		panic(fmt.Sprintf("random source unavailable: %v", err))
 	}
 	return hex.EncodeToString(b[:])
+}
+
+func authenticatedUserID(c *gin.Context) (string, bool) {
+	userID := strings.TrimSpace(c.GetHeader("X-Authenticated-User-Id"))
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return "", false
+	}
+	return safePathPart(userID), true
+}
+
+func (noopDocumentStore) CreateQueuedDocument(context.Context, models.Document) error {
+	return nil
+}
+
+func (noopDocumentStore) ListUserDocuments(context.Context, uuid.UUID) ([]models.DocumentSummary, error) {
+	return []models.DocumentSummary{}, nil
+}
+
+func (noopTaskStatusStore) Set(context.Context, models.TaskStatus) error {
+	return nil
+}
+
+func (noopTaskStatusStore) Get(context.Context, string) (models.TaskStatus, error) {
+	return models.TaskStatus{}, models.ErrTaskStatusNotFound
 }

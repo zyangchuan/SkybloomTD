@@ -240,13 +240,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "400":
+          description: Invalid multipart upload or missing `file` field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "413":
           description: Uploaded file exceeds proxy size limit.
+        "500":
+          description: Source storage or document row creation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Task status recording or RabbitMQ enqueue failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/document-content/upload-file:
     post:
       tags: [Document Content]
       summary: Upload a document for OCR and indexing
+      description: |
+        Queues the OCR/indexing workflow. The API creates a durable document
+        row immediately with `is_ready = false`, stores the main task status in
+        Redis as `queued`, and publishes the worker job to RabbitMQ.
       operationId: uploadDocument
       security:
         - bearerAuth: []
@@ -269,8 +291,97 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "400":
+          description: Invalid multipart upload or missing `file` field.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "413":
           description: Uploaded file exceeds proxy size limit.
+        "500":
+          description: Source storage or document row creation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Task status recording or RabbitMQ enqueue failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/documents:
+    get:
+      tags: [Document Content]
+      summary: List current user's documents
+      description: |
+        Returns durable document rows for the authenticated user. Each item
+        includes `is_ready` for durable usability and `task_id` for polling
+        temporary Redis task status while processing is still in progress.
+      operationId: listCurrentUserDocuments
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current user's documents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListDocumentsResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/tasks/{task_id}/status:
+    get:
+      tags: [Document Content]
+      summary: Get document processing task status
+      description: |
+        Reads the temporary Redis task status for a document processing job.
+        Status records expire after the configured task-status TTL, which is
+        seven days by default. If the Redis key has expired, use the document
+        `is_ready` flag as the durable readiness signal.
+      operationId: getDocumentTaskStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Task status was found in Redis.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStatusResponse"
+        "401":
+          description: Missing or invalid bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Task status was not found or has expired.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Redis status lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/generate_level:
     get:
@@ -423,6 +534,14 @@ components:
       schema:
         type: string
         format: uuid
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      description: Main document processing task id returned by upload.
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{32}$"
 
   schemas:
     HealthResponse:
@@ -519,27 +638,104 @@ components:
         - index_task_id
         - user_id
         - document_id
+        - is_ready
       properties:
         message:
           type: string
           example: Upload file success
         task_id:
           type: string
-          description: Celery chain result id.
+          pattern: "^[a-f0-9]{32}$"
+          description: Main document processing task id. Poll this id through the task status endpoint.
         ocr_task_id:
           type: string
+          pattern: "^[a-f0-9]{32}$"
         upload_task_id:
           type: string
+          pattern: "^[a-f0-9]{32}$"
         index_task_id:
           type: string
+          pattern: "^[a-f0-9]{32}$"
         user_id:
           type: string
           format: uuid
           description: Authenticated Supabase user id from the JWT.
         document_id:
           type: string
+          format: uuid
+          description: Generated document id. The document row exists immediately with `is_ready = false`.
+        is_ready:
+          type: boolean
+          description: Durable document readiness flag. It is `false` until indexing succeeds.
+          example: false
+
+    ListDocumentsResponse:
+      type: object
+      required:
+        - documents
+      properties:
+        documents:
+          type: array
+          items:
+            $ref: "#/components/schemas/DocumentSummary"
+
+    DocumentSummary:
+      type: object
+      required:
+        - document_id
+        - filename
+        - is_ready
+        - task_id
+        - created_at
+        - updated_at
+      properties:
+        document_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          example: lesson.pdf
+        is_ready:
+          type: boolean
+          description: Durable document readiness flag. `true` only after indexing succeeds.
+        task_id:
+          type: string
           pattern: "^[a-f0-9]{32}$"
-          description: Generated document id for the queued OCR workflow.
+          description: Main document processing task id.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TaskStatusResponse:
+      type: object
+      required:
+        - task_id
+        - document_id
+        - status
+        - error
+        - updated_at
+      properties:
+        task_id:
+          type: string
+          pattern: "^[a-f0-9]{32}$"
+        document_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, successful, failed]
+          description: Temporary Redis task status.
+        error:
+          type:
+            - string
+            - "null"
+          description: Failure details when `status` is `failed`; otherwise `null`.
+        updated_at:
+          type: string
+          format: date-time
 
     GenerateLevelResponse:
       type: object

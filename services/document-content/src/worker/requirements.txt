@@ -6,3 +6,4 @@ openai
 psycopg[binary]
 SQLAlchemy
 pgvector
+redis

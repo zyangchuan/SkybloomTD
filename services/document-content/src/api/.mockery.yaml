@@ -12,3 +12,9 @@ packages:
       SourceUploader:
         config:
           filename: source_uploader.go
+      DocumentStore:
+        config:
+          filename: document_store.go
+      TaskStatusStore:
+        config:
+          filename: task_status_store.go

@@ -1,28 +1,57 @@
 import json
 import logging
 import signal
-from typing import Any
+from typing import Any, Callable
 
 import pika
 
 from .config import DOCUMENT_CONTENT_QUEUE, RABBITMQ_URL
-from .indexing.tasks import index_ocr_output
-from .ocr.tasks import process_ocr
-from .uploads.tasks import upload_ocr_output
+from .task_status import set_task_status
 
 
 LOG = logging.getLogger(__name__)
 
 
-def process_job(job: dict[str, Any]) -> dict[str, Any]:
+def process_job(
+    job: dict[str, Any],
+    process_ocr_fn: Callable[..., dict[str, Any]] | None = None,
+    upload_ocr_output_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    index_ocr_output_fn: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    set_task_status_fn: Callable[
+        [str | None, str | None, str, str | None],
+        None,
+    ] = set_task_status,
+) -> dict[str, Any]:
+    if process_ocr_fn is None:
+        from .ocr.tasks import process_ocr as process_ocr_fn
+    if upload_ocr_output_fn is None:
+        from .uploads.tasks import upload_ocr_output as upload_ocr_output_fn
+    if index_ocr_output_fn is None:
+        from .indexing.tasks import index_ocr_output as index_ocr_output_fn
+
+    task_id = job.get("task_id")
     source = job["source"]
     user_id = job["user_id"]
     document_id = job["document_id"]
     filename = job.get("filename")
 
-    ocr_result = process_ocr(source, user_id, document_id, filename)
-    upload_result = upload_ocr_output(ocr_result)
-    return index_ocr_output(upload_result)
+    set_task_status_fn(task_id, document_id, "processing", None)
+
+    try:
+        ocr_result = process_ocr_fn(source, user_id, document_id, filename)
+        upload_result = upload_ocr_output_fn(ocr_result)
+        result = index_ocr_output_fn(upload_result)
+    except Exception as exc:
+        set_task_status_fn(task_id, document_id, "failed", str(exc))
+        raise
+
+    if result.get("status") == "indexed":
+        set_task_status_fn(task_id, document_id, "successful", None)
+    else:
+        reason = result.get("reason") or f"Unexpected status: {result.get('status')}"
+        set_task_status_fn(task_id, document_id, "failed", reason)
+
+    return result
 
 
 def main() -> None:

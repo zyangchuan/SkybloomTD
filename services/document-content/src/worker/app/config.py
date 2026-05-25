@@ -4,6 +4,8 @@ from urllib.parse import quote_plus
 
 RABBITMQ_URL = os.getenv("RABBITMQ_URL") or "amqp://guest:guest@rabbitmq:5672/"
 DOCUMENT_CONTENT_QUEUE = os.getenv("DOCUMENT_CONTENT_QUEUE", "document.process")
+REDIS_URL = os.getenv("REDIS_URL") or "redis://redis:6379/0"
+TASK_STATUS_TTL_SECONDS = int(os.getenv("TASK_STATUS_TTL_SECONDS", "604800"))
 
 INPUT_ROOT = Path(os.getenv("INPUT_ROOT", "/temp"))
 OUTPUT_ROOT = Path("/output")
