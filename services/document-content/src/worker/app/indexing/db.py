@@ -195,8 +195,8 @@ def ensure_schema() -> None:
                 REFERENCES sub_chapters(id)
                 ON DELETE SET NULL;
             END IF;
-        END
-        $$
+        END;
+        $$;
         """,
         "CREATE INDEX IF NOT EXISTS chunks_document_chapter_idx ON chunks(document_id, chapter_id)",
         "CREATE INDEX IF NOT EXISTS chunks_sub_chapter_idx ON chunks(sub_chapter_id)",

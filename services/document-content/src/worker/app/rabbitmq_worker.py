@@ -70,19 +70,34 @@ def main() -> None:
     signal.signal(signal.SIGINT, stop)
 
     def callback(ch, method, properties, body):
+        job: dict[str, Any] = {}
         try:
             job = json.loads(body.decode("utf-8"))
             result = process_job(job)
-            LOG.info(
-                "document job complete task_id=%s document_id=%s status=%s",
+        except Exception:
+            LOG.exception(
+                "document job failed task_id=%s document_id=%s",
                 job.get("task_id"),
                 job.get("document_id"),
-                result.get("status"),
             )
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return
+
+        LOG.info(
+            "document job complete task_id=%s document_id=%s status=%s",
+            job.get("task_id"),
+            job.get("document_id"),
+            result.get("status"),
+        )
+        try:
             ch.basic_ack(delivery_tag=method.delivery_tag)
         except Exception:
-            LOG.exception("document job failed")
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            LOG.exception(
+                "document job ack failed task_id=%s document_id=%s",
+                job.get("task_id"),
+                job.get("document_id"),
+            )
+            raise
 
     channel.basic_consume(queue=DOCUMENT_CONTENT_QUEUE, on_message_callback=callback)
     LOG.info("document-content worker consuming queue=%s", DOCUMENT_CONTENT_QUEUE)

@@ -1,0 +1,7 @@
+.gameCardBackground {
+    appearance: none;
+    border: 18px solid transparent;
+    border-image-source: url('../../public/gui/boxes_banners/Box_WhiteOutline_Square.svg');
+    border-image-slice: 140 fill;
+    border-image-repeat: stretch;
+}

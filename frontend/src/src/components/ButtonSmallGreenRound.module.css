@@ -1,0 +1,9 @@
+.buttonSmallGreenRound {
+    appearance: none;
+    border: 12px solid transparent;
+    border-image-source: url('../../public/gui/buttons_text/ButtonText_Small_Green_Round.svg');
+    border-image-slice: 120 fill;
+    border-image-repeat: stretch;
+    color: inherit;
+    font: inherit;
+}

@@ -44,8 +44,8 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 				ADD CONSTRAINT quizzes_answer_index_nonnegative_check
 				CHECK (answer_index >= 0);
 			END IF;
-		}
-		$$`,
+		END;
+		$$;`,
 		`CREATE INDEX IF NOT EXISTS levels_user_id_idx ON levels(user_id)`,
 		`CREATE INDEX IF NOT EXISTS levels_sub_chapter_id_idx ON levels(sub_chapter_id)`,
 		`CREATE INDEX IF NOT EXISTS levels_document_id_idx ON levels(document_id)`,
@@ -62,8 +62,8 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 			LOOP
 				EXECUTE format('ALTER TABLE levels DROP CONSTRAINT IF EXISTS %I', constraint_name);
 			END LOOP;
-		END
-		$$`,
+		END;
+		$$;`,
 		`UPDATE quizzes SET answer_index = 0 WHERE answer_index IS NULL`,
 		`ALTER TABLE quizzes ALTER COLUMN answer_index SET NOT NULL`,
 	}
