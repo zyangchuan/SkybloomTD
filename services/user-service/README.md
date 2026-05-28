@@ -6,10 +6,10 @@ Go Gin API for storing authenticated Supabase users in PostgreSQL.
 
 `POST /users` or `POST /users/me`
 
-Headers:
+Cookie:
 
 ```http
-Authorization: Bearer <supabase-jwt>
+skybloom_access_token=<supabase-jwt>
 Content-Type: application/json
 ```
 

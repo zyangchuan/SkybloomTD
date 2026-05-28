@@ -39,11 +39,12 @@ func Middleware(cfg config.Config) gin.HandlerFunc {
 		JWTSecret:          cfg.SupabaseJWTSecret,
 		JWTAudience:        cfg.SupabaseJWTAudience,
 		JWKSURL:            cfg.SupabaseJWKSURL,
+		AuthCookieName:     cfg.AuthCookieName,
 		AllowUnverifiedJWT: cfg.AllowUnverifiedJWT,
 	}
 
 	return func(c *gin.Context) {
-		claims, err := parser.ParseAuthorizationHeader(c.GetHeader("Authorization"))
+		claims, err := parser.ParseRequest(c.Request)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 			c.Abort()
@@ -85,6 +86,7 @@ type Parser struct {
 	JWTSecret          string
 	JWTAudience        string
 	JWKSURL            string
+	AuthCookieName     string
 	AllowUnverifiedJWT bool
 
 	mu          sync.Mutex
@@ -92,12 +94,21 @@ type Parser struct {
 	jwksExpires time.Time
 }
 
-func (p *Parser) ParseAuthorizationHeader(header string) (*SupabaseClaims, error) {
-	rawToken, ok := bearerToken(header)
-	if !ok {
-		return nil, errors.New("missing bearer token")
+func (p *Parser) ParseRequest(request *http.Request) (*SupabaseClaims, error) {
+	if request == nil {
+		return nil, errors.New("missing request")
 	}
+	rawToken, ok, err := p.tokenFromCookie(request)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("missing access token cookie")
+	}
+	return p.ParseToken(rawToken)
+}
 
+func (p *Parser) ParseToken(rawToken string) (*SupabaseClaims, error) {
 	claims := &SupabaseClaims{}
 	if p.AllowUnverifiedJWT {
 		parser := jwt.NewParser()
@@ -152,6 +163,25 @@ func (p *Parser) ParseAuthorizationHeader(header string) (*SupabaseClaims, error
 		return nil, errors.New("jwt subject is required")
 	}
 	return claims, nil
+}
+
+func (p *Parser) tokenFromCookie(request *http.Request) (string, bool, error) {
+	cookieName := strings.TrimSpace(p.AuthCookieName)
+	if cookieName == "" {
+		cookieName = "skybloom_access_token"
+	}
+	cookie, err := request.Cookie(cookieName)
+	if err == http.ErrNoCookie {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	token := strings.TrimSpace(cookie.Value)
+	if token == "" {
+		return "", false, nil
+	}
+	return token, true, nil
 }
 
 func (p *Parser) keyFromJWKS(token *jwt.Token) (any, error) {
@@ -324,12 +354,4 @@ func (k jwkKey) ed25519PublicKey() (ed25519.PublicKey, error) {
 		return nil, errors.New("invalid Ed25519 public key size")
 	}
 	return ed25519.PublicKey(xBytes), nil
-}
-
-func bearerToken(header string) (string, bool) {
-	parts := strings.Fields(header)
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return "", false
-	}
-	return parts[1], true
 }

@@ -71,12 +71,25 @@ func TestVerifyAuthReturnsUserHeaders(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/auth/verify", nil)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request.AddCookie(&http.Cookie{Name: "skybloom_access_token", Value: token})
 	router.ServeHTTP(response, request)
 
 	assert.Equal(t, http.StatusNoContent, response.Code)
 	assert.Equal(t, userID.String(), response.Header().Get("X-User-Id"))
 	assert.Equal(t, "student@example.com", response.Header().Get("X-User-Email"))
+}
+
+func TestVerifyAuthRejectsAuthorizationHeader(t *testing.T) {
+	userID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	token := signedTestToken(t, userID, "student@example.com")
+	router := newTestRouter(t, nil)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/auth/verify", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
 }
 
 func TestUpsertUserStoresAuthenticatedUser(t *testing.T) {
@@ -105,7 +118,7 @@ func TestUpsertUserStoresAuthenticatedUser(t *testing.T) {
 	body := bytes.NewBufferString(`{"email":"override@example.com","user_name":" Student ","metadata":{"grade":3}}`)
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/users/me", body)
-	request.Header.Set("Authorization", "Bearer "+token)
+	request.AddCookie(&http.Cookie{Name: "skybloom_access_token", Value: token})
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(response, request)
 

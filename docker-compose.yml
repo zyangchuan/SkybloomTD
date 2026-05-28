@@ -11,9 +11,11 @@ services:
       - ./docs:/usr/share/nginx/html/docs:ro
     depends_on:
       - frontend
+      - game
       - user-service
       - document-content-api
-      - level-generator-api
+      - game-service
+      - game-generation-worker
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/nginx-health | grep -q ok"]
       interval: 10s
@@ -27,15 +29,33 @@ services:
     image: skybloomtd-frontend:latest
     command: npm run dev
     build:
-      context: ./frontend/src
+      context: ./frontend/app
+      dockerfile: Dockerfile
     env_file:
-      - ./frontend/src/.env.local
+      - ./frontend/app/.env
     expose:
       - "3000"
     volumes:
-      - ./frontend/src:/app
+      - ./frontend/app:/app
       - /app/node_modules
       - /app/.next
+    restart: unless-stopped
+    networks:
+      - services-network
+
+  game:
+    container_name: game
+    image: skybloomtd-game:latest
+    command: npm run dev
+    build:
+      context: ./frontend/game
+    ports:
+      - "${GAME_CLIENT_PORT:-5173}:5173"
+    expose:
+      - "5173"
+    volumes:
+      - ./frontend/game:/app
+      - /app/node_modules
     restart: unless-stopped
     networks:
       - services-network
@@ -117,38 +137,65 @@ services:
     networks:
       - services-network
 
-  level-generator-api:
-    container_name: level-generator-api
+  game-service:
+    container_name: game-service
     build:
-      context: ./services/level-generator/src/api
+      context: ./services/game-service/src
       dockerfile: Dockerfile
-    image: level-generator-api:latest
+    image: game-service:latest
     expose:
-      - "8000"
+      - "8081"
     env_file:
       - .env
     environment:
+      GAME_SERVICE_PORT: 8081
       RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
-      LEVEL_GENERATOR_QUEUE: ${LEVEL_GENERATOR_QUEUE:-level.generate}
+      GAME_GENERATION_QUEUE: ${GAME_GENERATION_QUEUE:-game.generation.generate}
+      GAME_STATUS_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GAME_MAP_REDIS_URL: redis://game-redis:6379/0
+      GAME_GENERATION_STATUS_TTL_SECONDS: ${GAME_GENERATION_STATUS_TTL_SECONDS:-86400}
+      LEVEL_MAP_CACHE_TTL_SECONDS: ${LEVEL_MAP_CACHE_TTL_SECONDS:-86400}
+      LEVEL_QUIZ_CACHE_TTL_SECONDS: ${LEVEL_QUIZ_CACHE_TTL_SECONDS:-86400}
+    depends_on:
+      - game-redis
     networks:
       - services-network
 
-  level-generator-worker:
-    container_name: level-generator-worker
-    hostname: level-generator-worker
+  game-generation-worker:
+    container_name: game-generation-worker
+    hostname: game-generation-worker
     build:
-      context: ./services/level-generator/src/worker
-      dockerfile: Dockerfile
-    image: level-generator-worker:latest
+      context: ./services/game-service/src
+      dockerfile: Dockerfile.worker
+    image: game-generation-worker:latest
     env_file:
       - .env
     environment:
       RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
-      LEVEL_GENERATOR_QUEUE: ${LEVEL_GENERATOR_QUEUE:-level.generate}
+      GAME_GENERATION_QUEUE: ${GAME_GENERATION_QUEUE:-game.generation.generate}
+      GAME_STATUS_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GAME_MAP_REDIS_URL: redis://game-redis:6379/0
+      GAME_GENERATION_STATUS_TTL_SECONDS: ${GAME_GENERATION_STATUS_TTL_SECONDS:-86400}
+      LEVEL_MAP_CACHE_TTL_SECONDS: ${LEVEL_MAP_CACHE_TTL_SECONDS:-86400}
+      LEVEL_QUIZ_CACHE_TTL_SECONDS: ${LEVEL_QUIZ_CACHE_TTL_SECONDS:-86400}
       DOCUMENT_CONTENT_GRPC_ADDR: document-content-grpc:50051
     depends_on:
       document-content-grpc:
         condition: service_healthy
+      game-redis:
+        condition: service_started
+    networks:
+      - services-network
+
+  game-redis:
+    container_name: game-redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    expose:
+      - "6379"
+    volumes:
+      - game-redis-data:/data
+    restart: unless-stopped
     networks:
       - services-network
 
@@ -174,3 +221,4 @@ networks:
 
 volumes:
   models:
+  game-redis-data:

@@ -43,6 +43,7 @@ func NewRouter(cfg config.Config, users UserStore) *gin.Engine {
 			JWTSecret:          cfg.SupabaseJWTSecret,
 			JWTAudience:        cfg.SupabaseJWTAudience,
 			JWKSURL:            cfg.SupabaseJWKSURL,
+			AuthCookieName:     cfg.AuthCookieName,
 			AllowUnverifiedJWT: cfg.AllowUnverifiedJWT,
 		},
 	}
@@ -55,7 +56,7 @@ func NewRouter(cfg config.Config, users UserStore) *gin.Engine {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.CORSAllowedOrigins,
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodOptions},
-		AllowHeaders:     []string{"Authorization", "Content-Type"},
+		AllowHeaders:     []string{"Content-Type"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
@@ -87,7 +88,7 @@ func (s *Server) ready(c *gin.Context) {
 }
 
 func (s *Server) verifyAuth(c *gin.Context) {
-	claims, err := s.authParser.ParseAuthorizationHeader(c.GetHeader("Authorization"))
+	claims, err := s.authParser.ParseRequest(c.Request)
 	if err != nil {
 		log.Printf("auth verify failed: %v", err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})

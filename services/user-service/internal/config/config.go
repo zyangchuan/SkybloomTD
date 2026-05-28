@@ -14,6 +14,7 @@ type Config struct {
 	SupabaseJWTSecret   string
 	SupabaseJWTAudience string
 	SupabaseJWKSURL     string
+	AuthCookieName      string
 	AllowUnverifiedJWT  bool
 	CORSAllowedOrigins  []string
 }
@@ -31,6 +32,7 @@ func Load() (Config, error) {
 		SupabaseJWTSecret:   strings.TrimSpace(os.Getenv("SUPABASE_JWT_SECRET")),
 		SupabaseJWTAudience: envOrDefault("SUPABASE_JWT_AUDIENCE", "authenticated"),
 		SupabaseJWKSURL:     supabaseJWKSURL(),
+		AuthCookieName:      envOrDefault("AUTH_ACCESS_TOKEN_COOKIE", "skybloom_access_token"),
 		AllowUnverifiedJWT:  envBool("ALLOW_UNVERIFIED_JWT", false),
 		CORSAllowedOrigins:  csvEnv("CORS_ALLOWED_ORIGINS", "*"),
 	}, nil

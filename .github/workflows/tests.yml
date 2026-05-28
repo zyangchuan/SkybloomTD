@@ -18,8 +18,7 @@ jobs:
           - services/user-service
           - services/document-content/src/api
           - services/document-content/src/grpc
-          - services/level-generator/src/api
-          - services/level-generator/src/worker
+          - services/game-service/src
 
     steps:
       - name: Checkout

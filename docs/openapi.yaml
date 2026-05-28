@@ -8,9 +8,10 @@ info:
     Only the reverse proxy publishes a host port. Backend services are private
     Docker-network services and should be accessed through these paths.
 
-    Protected backend routes require a Supabase JWT in the `Authorization`
-    header. Nginx verifies the token through `user-service /auth/verify` and
-    forwards trusted identity headers to private services.
+    Protected backend routes require a Supabase JWT stored in the
+    `skybloom_access_token` cookie. Nginx verifies the cookie through
+    `user-service /auth/verify` and forwards trusted identity headers to
+    private services.
 servers:
   - url: http://localhost
     description: Local Docker Compose reverse proxy
@@ -23,8 +24,8 @@ tags:
     description: User profile persistence backed by `private.users`.
   - name: Document Content
     description: PDF/document upload and OCR workflow entrypoints.
-  - name: Level Generator
-    description: Level generation workflow entrypoints.
+  - name: Game Service
+    description: Authoritative game websocket and level generation workflow.
 
 paths:
   /nginx-health:
@@ -93,16 +94,16 @@ paths:
   /api/user-service/auth/verify:
     get:
       tags: [Auth]
-      summary: Verify a Supabase JWT
+      summary: Verify the authentication cookie
       description: |
-        Stateless token verification endpoint used by Nginx `auth_request`.
-        Clients generally do not need to call this directly.
+        Stateless Supabase token verification endpoint used by Nginx
+        `auth_request`. Clients generally do not need to call this directly.
       operationId: verifySupabaseJwt
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       responses:
         "204":
-          description: Token is valid.
+          description: Authentication cookie is valid.
           headers:
             X-User-Id:
               description: Authenticated Supabase user id from the JWT `sub` claim.
@@ -115,7 +116,7 @@ paths:
                 type: string
                 format: email
         "401":
-          description: Token is missing, invalid, expired, or misconfigured.
+          description: Authentication cookie is missing, invalid, expired, or misconfigured.
           content:
             application/json:
               schema:
@@ -127,11 +128,11 @@ paths:
       summary: Create or update the authenticated user profile
       description: |
         Stores the authenticated Supabase user in `private.users`. The database
-        user id is always taken from the JWT `sub` claim. If `id` is included in
-        the body, it must match the JWT subject.
+        user id is always taken from the JWT `sub` claim in the authentication
+        cookie. If `id` is included in the body, it must match the JWT subject.
       operationId: upsertUser
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -157,7 +158,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -176,7 +177,7 @@ paths:
       description: Alias of `POST /api/users`.
       operationId: upsertCurrentUser
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -197,7 +198,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -216,11 +217,12 @@ paths:
       description: |
         Shortcut route for `POST /api/document-content/upload-file`.
 
-        The authenticated user id is taken from the Supabase JWT. Do not send a
-        `user_id` field; client-supplied user ids are ignored by the backend.
+        The authenticated user id is taken from the Supabase JWT stored in the
+        authentication cookie. Do not send a `user_id` field; client-supplied
+        user ids are ignored by the backend.
       operationId: uploadDocumentShortcut
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -235,7 +237,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UploadDocumentResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -271,7 +273,7 @@ paths:
         Redis as `queued`, and publishes the worker job to RabbitMQ.
       operationId: uploadDocument
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -286,7 +288,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/UploadDocumentResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -322,7 +324,7 @@ paths:
         temporary Redis task status while processing is still in progress.
       operationId: listCurrentUserDocuments
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       responses:
         "200":
           description: Current user's documents.
@@ -331,7 +333,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ListDocumentsResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -353,7 +355,7 @@ paths:
         document chunks/sections, and the document row.
       operationId: deleteDocument
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/DocumentId"
       responses:
@@ -366,7 +368,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -393,7 +395,7 @@ paths:
         A document that is not ready yet may return an empty chapter list.
       operationId: listDocumentChapters
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/DocumentId"
       responses:
@@ -410,7 +412,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -435,7 +437,7 @@ paths:
       description: Returns indexed sub-chapters for a chapter owned by the authenticated user.
       operationId: listChapterSubChapters
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/ChapterId"
       responses:
@@ -452,7 +454,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -481,7 +483,7 @@ paths:
         `is_ready` flag as the durable readiness signal.
       operationId: getDocumentTaskStatus
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/TaskId"
       responses:
@@ -492,7 +494,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/TaskStatusResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
@@ -510,157 +512,150 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/generate_level:
+  /api/game-service/health:
     get:
-      tags: [Level Generator]
-      summary: Queue level generation for a sub-chapter
-      description: Shortcut route for `GET /api/level-generator/generate_level`.
-      operationId: generateLevelShortcutGet
+      tags: [Game Service]
+      summary: Check game-service process health through the protected proxy route
+      operationId: getGameServiceHealth
       security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/SubChapterId"
+        - cookieAuth: []
       responses:
         "200":
-          description: Level generation workflow was queued.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GenerateLevelResponse"
-        "401":
-          description: Missing or invalid bearer token.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "422":
-          description: Invalid sub-chapter id.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/FastApiValidationError"
-    post:
-      tags: [Level Generator]
-      summary: Queue level generation for a sub-chapter
-      description: Shortcut route for `POST /api/level-generator/generate_level`.
-      operationId: generateLevelShortcutPost
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/SubChapterId"
-      responses:
-        "200":
-          description: Level generation workflow was queued.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GenerateLevelResponse"
-        "401":
-          description: Missing or invalid bearer token.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "422":
-          description: Invalid sub-chapter id.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/FastApiValidationError"
-
-  /api/level-generator/health:
-    get:
-      tags: [Level Generator]
-      summary: Check level-generator API health through the protected proxy route
-      operationId: getLevelGeneratorHealth
-      security:
-        - bearerAuth: []
-      responses:
-        "200":
-          description: Level-generator API is healthy.
+          description: Game-service process is healthy.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/level-generator/generate_level:
+  /api/game-service/ready:
     get:
-      tags: [Level Generator]
-      summary: Queue level generation for a sub-chapter
-      operationId: generateLevelGet
+      tags: [Game Service]
+      summary: Check game-service database readiness through the protected proxy route
+      operationId: getGameServiceReadiness
       security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/SubChapterId"
+        - cookieAuth: []
       responses:
         "200":
-          description: Level generation workflow was queued.
+          description: Game-service can reach PostgreSQL.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GenerateLevelResponse"
+                $ref: "#/components/schemas/ReadyResponse"
         "401":
-          description: Missing or invalid bearer token.
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "422":
-          description: Invalid sub-chapter id.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/FastApiValidationError"
-    post:
-      tags: [Level Generator]
-      summary: Queue level generation for a sub-chapter
-      operationId: generateLevelPost
-      security:
-        - bearerAuth: []
-      parameters:
-        - $ref: "#/components/parameters/SubChapterId"
-      responses:
-        "200":
-          description: Level generation workflow was queued.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/GenerateLevelResponse"
-        "401":
-          description: Missing or invalid bearer token.
+        "503":
+          description: Database is unavailable.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "422":
-          description: Invalid sub-chapter id.
+
+  /api/game-service/ws:
+    get:
+      tags: [Game Service]
+      summary: Open the authoritative game websocket
+      description: |
+        WebSocket endpoint for the game client. Browser clients should connect
+        to `ws://localhost/api/game-service/ws` locally, or `wss://...` in
+        production. Authentication is supplied by the `skybloom_access_token`
+        cookie.
+
+        After the connection opens, send `game.start` with a `sub_chapter_id`.
+        The server responds with `level_generation.started`, including a
+        `generation_id` and `status_url`. Poll the status URL until generation
+        is complete, then send `game.load` with the returned `level_id` to
+        receive `game.initial_state`. The initial state exposes only map data;
+        quiz answer data stays server-side in the dedicated game Redis cache.
+        To begin authoritative gameplay, send `game.session.start` with the
+        completed `level_id`. The server initializes a Redis-backed session
+        with `health=100`, `essence=0`, and `wave=0`, returns
+        `game.session.started`, then streams `game.state` snapshots at 20 Hz.
+
+        If the database already has quizzes for the authenticated user's
+        sub-chapter, the service reuses the saved level instead of generating
+        a new quiz set. Quiz answer data is copied into the dedicated game
+        Redis cache for authoritative validation during play.
+      operationId: openGameWebSocket
+      security:
+        - cookieAuth: []
+      x-websocket-client-messages:
+        - $ref: "#/components/schemas/GameStartWebSocketMessage"
+        - $ref: "#/components/schemas/GameLoadWebSocketMessage"
+        - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
+      x-websocket-server-messages:
+        - $ref: "#/components/schemas/LevelGenerationStartedMessage"
+        - $ref: "#/components/schemas/GameInitialStateMessage"
+        - $ref: "#/components/schemas/GameSessionStartedMessage"
+        - $ref: "#/components/schemas/GameStateMessage"
+        - $ref: "#/components/schemas/GameErrorMessage"
+      responses:
+        "101":
+          description: WebSocket upgrade accepted.
+        "401":
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/FastApiValidationError"
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/game-service/level-generation/{generation_id}/status:
+    get:
+      tags: [Game Service]
+      summary: Get level generation status
+      description: |
+        Poll this short-lived Redis-backed status after the websocket
+        `game.start` response. If Redis status has expired but the level was
+        completed, the server reconstructs a complete status from the durable
+        generation row.
+      operationId: getGameLevelGenerationStatus
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/GenerationId"
+      responses:
+        "200":
+          description: Current generation status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LevelGenerationStatus"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Generation was not found, belongs to another user, or status has expired before completion.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Generation status dependencies are unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: Supabase JWT
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: skybloom_access_token
 
   parameters:
-    SubChapterId:
-      name: sub_chapter_id
-      in: query
-      required: true
-      description: UUID of the indexed sub-chapter to generate a level for.
-      schema:
-        type: string
-        format: uuid
     TaskId:
       name: task_id
       in: path
@@ -685,6 +680,14 @@ components:
       schema:
         type: string
         format: uuid
+    GenerationId:
+      name: generation_id
+      in: path
+      required: true
+      description: Level generation id returned by the `level_generation.started` websocket message.
+      schema:
+        type: string
+        pattern: "^[a-f0-9]{32}$"
 
   schemas:
     HealthResponse:
@@ -729,7 +732,7 @@ components:
         id:
           type: string
           format: uuid
-          description: Optional. If provided, must match the JWT `sub` claim.
+          description: Optional. If provided, must match the authenticated JWT `sub` claim.
         email:
           type: string
           format: email
@@ -808,7 +811,7 @@ components:
         user_id:
           type: string
           format: uuid
-          description: Authenticated Supabase user id from the JWT.
+          description: Authenticated Supabase user id from the authenticated JWT.
         document_id:
           type: string
           format: uuid
@@ -994,26 +997,126 @@ components:
           type: string
           format: date-time
 
-    GenerateLevelResponse:
+    GameStartWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.start
+        data:
+          type: object
+          required: [sub_chapter_id]
+          properties:
+            sub_chapter_id:
+              type: string
+              format: uuid
+              description: Indexed sub-chapter to generate a level for.
+
+    GameLoadWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.load
+        data:
+          type: object
+          required: [level_id]
+          properties:
+            level_id:
+              type: string
+              format: uuid
+              description: Completed level id returned by generation status.
+
+    GameSessionStartWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.session.start
+        data:
+          type: object
+          required: [level_id]
+          properties:
+            level_id:
+              type: string
+              format: uuid
+              description: Completed level id to start an authoritative gameplay session for.
+
+    LevelGenerationStartedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: level_generation.started
+        data:
+          $ref: "#/components/schemas/LevelGenerationStartResult"
+
+    GameInitialStateMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.initial_state
+        data:
+          $ref: "#/components/schemas/GameInitialState"
+
+    GameSessionStartedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.session.started
+        data:
+          $ref: "#/components/schemas/GameState"
+
+    GameStateMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.state
+        data:
+          $ref: "#/components/schemas/GameState"
+
+    GameErrorMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: error
+        data:
+          type: object
+          required: [error]
+          properties:
+            error:
+              type: string
+              example: unsupported message type
+
+    LevelGenerationStartResult:
       type: object
       required:
-        - message
-        - task_id
-        - fetch_task_id
-        - generate_task_id
+        - generation_id
         - user_id
         - sub_chapter_id
+        - status
+        - map_status
+        - quiz_status
+        - map_seed
+        - map_algorithm_version
+        - reused
+        - status_url
       properties:
-        message:
+        generation_id:
           type: string
-          example: Level generation started
-        task_id:
-          type: string
-          description: Celery chain result id.
-        fetch_task_id:
-          type: string
-        generate_task_id:
-          type: string
+          pattern: "^[a-f0-9]{32}$"
         user_id:
           type: string
           format: uuid
@@ -1021,3 +1124,188 @@ components:
         sub_chapter_id:
           type: string
           format: uuid
+        status:
+          $ref: "#/components/schemas/LevelGenerationOverallStatus"
+        map_status:
+          $ref: "#/components/schemas/LevelGenerationStepStatus"
+        quiz_status:
+          $ref: "#/components/schemas/LevelGenerationStepStatus"
+        map_seed:
+          type: integer
+          format: int64
+        map_algorithm_version:
+          type: integer
+          example: 1
+        level_id:
+          type: string
+          format: uuid
+          description: Present when an idempotent request reuses an already completed level.
+        reused:
+          type: boolean
+          description: True when the request reused an existing generation or a saved level that already has quizzes for this user and sub-chapter.
+        status_url:
+          type: string
+          example: /api/game-service/level-generation/0d2a8c64c36f4a7d88442a7517c9f014/status
+
+    LevelGenerationStatus:
+      type: object
+      required:
+        - generation_id
+        - user_id
+        - sub_chapter_id
+        - status
+        - map_status
+        - quiz_status
+        - map_seed
+        - map_algorithm_version
+        - updated_at
+      properties:
+        generation_id:
+          type: string
+          pattern: "^[a-f0-9]{32}$"
+        user_id:
+          type: string
+          format: uuid
+        sub_chapter_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/LevelGenerationOverallStatus"
+        map_status:
+          $ref: "#/components/schemas/LevelGenerationStepStatus"
+        quiz_status:
+          $ref: "#/components/schemas/LevelGenerationStepStatus"
+        map_seed:
+          type: integer
+          format: int64
+        map_algorithm_version:
+          type: integer
+          example: 1
+        level_id:
+          type: string
+          format: uuid
+          description: Present when `status` is `complete`.
+        error:
+          type: string
+          description: Present when generation fails.
+        updated_at:
+          type: string
+          format: date-time
+
+    LevelGenerationOverallStatus:
+      type: string
+      enum: [pending, complete, failed]
+
+    LevelGenerationStepStatus:
+      type: string
+      enum: [pending, running, complete, failed]
+
+    GameInitialState:
+      type: object
+      required: [map]
+      properties:
+        map:
+          $ref: "#/components/schemas/GeneratedMap"
+
+    GameState:
+      type: object
+      description: Authoritative gameplay snapshot. After `game.session.started`, `game.state` messages are sent 20 times per second.
+      required: [session_id, level_id, health, essence, wave, tick, server_time]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        level_id:
+          type: string
+          format: uuid
+        health:
+          type: integer
+          example: 100
+        essence:
+          type: integer
+          example: 0
+        wave:
+          type: integer
+          example: 0
+        tick:
+          type: integer
+          format: int64
+          example: 0
+        server_time:
+          type: string
+          format: date-time
+
+    GeneratedMap:
+      type: object
+      required: [version, seed, width, height, enemy_path, objects]
+      properties:
+        version:
+          type: integer
+          example: 1
+        seed:
+          type: integer
+          format: int64
+        width:
+          type: integer
+          example: 18
+        height:
+          type: integer
+          example: 12
+        enemy_path:
+          type: array
+          description: Ordered path tiles from the enemy spawn edge to the exit edge.
+          items:
+            $ref: "#/components/schemas/PathTile"
+        objects:
+          type: array
+          description: Decorative or blocking map objects generated outside the enemy path and its one-tile placement buffer.
+          items:
+            $ref: "#/components/schemas/MapObject"
+
+    PathTile:
+      type: object
+      required: [x, y, kind]
+      properties:
+        x:
+          type: integer
+          minimum: 0
+          maximum: 17
+        y:
+          type: integer
+          minimum: 0
+          maximum: 11
+        kind:
+          type: string
+          enum: [start, end, straight, turn]
+        from:
+          $ref: "#/components/schemas/GridDirection"
+        to:
+          $ref: "#/components/schemas/GridDirection"
+        axis:
+          type: string
+          enum: [horizontal, vertical]
+          description: Present on straight path tiles.
+        turn:
+          type: string
+          enum: [left, right]
+          description: Present on turn path tiles.
+
+    GridDirection:
+      type: string
+      enum: [north, east, south, west]
+
+    MapObject:
+      type: object
+      required: [type, x, y]
+      properties:
+        type:
+          type: string
+          enum: [tree, tree_stump, bush, rock]
+        x:
+          type: integer
+          minimum: 0
+          maximum: 17
+        y:
+          type: integer
+          minimum: 0
+          maximum: 11
