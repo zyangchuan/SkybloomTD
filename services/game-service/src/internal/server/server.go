@@ -867,13 +867,9 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 		if err != nil {
 			return err
 		}
-	} else {
-		if err := s.saveQuizMistake(callCtx, loop, answeredQuiz, request.SelectedIndex); err != nil {
-			return errors.New("failed to save incorrect quiz")
-		}
 	}
 
-	return writeWebsocketJSON(conn, writeMu, Message{
+	if err := writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.result",
 		Data: QuizResultState{
 			QuizID:         answeredQuiz.ID,
@@ -883,7 +879,15 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 			Essence:        essence,
 			Remaining:      remaining,
 		},
-	})
+	}); err != nil {
+		return err
+	}
+
+	if !correct {
+		s.saveQuizMistakeAsync(loop, answeredQuiz, request.SelectedIndex)
+	}
+
+	return nil
 }
 
 func (s *Server) awardEssenceThroughLoop(ctx context.Context, loop *runningGameLoop, amount int) (int, error) {
@@ -914,11 +918,23 @@ func (s *Server) awardEssenceThroughLoop(ctx context.Context, loop *runningGameL
 	}
 }
 
-func (s *Server) saveQuizMistake(ctx context.Context, loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) error {
+func (s *Server) saveQuizMistakeAsync(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) {
 	if s.levels == nil {
-		return errors.New("level repository is not configured")
+		log.Printf("quiz mistake save skipped quiz_id=%s: level repository is not configured", quiz.ID)
+		return
 	}
-	return s.levels.SaveQuizMistake(ctx, repository.QuizMistakeInput{
+	input := quizMistakeInput(loop, quiz, selectedIndex)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.levels.SaveQuizMistake(ctx, input); err != nil {
+			log.Printf("quiz mistake save failed quiz_id=%s user_id=%s: %v", input.QuizID, input.UserID, err)
+		}
+	}()
+}
+
+func quizMistakeInput(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) repository.QuizMistakeInput {
+	return repository.QuizMistakeInput{
 		UserID:           loop.userID,
 		LevelID:          loop.levelID,
 		GenerationID:     loop.generationID,
@@ -926,10 +942,10 @@ func (s *Server) saveQuizMistake(ctx context.Context, loop *runningGameLoop, qui
 		QuizIndex:        quiz.QuizIndex,
 		QuizType:         quiz.QuizType,
 		QuestionMarkdown: quiz.QuestionMarkdown,
-		OptionsMarkdown:  quiz.OptionsMarkdown,
+		OptionsMarkdown:  append([]string(nil), quiz.OptionsMarkdown...),
 		AnswerIndex:      quiz.AnswerIndex,
 		SelectedIndex:    selectedIndex,
-	})
+	}
 }
 
 func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSession, action clientAction) error {

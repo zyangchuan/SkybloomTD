@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -506,11 +507,83 @@ func TestWebsocketQuizIncorrectAnswerRecordsMistake(t *testing.T) {
 	if len(quizzes.quizzes.Quizzes) != 0 {
 		t.Fatalf("expected answered quiz to be removed, got %d quizzes", len(quizzes.quizzes.Quizzes))
 	}
-	if len(levels.mistakes) != 1 {
-		t.Fatalf("expected one recorded mistake, got %d", len(levels.mistakes))
+	mistakes := waitForMistakes(t, levels, 1)
+	if mistakes[0].SelectedIndex != 1 || mistakes[0].QuizID != "77777777-7777-7777-7777-777777777777" {
+		t.Fatalf("unexpected recorded mistake %+v", mistakes[0])
 	}
-	if levels.mistakes[0].SelectedIndex != 1 || levels.mistakes[0].QuizID != "77777777-7777-7777-7777-777777777777" {
-		t.Fatalf("unexpected recorded mistake %+v", levels.mistakes[0])
+}
+
+func TestWebsocketQuizIncorrectAnswerRespondsBeforeMistakeSave(t *testing.T) {
+	saveStarted := make(chan struct{})
+	continueSave := make(chan struct{})
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+		saveMistakeStarted:  saveStarted,
+		saveMistakeContinue: continueSave,
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "77777777-7777-7777-7777-777777777777",
+					QuizIndex:        2,
+					QuizType:         "mcq",
+					QuestionMarkdown: "Pick A",
+					OptionsMarkdown:  []string{"A", "B", "C"},
+					AnswerIndex:      0,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.quiz.answer",
+		Data: map[string]any{"quiz_id": "77777777-7777-7777-7777-777777777777", "selected_index": 1},
+	}); err != nil {
+		t.Fatalf("WriteJSON quiz answer failed: %v", err)
+	}
+
+	result := readMessageOfType(t, conn, "game.quiz.result")
+	if result.Type != "game.quiz.result" {
+		t.Fatalf("expected quiz result, got %s", result.Type)
+	}
+
+	select {
+	case <-saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("mistake save did not start")
+	}
+
+	close(continueSave)
+	mistakes := waitForMistakes(t, levels, 1)
+	if mistakes[0].SelectedIndex != 1 {
+		t.Fatalf("unexpected recorded mistake %+v", mistakes[0])
 	}
 }
 
@@ -1038,8 +1111,12 @@ func TestWebsocketRequiresAuthentication(t *testing.T) {
 }
 
 type fakeLevelRepository struct {
-	bootstrap repository.LevelBootstrap
-	mistakes  []repository.QuizMistakeInput
+	bootstrap           repository.LevelBootstrap
+	mistakeMu           sync.Mutex
+	mistakeStartedOnce  sync.Once
+	saveMistakeStarted  chan struct{}
+	saveMistakeContinue chan struct{}
+	mistakes            []repository.QuizMistakeInput
 }
 
 func (r *fakeLevelRepository) GetBootstrap(_ context.Context, levelID string, userID string) (repository.LevelBootstrap, error) {
@@ -1053,9 +1130,29 @@ func (r *fakeLevelRepository) Ping(context.Context) error {
 	return nil
 }
 
-func (r *fakeLevelRepository) SaveQuizMistake(_ context.Context, input repository.QuizMistakeInput) error {
+func (r *fakeLevelRepository) SaveQuizMistake(ctx context.Context, input repository.QuizMistakeInput) error {
+	if r.saveMistakeStarted != nil {
+		r.mistakeStartedOnce.Do(func() {
+			close(r.saveMistakeStarted)
+		})
+	}
+	if r.saveMistakeContinue != nil {
+		select {
+		case <-r.saveMistakeContinue:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	r.mistakeMu.Lock()
+	defer r.mistakeMu.Unlock()
 	r.mistakes = append(r.mistakes, input)
 	return nil
+}
+
+func (r *fakeLevelRepository) mistakesSnapshot() []repository.QuizMistakeInput {
+	r.mistakeMu.Lock()
+	defer r.mistakeMu.Unlock()
+	return append([]repository.QuizMistakeInput(nil), r.mistakes...)
 }
 
 type fakeMapCache struct {
@@ -1248,4 +1345,19 @@ func readMessageOfType(t *testing.T, conn *websocket.Conn, messageType string) M
 	}
 	t.Fatalf("did not receive message type %s", messageType)
 	return Message{}
+}
+
+func waitForMistakes(t *testing.T, levels *fakeLevelRepository, want int) []repository.QuizMistakeInput {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mistakes := levels.mistakesSnapshot()
+		if len(mistakes) == want {
+			return mistakes
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	mistakes := levels.mistakesSnapshot()
+	t.Fatalf("expected %d recorded mistakes, got %d", want, len(mistakes))
+	return nil
 }
