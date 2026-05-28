@@ -33,7 +33,7 @@ func Open(ctx context.Context, databaseURL string) (*gorm.DB, func() error, erro
 }
 
 func Migrate(ctx context.Context, db *gorm.DB) error {
-	if err := db.WithContext(ctx).AutoMigrate(&models.LevelGenerationRecord{}, &models.Level{}, &models.Quiz{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&models.LevelGenerationRecord{}, &models.Level{}, &models.Quiz{}, &models.QuizMistake{}); err != nil {
 		return err
 	}
 
@@ -63,6 +63,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 		`CREATE INDEX IF NOT EXISTS levels_generation_id_idx ON levels(generation_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS levels_generation_id_unique_idx ON levels(generation_id) WHERE generation_id IS NOT NULL AND generation_id <> ''`,
 		`CREATE INDEX IF NOT EXISTS quizzes_level_id_idx ON quizzes(level_id)`,
+		`CREATE INDEX IF NOT EXISTS quiz_mistakes_user_id_idx ON quiz_mistakes(user_id)`,
+		`CREATE INDEX IF NOT EXISTS quiz_mistakes_level_id_idx ON quiz_mistakes(level_id)`,
+		`CREATE INDEX IF NOT EXISTS quiz_mistakes_generation_id_idx ON quiz_mistakes(generation_id)`,
 		`CREATE INDEX IF NOT EXISTS level_generation_jobs_user_id_idx ON level_generation_jobs(user_id)`,
 		`CREATE INDEX IF NOT EXISTS level_generation_jobs_sub_chapter_id_idx ON level_generation_jobs(sub_chapter_id)`,
 		`CREATE INDEX IF NOT EXISTS level_generation_jobs_level_id_idx ON level_generation_jobs(level_id)`,

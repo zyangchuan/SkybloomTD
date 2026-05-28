@@ -13,7 +13,10 @@ import (
 	"skybloom/game-service/internal/repository"
 )
 
-var ErrQuizzesNotFound = errors.New("level quizzes not found")
+var (
+	ErrQuizzesNotFound = errors.New("level quizzes not found")
+	ErrQuizNotFound    = errors.New("quiz not found")
+)
 
 type Store struct {
 	client *redisclient.Client
@@ -74,6 +77,9 @@ func FromLevelBootstrap(level repository.LevelBootstrap, generationID string) Le
 
 func (s *Store) Get(ctx context.Context, generationID string) (LevelQuizzes, error) {
 	_ = ctx
+	if s == nil || s.client == nil {
+		return LevelQuizzes{}, errors.New("quiz cache is not configured")
+	}
 	raw, err := s.client.Do("GET", key(generationID))
 	if errors.Is(err, redisclient.ErrNil) {
 		return LevelQuizzes{}, ErrQuizzesNotFound
@@ -97,12 +103,46 @@ func (s *Store) Get(ctx context.Context, generationID string) (LevelQuizzes, err
 func (s *Store) Set(ctx context.Context, generationID string, quizzes LevelQuizzes) error {
 	_ = ctx
 	quizzes.GenerationID = generationID
+	if s == nil || s.client == nil {
+		return errors.New("quiz cache is not configured")
+	}
 	body, err := json.Marshal(quizzes)
 	if err != nil {
 		return err
 	}
 	_, err = s.client.Do("SET", key(generationID), string(body), "EX", strconv.Itoa(int(s.ttl.Seconds())))
 	return err
+}
+
+func (s *Store) PeekNext(ctx context.Context, generationID string) (CachedQuiz, int, error) {
+	quizzes, err := s.Get(ctx, generationID)
+	if err != nil {
+		return CachedQuiz{}, 0, err
+	}
+	if len(quizzes.Quizzes) == 0 {
+		return CachedQuiz{}, 0, ErrQuizzesNotFound
+	}
+	return quizzes.Quizzes[0], len(quizzes.Quizzes), nil
+}
+
+func (s *Store) Take(ctx context.Context, generationID string, quizID string) (CachedQuiz, int, error) {
+	quizzes, err := s.Get(ctx, generationID)
+	if err != nil {
+		return CachedQuiz{}, 0, err
+	}
+	for index, quiz := range quizzes.Quizzes {
+		if quiz.ID != quizID {
+			continue
+		}
+		remaining := append([]CachedQuiz{}, quizzes.Quizzes[:index]...)
+		remaining = append(remaining, quizzes.Quizzes[index+1:]...)
+		quizzes.Quizzes = remaining
+		if err := s.Set(ctx, generationID, quizzes); err != nil {
+			return CachedQuiz{}, 0, err
+		}
+		return quiz, len(remaining), nil
+	}
+	return CachedQuiz{}, len(quizzes.Quizzes), ErrQuizNotFound
 }
 
 func (s *Store) Close() error {

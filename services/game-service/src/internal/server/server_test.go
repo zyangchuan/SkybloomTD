@@ -19,6 +19,7 @@ import (
 	"skybloom/game-service/internal/mapcache"
 	"skybloom/game-service/internal/mapgen"
 	"skybloom/game-service/internal/models"
+	"skybloom/game-service/internal/quizcache"
 	"skybloom/game-service/internal/repository"
 )
 
@@ -211,6 +212,12 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if len(startedState.Birds) != 0 {
 		t.Fatalf("expected no placed birds at session start, got %d", len(startedState.Birds))
 	}
+	if len(startedState.Smogs) != 0 {
+		t.Fatalf("expected no smogs before first tick, got %d", len(startedState.Smogs))
+	}
+	if len(startedState.Projectiles) != 0 {
+		t.Fatalf("expected no projectiles before first tick, got %d", len(startedState.Projectiles))
+	}
 	if sessions.options.UserID != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("unexpected session user_id %q", sessions.options.UserID)
 	}
@@ -229,8 +236,17 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if tickState.Tick != 1 {
 		t.Fatalf("expected first tick to be 1, got %d", tickState.Tick)
 	}
-	if tickState.Health != gamesession.InitialHealth || tickState.Essence != gamesession.InitialEssence || tickState.Wave != gamesession.InitialWave {
+	if tickState.Health != gamesession.InitialHealth || tickState.Essence != gamesession.InitialEssence || tickState.Wave != 1 {
 		t.Fatalf("unexpected tick state %+v", tickState)
+	}
+	if len(tickState.Smogs) != 1 {
+		t.Fatalf("expected first tick to spawn one smog, got %d", len(tickState.Smogs))
+	}
+	if tickState.Smogs[0].Health != 30 {
+		t.Fatalf("expected first smog health 30, got %d", tickState.Smogs[0].Health)
+	}
+	if tickState.Smogs[0].Speed != 0.8 {
+		t.Fatalf("expected first smog speed 0.8, got %f", tickState.Smogs[0].Speed)
 	}
 }
 
@@ -325,6 +341,276 @@ func TestWebsocketPlaceTowerConsumesEssenceAndPersistsBird(t *testing.T) {
 	}
 }
 
+func TestWebsocketQuizRequestAndCorrectAnswerAwardsEssence(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "66666666-6666-6666-6666-666666666666",
+					QuizIndex:        0,
+					QuizType:         "true_false",
+					QuestionMarkdown: "Sky is blue?",
+					OptionsMarkdown:  []string{"True", "False"},
+					AnswerIndex:      0,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON quiz request failed: %v", err)
+	}
+	prompt := readMessageOfType(t, conn, "game.quiz.presented")
+	body, err := json.Marshal(prompt.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz prompt failed: %v", err)
+	}
+	if strings.Contains(string(body), "answer_index") {
+		t.Fatalf("quiz prompt leaked answer index: %s", string(body))
+	}
+	var promptState QuizPromptState
+	if err := json.Unmarshal(body, &promptState); err != nil {
+		t.Fatalf("Unmarshal quiz prompt failed: %v", err)
+	}
+	if promptState.QuizID != "66666666-6666-6666-6666-666666666666" {
+		t.Fatalf("unexpected quiz id %q", promptState.QuizID)
+	}
+	if len(promptState.OptionsMarkdown) != 2 {
+		t.Fatalf("expected quiz options, got %+v", promptState.OptionsMarkdown)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.quiz.answer",
+		Data: map[string]any{"quiz_id": promptState.QuizID, "selected_index": 0},
+	}); err != nil {
+		t.Fatalf("WriteJSON quiz answer failed: %v", err)
+	}
+	result := readMessageOfType(t, conn, "game.quiz.result")
+	body, err = json.Marshal(result.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz result failed: %v", err)
+	}
+	var resultState QuizResultState
+	if err := json.Unmarshal(body, &resultState); err != nil {
+		t.Fatalf("Unmarshal quiz result failed: %v", err)
+	}
+	if !resultState.Correct {
+		t.Fatalf("expected correct result, got %+v", resultState)
+	}
+	if resultState.EssenceAwarded != correctQuizEssenceAward {
+		t.Fatalf("expected essence award %d, got %d", correctQuizEssenceAward, resultState.EssenceAwarded)
+	}
+	if resultState.Essence != gamesession.InitialEssence+correctQuizEssenceAward {
+		t.Fatalf("expected essence %d, got %d", gamesession.InitialEssence+correctQuizEssenceAward, resultState.Essence)
+	}
+	if sessions.economy.Essence != gamesession.InitialEssence+correctQuizEssenceAward {
+		t.Fatalf("expected persisted essence %d, got %d", gamesession.InitialEssence+correctQuizEssenceAward, sessions.economy.Essence)
+	}
+	if len(quizzes.quizzes.Quizzes) != 0 {
+		t.Fatalf("expected answered quiz to be removed, got %d quizzes", len(quizzes.quizzes.Quizzes))
+	}
+}
+
+func TestWebsocketQuizIncorrectAnswerRecordsMistake(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "77777777-7777-7777-7777-777777777777",
+					QuizIndex:        2,
+					QuizType:         "mcq",
+					QuestionMarkdown: "Pick A",
+					OptionsMarkdown:  []string{"A", "B", "C"},
+					AnswerIndex:      0,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.quiz.answer",
+		Data: map[string]any{"quiz_id": "77777777-7777-7777-7777-777777777777", "selected_index": 1},
+	}); err != nil {
+		t.Fatalf("WriteJSON quiz answer failed: %v", err)
+	}
+	result := readMessageOfType(t, conn, "game.quiz.result")
+	body, err := json.Marshal(result.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz result failed: %v", err)
+	}
+	var resultState QuizResultState
+	if err := json.Unmarshal(body, &resultState); err != nil {
+		t.Fatalf("Unmarshal quiz result failed: %v", err)
+	}
+	if resultState.Correct {
+		t.Fatalf("expected incorrect result, got %+v", resultState)
+	}
+	if len(quizzes.quizzes.Quizzes) != 0 {
+		t.Fatalf("expected answered quiz to be removed, got %d quizzes", len(quizzes.quizzes.Quizzes))
+	}
+	if len(levels.mistakes) != 1 {
+		t.Fatalf("expected one recorded mistake, got %d", len(levels.mistakes))
+	}
+	if levels.mistakes[0].SelectedIndex != 1 || levels.mistakes[0].QuizID != "77777777-7777-7777-7777-777777777777" {
+		t.Fatalf("unexpected recorded mistake %+v", levels.mistakes[0])
+	}
+}
+
+func TestWebsocketGameExitDeletesSession(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{Type: "game.exit"}); err != nil {
+		t.Fatalf("WriteJSON game exit failed: %v", err)
+	}
+
+	exited := readMessageOfType(t, conn, "game.exited")
+	body, err := json.Marshal(exited.Data)
+	if err != nil {
+		t.Fatalf("Marshal game exited failed: %v", err)
+	}
+	var exitedState GameExitedState
+	if err := json.Unmarshal(body, &exitedState); err != nil {
+		t.Fatalf("Unmarshal game exited failed: %v", err)
+	}
+	if !exitedState.Deleted {
+		t.Fatalf("expected exited state to mark deletion, got %+v", exitedState)
+	}
+	if sessions.deletedSessionID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+		t.Fatalf("expected deleted session id, got %q", sessions.deletedSessionID)
+	}
+}
+
+func TestWebsocketGameExitDeletesStoppedSessionByID(t *testing.T) {
+	sessions := &fakeGameSessionStore{}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, &fakeLevelRepository{}, nil, nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.exit",
+		Data: map[string]string{"session_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"},
+	}); err != nil {
+		t.Fatalf("WriteJSON game exit failed: %v", err)
+	}
+
+	exited := readMessageOfType(t, conn, "game.exited")
+	body, err := json.Marshal(exited.Data)
+	if err != nil {
+		t.Fatalf("Marshal game exited failed: %v", err)
+	}
+	var exitedState GameExitedState
+	if err := json.Unmarshal(body, &exitedState); err != nil {
+		t.Fatalf("Unmarshal game exited failed: %v", err)
+	}
+	if !exitedState.Deleted {
+		t.Fatalf("expected exited state to mark deletion, got %+v", exitedState)
+	}
+	if sessions.deletedSessionID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+		t.Fatalf("expected deleted session id, got %q", sessions.deletedSessionID)
+	}
+}
+
 func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 	levels := &fakeLevelRepository{
 		bootstrap: repository.LevelBootstrap{
@@ -345,17 +631,41 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 			SubChapterID: "55555555-5555-5555-5555-555555555555",
 			Health:       gamesession.InitialHealth,
 			Essence:      950,
-			Wave:         gamesession.InitialWave,
+			Wave:         1,
 			Tick:         14,
 			StartedAt:    time.Now().UTC(),
 			UpdatedAt:    time.Now().UTC(),
 		},
+		waveStartedAtTick: 1,
+		waveSpawned:       2,
+		nextWaveTick:      1,
 		birds: []gamesession.StoredBird{
 			{
 				ID:       "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 				Type:     gameobject.BirdTypeSparrow,
 				Position: gameobject.Position{X: 1, Y: 1},
 				Stats:    gameobject.BirdStats{Damage: 10, ProjectileSpeed: gameobject.StandardProjectileSpeed, FireRate: 1, Range: 3.5, Cost: 50},
+			},
+		},
+		smogs: []gamesession.StoredSmog{
+			{
+				ID:        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+				Health:    20,
+				Position:  gameobject.Position{X: 2.5, Y: 1},
+				Speed:     1.5,
+				PathIndex: 2,
+			},
+		},
+		projectiles: []gamesession.StoredProjectile{
+			{
+				ID:              "dddddddd-dddd-dddd-dddd-dddddddddddd",
+				Type:            gameobject.ProjectileTypeLocked,
+				Damage:          10,
+				ProjectileSpeed: gameobject.LockedProjectileSpeed,
+				Position:        gameobject.Position{X: 1, Y: 1},
+				Direction:       gameobject.Vector{X: 1, Y: 0},
+				TargetID:        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+				RemainingRange:  1,
 			},
 		},
 	}
@@ -397,6 +707,251 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 	}
 	if state.Birds[0].Type != gameobject.BirdTypeSparrow {
 		t.Fatalf("unexpected restored bird type %q", state.Birds[0].Type)
+	}
+	if len(state.Smogs) != 1 {
+		t.Fatalf("expected one restored smog, got %d", len(state.Smogs))
+	}
+	if state.Smogs[0].ID != "cccccccc-cccc-cccc-cccc-cccccccccccc" || state.Smogs[0].Health != 20 {
+		t.Fatalf("unexpected restored smog %+v", state.Smogs[0])
+	}
+	if len(state.Projectiles) != 1 {
+		t.Fatalf("expected one restored projectile, got %d", len(state.Projectiles))
+	}
+	if state.Projectiles[0].TargetID != "cccccccc-cccc-cccc-cccc-cccccccccccc" {
+		t.Fatalf("unexpected restored projectile %+v", state.Projectiles[0])
+	}
+}
+
+func TestAdvanceRuntimeTickDamagesHealthWhenSmogEscapes(t *testing.T) {
+	runtime := runtimeSession{
+		session: gamesession.State{
+			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			LevelID:   "11111111-1111-1111-1111-111111111111",
+			Health:    10,
+			Wave:      3,
+			Tick:      240,
+		},
+		economy:           gamesession.NewEconomy(100),
+		waveStartedAtTick: 120,
+		waveSpawned:       12,
+		nextWaveTick:      120,
+		path: []gameobject.Position{
+			{X: 0, Y: 0},
+			{X: 1, Y: 0},
+		},
+		smogs: []gameobject.Smog{
+			{ID: "smog-1", Health: 10, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
+		},
+	}
+
+	events := advanceRuntimeTick(&runtime, time.Now().UTC())
+
+	if runtime.session.Health != 0 {
+		t.Fatalf("expected health to drop to 0, got %d", runtime.session.Health)
+	}
+	if len(runtime.smogs) != 0 {
+		t.Fatalf("expected escaped smog to be removed, got %d", len(runtime.smogs))
+	}
+	if len(events) == 0 || events[0].Type != "smog.escaped" {
+		t.Fatalf("expected smog escaped event, got %+v", events)
+	}
+}
+
+func TestAdvanceRuntimeTickWaitsThreeSecondsAfterWaveCleared(t *testing.T) {
+	runtime := runtimeSession{
+		session: gamesession.State{
+			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			LevelID:   "11111111-1111-1111-1111-111111111111",
+			Health:    gamesession.InitialHealth,
+			Wave:      1,
+			Tick:      10,
+		},
+		economy:           gamesession.NewEconomy(100),
+		waveStartedAtTick: 1,
+		waveSpawned:       5,
+		nextWaveTick:      1,
+		path: []gameobject.Position{
+			{X: 0, Y: 0},
+			{X: 1, Y: 0},
+		},
+	}
+
+	events := advanceRuntimeTick(&runtime, time.Now().UTC())
+
+	if runtime.session.Wave != 1 {
+		t.Fatalf("expected wave 1 to remain current while waiting, got %d", runtime.session.Wave)
+	}
+	if runtime.nextWaveTick != 71 {
+		t.Fatalf("expected wave 2 to be scheduled for tick 71, got %d", runtime.nextWaveTick)
+	}
+	if runtime.waveSpawned != 0 {
+		t.Fatalf("expected spawned count reset for next wave, got %d", runtime.waveSpawned)
+	}
+	if len(runtime.smogs) != 0 {
+		t.Fatalf("expected no smogs while waiting, got %d", len(runtime.smogs))
+	}
+	if len(events) != 1 || events[0].Type != "wave.cleared" {
+		t.Fatalf("expected only wave cleared event, got %+v", events)
+	}
+
+	runtime.session.Tick = 69
+	events = advanceRuntimeTick(&runtime, time.Now().UTC())
+	if runtime.session.Wave != 1 || len(runtime.smogs) != 0 {
+		t.Fatalf("wave 2 should not start before tick 71: wave=%d smogs=%d events=%+v", runtime.session.Wave, len(runtime.smogs), events)
+	}
+
+	events = advanceRuntimeTick(&runtime, time.Now().UTC())
+	if runtime.session.Wave != 2 {
+		t.Fatalf("expected wave 2 to start after delay, got %d", runtime.session.Wave)
+	}
+	if len(runtime.smogs) != 1 {
+		t.Fatalf("expected wave 2 to spawn one smog, got %d", len(runtime.smogs))
+	}
+	if len(events) < 2 || events[0].Type != "wave.started" || events[1].Type != "smog.spawned" {
+		t.Fatalf("expected wave started and smog spawned events, got %+v", events)
+	}
+}
+
+func TestAdvanceRuntimeTickSpawnsSmogsEverySecond(t *testing.T) {
+	runtime := runtimeSession{
+		session: gamesession.State{
+			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			LevelID:   "11111111-1111-1111-1111-111111111111",
+			Health:    gamesession.InitialHealth,
+		},
+		economy:      gamesession.NewEconomy(100),
+		nextWaveTick: 1,
+		path: []gameobject.Position{
+			{X: 0, Y: 0},
+			{X: 100, Y: 0},
+		},
+	}
+
+	advanceRuntimeTick(&runtime, time.Now().UTC())
+	if len(runtime.smogs) != 1 {
+		t.Fatalf("expected first tick to spawn one smog, got %d", len(runtime.smogs))
+	}
+
+	for i := 0; i < 19; i++ {
+		advanceRuntimeTick(&runtime, time.Now().UTC())
+	}
+	if len(runtime.smogs) != 1 {
+		t.Fatalf("expected no second smog before one second, got %d", len(runtime.smogs))
+	}
+
+	advanceRuntimeTick(&runtime, time.Now().UTC())
+	if len(runtime.smogs) != 2 {
+		t.Fatalf("expected second smog after one second, got %d", len(runtime.smogs))
+	}
+}
+
+func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{
+		state: gamesession.State{
+			SessionID:    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			GenerationID: "generation-1",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Health:       gamesession.InitialHealth,
+			Essence:      gamesession.InitialEssence,
+			Wave:         3,
+			Tick:         200,
+			StartedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+		},
+		waveStartedAtTick: 120,
+		waveSpawned:       12,
+		nextWaveTick:      120,
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	victory := readMessageOfType(t, conn, "game.victory")
+	body, err := json.Marshal(victory.Data)
+	if err != nil {
+		t.Fatalf("Marshal victory failed: %v", err)
+	}
+	var victoryState GameVictoryState
+	if err := json.Unmarshal(body, &victoryState); err != nil {
+		t.Fatalf("Unmarshal victory failed: %v", err)
+	}
+	if victoryState.Reason != "all_waves_cleared" {
+		t.Fatalf("unexpected victory reason %q", victoryState.Reason)
+	}
+	if victoryState.Wave != 3 {
+		t.Fatalf("expected victory on wave 3, got %d", victoryState.Wave)
+	}
+}
+
+func TestAdvanceRuntimeTickReportsBirdAttackAndSmogDamage(t *testing.T) {
+	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypeSparrow, gameobject.Position{X: 0, Y: 0})
+	if err != nil {
+		t.Fatalf("NewBird failed: %v", err)
+	}
+	runtime := runtimeSession{
+		session: gamesession.State{
+			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			LevelID:   "11111111-1111-1111-1111-111111111111",
+			Health:    gamesession.InitialHealth,
+			Tick:      10,
+		},
+		economy: gamesession.NewEconomy(100),
+		birds:   []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
+		smogs: []gameobject.Smog{
+			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 0.1, Y: 0}},
+		},
+	}
+
+	events := advanceRuntimeTick(&runtime, time.Now().UTC())
+
+	if len(runtime.projectiles) != 0 {
+		t.Fatalf("expected locked projectile to resolve in one tick, got %d active projectiles", len(runtime.projectiles))
+	}
+	if len(runtime.smogs) != 1 || runtime.smogs[0].Health != 20 {
+		t.Fatalf("expected smog health 20, got %+v", runtime.smogs)
+	}
+	var sawAttack, sawDamage bool
+	for _, event := range events {
+		if event.Type == "bird.attack" && event.BirdID == "bird-1" && event.SmogID == "smog-1" {
+			sawAttack = true
+		}
+		if event.Type == "smog.damage" && event.SmogID == "smog-1" && event.Health == 20 {
+			sawDamage = true
+		}
+	}
+	if !sawAttack || !sawDamage {
+		t.Fatalf("expected attack and damage events, got %+v", events)
 	}
 }
 
@@ -484,6 +1039,7 @@ func TestWebsocketRequiresAuthentication(t *testing.T) {
 
 type fakeLevelRepository struct {
 	bootstrap repository.LevelBootstrap
+	mistakes  []repository.QuizMistakeInput
 }
 
 func (r *fakeLevelRepository) GetBootstrap(_ context.Context, levelID string, userID string) (repository.LevelBootstrap, error) {
@@ -494,6 +1050,11 @@ func (r *fakeLevelRepository) GetBootstrap(_ context.Context, levelID string, us
 }
 
 func (r *fakeLevelRepository) Ping(context.Context) error {
+	return nil
+}
+
+func (r *fakeLevelRepository) SaveQuizMistake(_ context.Context, input repository.QuizMistakeInput) error {
+	r.mistakes = append(r.mistakes, input)
 	return nil
 }
 
@@ -513,6 +1074,37 @@ func (c *fakeMapCache) Set(_ context.Context, _ string, levelMap mapgen.Generate
 	return nil
 }
 
+type fakeQuizCache struct {
+	quizzes quizcache.LevelQuizzes
+}
+
+func (c *fakeQuizCache) Set(_ context.Context, generationID string, quizzes quizcache.LevelQuizzes) error {
+	quizzes.GenerationID = generationID
+	c.quizzes = quizzes
+	return nil
+}
+
+func (c *fakeQuizCache) PeekNext(_ context.Context, generationID string) (quizcache.CachedQuiz, int, error) {
+	if c.quizzes.GenerationID != generationID || len(c.quizzes.Quizzes) == 0 {
+		return quizcache.CachedQuiz{}, 0, quizcache.ErrQuizzesNotFound
+	}
+	return c.quizzes.Quizzes[0], len(c.quizzes.Quizzes), nil
+}
+
+func (c *fakeQuizCache) Take(_ context.Context, generationID string, quizID string) (quizcache.CachedQuiz, int, error) {
+	if c.quizzes.GenerationID != generationID {
+		return quizcache.CachedQuiz{}, 0, quizcache.ErrQuizzesNotFound
+	}
+	for index, quiz := range c.quizzes.Quizzes {
+		if quiz.ID != quizID {
+			continue
+		}
+		c.quizzes.Quizzes = append(append([]quizcache.CachedQuiz{}, c.quizzes.Quizzes[:index]...), c.quizzes.Quizzes[index+1:]...)
+		return quiz, len(c.quizzes.Quizzes), nil
+	}
+	return quizcache.CachedQuiz{}, len(c.quizzes.Quizzes), quizcache.ErrQuizNotFound
+}
+
 func startHTTPServer(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -523,6 +1115,20 @@ func startHTTPServer(t *testing.T, handler http.Handler) *httptest.Server {
 	server.Listener = listener
 	server.Start()
 	return server
+}
+
+func dialGameWebsocket(t *testing.T, serverURL string) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(serverURL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+	return conn
 }
 
 type fakeStarter struct {
@@ -538,10 +1144,16 @@ func (s *fakeStarter) Start(_ context.Context, userID string, subChapterID strin
 }
 
 type fakeGameSessionStore struct {
-	options gamesession.StartOptions
-	state   gamesession.State
-	economy gamesession.Economy
-	birds   []gamesession.StoredBird
+	options           gamesession.StartOptions
+	state             gamesession.State
+	economy           gamesession.Economy
+	birds             []gamesession.StoredBird
+	smogs             []gamesession.StoredSmog
+	projectiles       []gamesession.StoredProjectile
+	waveStartedAtTick int64
+	waveSpawned       int
+	nextWaveTick      int64
+	deletedSessionID  string
 }
 
 func (s *fakeGameSessionStore) Start(_ context.Context, options gamesession.StartOptions) (gamesession.State, error) {
@@ -550,7 +1162,7 @@ func (s *fakeGameSessionStore) Start(_ context.Context, options gamesession.Star
 	if s.state.SessionID != "" {
 		return s.state, nil
 	}
-	return gamesession.State{
+	s.state = gamesession.State{
 		SessionID:    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		UserID:       options.UserID,
 		LevelID:      options.LevelID,
@@ -562,16 +1174,51 @@ func (s *fakeGameSessionStore) Start(_ context.Context, options gamesession.Star
 		Tick:         0,
 		StartedAt:    now,
 		UpdatedAt:    now,
+	}
+	s.nextWaveTick = 1
+	return s.state, nil
+}
+
+func (s *fakeGameSessionStore) LoadRuntimeState(_ context.Context, _ string) (gamesession.RuntimeState, error) {
+	return gamesession.RuntimeState{
+		Health:            s.state.Health,
+		Essence:           s.state.Essence,
+		Wave:              s.state.Wave,
+		Tick:              s.state.Tick,
+		WaveStartedAtTick: s.waveStartedAtTick,
+		WaveSpawned:       s.waveSpawned,
+		NextWaveTick:      s.nextWaveTick,
+		Birds:             append([]gamesession.StoredBird{}, s.birds...),
+		Smogs:             append([]gamesession.StoredSmog{}, s.smogs...),
+		Projectiles:       append([]gamesession.StoredProjectile{}, s.projectiles...),
 	}, nil
 }
 
-func (s *fakeGameSessionStore) LoadBirds(_ context.Context, _ string) ([]gamesession.StoredBird, error) {
-	return append([]gamesession.StoredBird{}, s.birds...), nil
+func (s *fakeGameSessionStore) SaveRuntimeState(_ context.Context, _ string, runtime gamesession.RuntimeState) error {
+	s.economy = gamesession.NewEconomy(runtime.Essence)
+	s.birds = append([]gamesession.StoredBird{}, runtime.Birds...)
+	s.smogs = append([]gamesession.StoredSmog{}, runtime.Smogs...)
+	s.projectiles = append([]gamesession.StoredProjectile{}, runtime.Projectiles...)
+	s.state.Health = runtime.Health
+	s.state.Essence = runtime.Essence
+	s.state.Wave = runtime.Wave
+	s.state.Tick = runtime.Tick
+	s.waveStartedAtTick = runtime.WaveStartedAtTick
+	s.waveSpawned = runtime.WaveSpawned
+	s.nextWaveTick = runtime.NextWaveTick
+	return nil
 }
 
-func (s *fakeGameSessionStore) SaveRuntimeState(_ context.Context, _ string, economy gamesession.Economy, birds []gamesession.StoredBird) error {
-	s.economy = economy
-	s.birds = append([]gamesession.StoredBird{}, birds...)
+func (s *fakeGameSessionStore) Delete(_ context.Context, sessionID string) error {
+	s.deletedSessionID = sessionID
+	s.state = gamesession.State{}
+	s.economy = gamesession.Economy{}
+	s.birds = nil
+	s.smogs = nil
+	s.projectiles = nil
+	s.waveStartedAtTick = 0
+	s.waveSpawned = 0
+	s.nextWaveTick = 0
 	return nil
 }
 

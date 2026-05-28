@@ -40,6 +40,19 @@ type QuizItem struct {
 	AnswerIndex      int      `json:"answer_index"`
 }
 
+type QuizMistakeInput struct {
+	UserID           string
+	LevelID          string
+	GenerationID     string
+	QuizID           string
+	QuizIndex        int
+	QuizType         string
+	QuestionMarkdown string
+	OptionsMarkdown  []string
+	AnswerIndex      int
+	SelectedIndex    int
+}
+
 type SavedLevel struct {
 	LevelID      string
 	SubChapterID string
@@ -124,6 +137,26 @@ func (r *LevelRepository) Ping(ctx context.Context) error {
 		return err
 	}
 	return sqlDB.PingContext(ctx)
+}
+
+func (r *LevelRepository) SaveQuizMistake(ctx context.Context, input QuizMistakeInput) error {
+	optionsJSON, err := json.Marshal(input.OptionsMarkdown)
+	if err != nil {
+		return err
+	}
+	return r.db.WithContext(ctx).Create(&models.QuizMistake{
+		ID:               uuid.NewString(),
+		UserID:           input.UserID,
+		LevelID:          input.LevelID,
+		GenerationID:     input.GenerationID,
+		QuizID:           input.QuizID,
+		QuizIndex:        input.QuizIndex,
+		QuizType:         input.QuizType,
+		QuestionMarkdown: input.QuestionMarkdown,
+		OptionsMarkdown:  optionsJSON,
+		AnswerIndex:      input.AnswerIndex,
+		SelectedIndex:    input.SelectedIndex,
+	}).Error
 }
 
 func (r *LevelRepository) CreateGeneration(ctx context.Context, generation models.LevelGenerationRecord) error {

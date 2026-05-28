@@ -52,6 +52,39 @@ type StoredBird struct {
 	LastFiredAtTick int64                `json:"last_fired_at_tick"`
 }
 
+type StoredSmog struct {
+	ID        string              `json:"id"`
+	Health    int                 `json:"health"`
+	Position  gameobject.Position `json:"position"`
+	Speed     float64             `json:"speed"`
+	PathIndex int                 `json:"path_index"`
+}
+
+type StoredProjectile struct {
+	ID              string                    `json:"id"`
+	Type            gameobject.ProjectileType `json:"type"`
+	Damage          float64                   `json:"damage"`
+	ProjectileSpeed float64                   `json:"projectile_speed"`
+	Position        gameobject.Position       `json:"position"`
+	Direction       gameobject.Vector         `json:"direction"`
+	TargetID        string                    `json:"target_id,omitempty"`
+	RemainingRange  float64                   `json:"remaining_range"`
+	HitRadius       float64                   `json:"hit_radius"`
+}
+
+type RuntimeState struct {
+	Health            int
+	Essence           int
+	Wave              int
+	Tick              int64
+	WaveStartedAtTick int64
+	WaveSpawned       int
+	NextWaveTick      int64
+	Birds             []StoredBird
+	Smogs             []StoredSmog
+	Projectiles       []StoredProjectile
+}
+
 type Store struct {
 	client *redisclient.Client
 	ttl    time.Duration
@@ -100,19 +133,24 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		UpdatedAt:    now,
 	}
 	values := map[string]any{
-		"session_id":     state.SessionID,
-		"user_id":        state.UserID,
-		"level_id":       state.LevelID,
-		"generation_id":  state.GenerationID,
-		"sub_chapter_id": state.SubChapterID,
-		"health":         state.Health,
-		"essence":        state.Essence,
-		"wave":           state.Wave,
-		"wave_number":    state.Wave,
-		"tick":           state.Tick,
-		"birds":          "[]",
-		"started_at":     state.StartedAt.Format(time.RFC3339Nano),
-		"updated_at":     state.UpdatedAt.Format(time.RFC3339Nano),
+		"session_id":           state.SessionID,
+		"user_id":              state.UserID,
+		"level_id":             state.LevelID,
+		"generation_id":        state.GenerationID,
+		"sub_chapter_id":       state.SubChapterID,
+		"health":               state.Health,
+		"essence":              state.Essence,
+		"wave":                 state.Wave,
+		"wave_number":          state.Wave,
+		"tick":                 state.Tick,
+		"wave_started_at_tick": 0,
+		"wave_spawned":         0,
+		"next_wave_tick":       1,
+		"birds":                "[]",
+		"smogs":                "[]",
+		"projectiles":          "[]",
+		"started_at":           state.StartedAt.Format(time.RFC3339Nano),
+		"updated_at":           state.UpdatedAt.Format(time.RFC3339Nano),
 	}
 	redisKey := key(state.SessionID)
 	args := []string{"HSET", redisKey}
@@ -128,32 +166,72 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 	return state, nil
 }
 
-func (s *Store) LoadBirds(ctx context.Context, sessionID string) ([]StoredBird, error) {
+func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (RuntimeState, error) {
 	_ = ctx
-	raw, err := s.client.Do("HGET", key(sessionID), "birds")
-	if errors.Is(err, redisclient.ErrNil) {
+	raw, err := s.client.Do("HGETALL", key(sessionID))
+	if err != nil {
+		return RuntimeState{}, err
+	}
+	values := hashValues(raw)
+	if len(values) == 0 {
+		return RuntimeState{}, ErrSessionNotFound
+	}
+	var birds []StoredBird
+	if err := unmarshalStoredSlice(values["birds"], &birds); err != nil {
+		return RuntimeState{}, err
+	}
+	var smogs []StoredSmog
+	if err := unmarshalStoredSlice(values["smogs"], &smogs); err != nil {
+		return RuntimeState{}, err
+	}
+	var projectiles []StoredProjectile
+	if err := unmarshalStoredSlice(values["projectiles"], &projectiles); err != nil {
+		return RuntimeState{}, err
+	}
+
+	state, err := parseState(values)
+	if err != nil {
+		return RuntimeState{}, err
+	}
+	return RuntimeState{
+		Health:            state.Health,
+		Essence:           state.Essence,
+		Wave:              state.Wave,
+		Tick:              state.Tick,
+		WaveStartedAtTick: int64Value(values["wave_started_at_tick"], 0),
+		WaveSpawned:       intValue(values["wave_spawned"], 0),
+		NextWaveTick:      int64Value(values["next_wave_tick"], 0),
+		Birds:             birds,
+		Smogs:             smogs,
+		Projectiles:       projectiles,
+	}, nil
+}
+
+func (s *Store) LoadBirds(ctx context.Context, sessionID string) ([]StoredBird, error) {
+	runtime, err := s.LoadRuntimeState(ctx, sessionID)
+	if errors.Is(err, ErrSessionNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	body, ok := raw.(string)
-	if !ok || strings.TrimSpace(body) == "" {
-		return nil, nil
-	}
-	var birds []StoredBird
-	if err := json.Unmarshal([]byte(body), &birds); err != nil {
-		return nil, err
-	}
-	return birds, nil
+	return runtime.Birds, nil
 }
 
-func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, economy Economy, birds []StoredBird) error {
+func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime RuntimeState) error {
 	_ = ctx
 	if s == nil || s.client == nil {
 		return errors.New("game session store is not configured")
 	}
-	body, err := json.Marshal(birds)
+	birdsBody, err := json.Marshal(runtime.Birds)
+	if err != nil {
+		return err
+	}
+	smogsBody, err := json.Marshal(runtime.Smogs)
+	if err != nil {
+		return err
+	}
+	projectilesBody, err := json.Marshal(runtime.Projectiles)
 	if err != nil {
 		return err
 	}
@@ -162,10 +240,28 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, economy 
 	args := []string{
 		"HSET",
 		redisKey,
+		"health",
+		strconv.Itoa(runtime.Health),
 		"essence",
-		strconv.Itoa(economy.Essence),
+		strconv.Itoa(runtime.Essence),
+		"wave",
+		strconv.Itoa(runtime.Wave),
+		"wave_number",
+		strconv.Itoa(runtime.Wave),
+		"tick",
+		strconv.FormatInt(runtime.Tick, 10),
+		"wave_started_at_tick",
+		strconv.FormatInt(runtime.WaveStartedAtTick, 10),
+		"wave_spawned",
+		strconv.Itoa(runtime.WaveSpawned),
+		"next_wave_tick",
+		strconv.FormatInt(runtime.NextWaveTick, 10),
 		"birds",
-		string(body),
+		string(birdsBody),
+		"smogs",
+		string(smogsBody),
+		"projectiles",
+		string(projectilesBody),
 		"updated_at",
 		now.Format(time.RFC3339Nano),
 	}
@@ -180,6 +276,28 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, economy 
 		return err
 	}
 	return s.refreshTTL(sessionID, state.UserID, state.LevelID)
+}
+
+func (s *Store) Delete(ctx context.Context, sessionID string) error {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return errors.New("game session store is not configured")
+	}
+	raw, err := s.client.Do("HGETALL", key(sessionID))
+	if errors.Is(err, redisclient.ErrNil) {
+		raw = nil
+		err = nil
+	}
+	if err != nil {
+		return err
+	}
+	values := hashValues(raw)
+	args := []string{"DEL", key(sessionID)}
+	if values["user_id"] != "" && values["level_id"] != "" {
+		args = append(args, indexKey(values["user_id"], values["level_id"]))
+	}
+	_, err = s.client.Do(args...)
+	return err
 }
 
 func (s *Store) Close() error {
@@ -305,6 +423,35 @@ func hashValues(raw any) map[string]string {
 		}
 	}
 	return values
+}
+
+func unmarshalStoredSlice(body string, target any) error {
+	if strings.TrimSpace(body) == "" {
+		body = "[]"
+	}
+	return json.Unmarshal([]byte(body), target)
+}
+
+func intValue(value string, fallback int) int {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func int64Value(value string, fallback int64) int64 {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func asString(value any) string {

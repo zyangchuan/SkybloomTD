@@ -583,8 +583,21 @@ paths:
         `game.state` snapshots at 20 Hz. During the session, clients can send
         `game.action.place_tower` with a `bird_type` and grid `x`/`y`.
         Reconnecting with the same `level_id` reuses the existing Redis session
-        for that user and level, including placed birds and current essence,
-        until the session expires.
+        for that user and level, including placed birds, active smogs, active
+        projectiles, health, wave, tick, and current essence, until the session
+        expires. The gameplay loop runs three smog waves. The first wave starts
+        at the beginning of the session, and each later wave starts three
+        seconds after the previous wave has been cleared. Each smog that
+        reaches the path end removes 10 health. When health reaches 0, the
+        server stops the loop and sends `game.over`. When all three waves are
+        cleared with health remaining, the server stops the loop and sends
+        `game.victory`. Clients can send `game.exit` to stop the running loop
+        and delete the Redis gameplay session; cached maps are left to expire
+        by TTL. During a running session, clients can send `game.quiz.request`
+        to receive one quiz prompt without answer data, then send
+        `game.quiz.answer` with the selected option index. Correct answers
+        award 30 essence; incorrect answers are saved for a later mistakes
+        summary. Answered quizzes are removed from Redis.
 
         If the database already has quizzes for the authenticated user's
         sub-chapter, the service reuses the saved level instead of generating
@@ -598,11 +611,20 @@ paths:
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
+        - $ref: "#/components/schemas/GameExitWebSocketMessage"
+        - $ref: "#/components/schemas/GameQuizRequestMessage"
+        - $ref: "#/components/schemas/GameQuizAnswerMessage"
       x-websocket-server-messages:
         - $ref: "#/components/schemas/LevelGenerationStartedMessage"
         - $ref: "#/components/schemas/GameInitialStateMessage"
         - $ref: "#/components/schemas/GameSessionStartedMessage"
         - $ref: "#/components/schemas/GameStateMessage"
+        - $ref: "#/components/schemas/GameOverMessage"
+        - $ref: "#/components/schemas/GameVictoryMessage"
+        - $ref: "#/components/schemas/GameExitedMessage"
+        - $ref: "#/components/schemas/GameQuizPresentedMessage"
+        - $ref: "#/components/schemas/GameQuizResultMessage"
+        - $ref: "#/components/schemas/GameQuizUnavailableMessage"
         - $ref: "#/components/schemas/GameActionAcceptedMessage"
         - $ref: "#/components/schemas/GameActionRejectedMessage"
         - $ref: "#/components/schemas/GameErrorMessage"
@@ -1074,6 +1096,48 @@ components:
               type: integer
               description: Grid row.
 
+    GameExitWebSocketMessage:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: game.exit
+        data:
+          type: object
+          properties:
+            session_id:
+              type: string
+              format: uuid
+              description: Optional session id to delete if the local loop has already stopped.
+
+    GameQuizRequestMessage:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: game.quiz.request
+
+    GameQuizAnswerMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.quiz.answer
+        data:
+          type: object
+          required: [quiz_id, selected_index]
+          properties:
+            quiz_id:
+              type: string
+              format: uuid
+            selected_index:
+              type: integer
+              minimum: 0
+              description: Zero-based option index chosen by the player.
+
     LevelGenerationStartedMessage:
       type: object
       required: [type, data]
@@ -1113,6 +1177,66 @@ components:
           const: game.state
         data:
           $ref: "#/components/schemas/GameState"
+
+    GameOverMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.over
+        data:
+          $ref: "#/components/schemas/GameOverState"
+
+    GameVictoryMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.victory
+        data:
+          $ref: "#/components/schemas/GameVictoryState"
+
+    GameExitedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.exited
+        data:
+          $ref: "#/components/schemas/GameExitedState"
+
+    GameQuizPresentedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.quiz.presented
+        data:
+          $ref: "#/components/schemas/QuizPrompt"
+
+    GameQuizResultMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.quiz.result
+        data:
+          $ref: "#/components/schemas/QuizResult"
+
+    GameQuizUnavailableMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.quiz.unavailable
+        data:
+          $ref: "#/components/schemas/QuizUnavailable"
 
     GameActionAcceptedMessage:
       type: object
@@ -1277,7 +1401,7 @@ components:
     GameState:
       type: object
       description: Authoritative gameplay snapshot. After `game.session.started`, `game.state` messages are sent 20 times per second.
-      required: [session_id, level_id, health, essence, wave, tick, server_time, birds]
+      required: [session_id, level_id, health, essence, wave, tick, server_time, birds, smogs, projectiles]
       properties:
         session_id:
           type: string
@@ -1311,6 +1435,132 @@ components:
           description: Placed birds in the current session.
           items:
             $ref: "#/components/schemas/PlacedBird"
+        smogs:
+          type: array
+          description: Active enemies with authoritative positions and health.
+          items:
+            $ref: "#/components/schemas/Smog"
+        projectiles:
+          type: array
+          description: Active projectiles in flight.
+          items:
+            $ref: "#/components/schemas/Projectile"
+        events:
+          type: array
+          description: Transient events emitted for this tick, such as attacks, damage, spawns, escapes, and wave starts.
+          items:
+            $ref: "#/components/schemas/GameEvent"
+
+    GameOverState:
+      type: object
+      required: [session_id, level_id, health, wave, tick, reason]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        level_id:
+          type: string
+          format: uuid
+        health:
+          type: integer
+          example: 0
+        wave:
+          type: integer
+          example: 3
+        tick:
+          type: integer
+          format: int64
+        reason:
+          type: string
+          example: health_depleted
+
+    GameVictoryState:
+      type: object
+      required: [session_id, level_id, health, wave, tick, reason]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        level_id:
+          type: string
+          format: uuid
+        health:
+          type: integer
+          example: 40
+        wave:
+          type: integer
+          example: 3
+        tick:
+          type: integer
+          format: int64
+        reason:
+          type: string
+          example: all_waves_cleared
+
+    GameExitedState:
+      type: object
+      required: [deleted, reason]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        deleted:
+          type: boolean
+          description: Whether a Redis gameplay session was deleted.
+        reason:
+          type: string
+          example: client_exit
+
+    QuizPrompt:
+      type: object
+      description: Quiz prompt sent to the client without answer data.
+      required: [quiz_id, quiz_type, question_markdown, options_markdown, remaining]
+      properties:
+        quiz_id:
+          type: string
+          format: uuid
+        quiz_type:
+          type: string
+          enum: [mcq, true_false]
+        question_markdown:
+          type: string
+        options_markdown:
+          type: array
+          items:
+            type: string
+        remaining:
+          type: integer
+          description: Number of quizzes remaining before answering this prompt.
+
+    QuizResult:
+      type: object
+      required: [quiz_id, correct, selected_index, essence_awarded, remaining]
+      properties:
+        quiz_id:
+          type: string
+          format: uuid
+        correct:
+          type: boolean
+        selected_index:
+          type: integer
+        essence_awarded:
+          type: integer
+          example: 30
+        essence:
+          type: integer
+          description: Present when essence was awarded.
+          example: 1030
+        remaining:
+          type: integer
+          description: Number of quizzes left after deleting the answered quiz.
+
+    QuizUnavailable:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          example: no_quizzes_remaining
 
     BirdTypeInfo:
       type: object
@@ -1343,6 +1593,84 @@ components:
           type: integer
           format: int64
 
+    Smog:
+      type: object
+      required: [id, health, position, speed, path_index]
+      properties:
+        id:
+          type: string
+          format: uuid
+        health:
+          type: integer
+        position:
+          $ref: "#/components/schemas/GridPosition"
+        speed:
+          type: number
+          format: double
+        path_index:
+          type: integer
+
+    Projectile:
+      type: object
+      required: [id, type, damage, projectile_speed, position, direction, remaining_range, hit_radius]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [locked, directional]
+        damage:
+          type: number
+          format: double
+        projectile_speed:
+          type: number
+          format: double
+        position:
+          $ref: "#/components/schemas/GridPosition"
+        direction:
+          $ref: "#/components/schemas/Vector"
+        target_id:
+          type: string
+          format: uuid
+          description: Present for locked projectiles.
+        remaining_range:
+          type: number
+          format: double
+        hit_radius:
+          type: number
+          format: double
+
+    GameEvent:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [wave.started, wave.cleared, smog.spawned, smog.escaped, bird.attack, smog.damage]
+        bird_id:
+          type: string
+          format: uuid
+        smog_id:
+          type: string
+          format: uuid
+        projectile_id:
+          type: string
+          format: uuid
+        projectile_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        damage:
+          type: number
+          format: double
+        health:
+          type: integer
+          description: Remaining smog health for damage events, or remaining base health for escape events.
+        wave:
+          type: integer
+
     BirdStats:
       type: object
       required: [damage, projectile_speed, fire_rate, range, cost]
@@ -1362,6 +1690,17 @@ components:
           type: integer
 
     GridPosition:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+          format: double
+        y:
+          type: number
+          format: double
+
+    Vector:
       type: object
       required: [x, y]
       properties:
