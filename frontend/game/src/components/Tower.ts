@@ -5,10 +5,7 @@ export default class Tower extends Phaser.GameObjects.Sprite {
   public birdType: string;
   public gridX: number;
   public gridY: number;
-<<<<<<< HEAD
-=======
   public range: number = 0;
->>>>>>> 4e8bc9e (added towers to game client)
 
   constructor(scene: Phaser.Scene, x: number, y: number, id: string, birdType: string, gridX: number, gridY: number) {
     super(scene, x, y, `tower_${birdType}`);
@@ -31,12 +28,6 @@ export default class Tower extends Phaser.GameObjects.Sprite {
   }
 
   /**
-<<<<<<< HEAD
-   * Slowly rotate in idle to feel highly interactive and dynamic (disabled by request)
-   */
-  public update() {
-    // Rotation remains stable at 0 by default, tracking to be implemented later.
-=======
    * Targets the enemy closest to the end (furthest along path) within its range
    * and smoothly interpolates rotation towards it.
    */
@@ -66,13 +57,12 @@ export default class Tower extends Phaser.GameObjects.Sprite {
     if (bestSmog) {
       // Calculate rotation target angle directly using grid coordinates
       const targetAngle = Math.atan2(bestSmog.y - this.gridY, bestSmog.x - this.gridX) + Math.PI;
-      
+
       // Interpolate smoothly towards the target angle
       this.rotation = Phaser.Math.Angle.RotateTo(this.rotation, targetAngle, 0.08);
     } else {
       // Return slowly to default rotation of 0 when no target is in range
       this.rotation = Phaser.Math.Angle.RotateTo(this.rotation, 0, 0.04);
     }
->>>>>>> 4e8bc9e (added towers to game client)
   }
 }

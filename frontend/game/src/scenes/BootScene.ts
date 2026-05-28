@@ -20,7 +20,7 @@ export default class BootScene extends Phaser.Scene {
 
   preload() {
     const { width, height } = this.scale;
-    
+
     // Background gradient/graphics
     const graphics = this.add.graphics();
     graphics.fillGradientStyle(0x0a0e17, 0x0a0e17, 0x121824, 0x121824, 1);
@@ -30,7 +30,7 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('grass', '/game/assets/grass_floor.png');
     this.load.image('path_horiz', '/game/assets/path_straight_horizontal.png');
     this.load.image('path_vert', '/game/assets/path_straight_vertical.png');
-    
+
     // Corner turn paths
     this.load.image('path_corner_ne', '/game/assets/path_turn_north_to_east.png');
     this.load.image('path_corner_se', '/game/assets/path_turn_south_to_east.png');
@@ -41,14 +41,14 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('tree_01', '/game/assets/tree_01.png');
     this.load.image('tree_02', '/game/assets/tree_02.png');
     this.load.image('tree_03', '/game/assets/tree_03.png');
-    
+
     this.load.image('tree_stump_01', '/game/assets/tree_stump_01.png');
     this.load.image('tree_stump_02', '/game/assets/tree_stump_02.png');
-    
+
     this.load.image('bush_01', '/game/assets/bush_01.png');
     this.load.image('bush_02', '/game/assets/bush_02.png');
     this.load.image('bush_03', '/game/assets/bush_03.png');
-    
+
     this.load.image('rock_01', '/game/assets/rock_01.png');
     this.load.image('rock_02', '/game/assets/rock_02.png');
     this.load.image('rock_03', '/game/assets/rock_03.png');
@@ -62,6 +62,9 @@ export default class BootScene extends Phaser.Scene {
     // Preload bird item assets
     this.load.svg('box_square', '/game/assets/gui/boxes_banners/Box_Square.svg', { width: 256, height: 256 });
     this.load.svg('box_orange_square', '/game/assets/gui/boxes_banners/Box_Orange_Square.svg', { width: 256, height: 256 });
+    this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
     this.load.image('head_sparrow', '/game/assets/birds/sparrow_head.png');
     this.load.image('head_woodpecker', '/game/assets/birds/woodpecker_head.png');
     this.load.image('head_eagle', '/game/assets/birds/eagle_head.png');
@@ -72,6 +75,15 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('tower_woodpecker', '/game/assets/birds/woodpecker_tower.png');
     this.load.image('tower_eagle', '/game/assets/birds/eagle_tower.png');
     this.load.image('tower_peacock', '/game/assets/birds/peacock_tower.png');
+
+    // Preload smogs
+    this.load.image('enemy_smog', '/game/assets/smogs/smog.png');
+
+    // Preload bird projectiles
+    this.load.image('projectile_sparrow', '/game/assets/birds/sparrow_projectile.png');
+    this.load.image('projectile_woodpecker', '/game/assets/birds/woodpecker_projectile.png');
+    this.load.image('projectile_eagle', '/game/assets/birds/eagle_projectile.png');
+    this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
   }
 
   create() {
@@ -114,7 +126,7 @@ export default class BootScene extends Phaser.Scene {
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws';
       const wsUrl = `${protocol}://${window.location.host}/api/game-service/ws`;
-      
+
       this.detailText.setText('Opening websocket connection...');
       this.ws = new WebSocket(wsUrl);
 
@@ -162,7 +174,7 @@ export default class BootScene extends Phaser.Scene {
     switch (message.type) {
       case 'level_generation.started':
         const { generation_id, status_url, level_id } = message.data;
-        
+
         if (level_id) {
           this.levelId = level_id; // Save retrieved level ID
           this.detailText.setText('Level ready! Loading game session...');
@@ -182,21 +194,21 @@ export default class BootScene extends Phaser.Scene {
       case 'game.initial_state':
         this.detailText.setText('Session loaded! Booting scene...');
         this.cleanup();
-        
+
         if (this.ws) {
           this.ws.onopen = null;
           this.ws.onmessage = null;
           this.ws.onerror = null;
           this.ws.onclose = null;
         }
-        
+
         const transferredWs = this.ws;
         this.ws = null; // Detach reference to prevent close during transition shutdown
 
-        this.scene.start('GameScene', { 
-          initialState: message.data, 
+        this.scene.start('GameScene', {
+          initialState: message.data,
           ws: transferredWs,
-          levelId: this.levelId 
+          levelId: this.levelId
         });
         break;
 
@@ -226,7 +238,7 @@ export default class BootScene extends Phaser.Scene {
         if (data.status === 'complete') {
           clearInterval(this.pollIntervalId);
           this.pollIntervalId = null;
-          
+
           this.levelId = data.level_id; // Save retrieved level ID from poll response
           this.detailText.setText('Level completed! Launching...');
           this.loadGameSession(data.level_id);
@@ -263,7 +275,7 @@ export default class BootScene extends Phaser.Scene {
 
   private showError(message: string) {
     this.cleanup();
-    
+
     if (this.loadingTween) {
       this.loadingTween.stop();
     }

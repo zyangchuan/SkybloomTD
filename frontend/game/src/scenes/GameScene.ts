@@ -11,6 +11,22 @@ export default class GameScene extends Phaser.Scene {
 
   // Map state trackers
   private towers: Map<string, Tower> = new Map();
+  private smogs: Map<string, {
+    sprite: Phaser.GameObjects.Sprite,
+    healthBar: Phaser.GameObjects.Graphics,
+    targetX: number,
+    targetY: number,
+    health: number,
+    maxHealth: number
+  }> = new Map();
+  private smogMaxHealth: Map<string, number> = new Map();
+  private projectiles: Map<string, {
+    sprite: Phaser.GameObjects.Sprite,
+    targetX: number,
+    targetY: number,
+    targetRotation: number
+  }> = new Map();
+  public activeSmogsList: Array<{ id: string, x: number, y: number, pathIndex: number }> = [];
   private gridWidth: number = 18;
   private gridHeight: number = 12;
   private tileSize: number = 0;
@@ -19,12 +35,20 @@ export default class GameScene extends Phaser.Scene {
   private enemyPath: any[] = [];
   private obstacles: any[] = [];
 
+  private sessionId: string = '';
+
   // Drag and placement elements
   private activeDragSprite: Phaser.GameObjects.Sprite | null = null;
   private activeDragBirdType: string | null = null;
   private gridHighlightGraphics: Phaser.GameObjects.Graphics | null = null;
   private closestCellHighlight: Phaser.GameObjects.Graphics | null = null;
   private pulseTween: Phaser.Tweens.Tween | null = null;
+  private dragCancelLeftBox: Phaser.GameObjects.Graphics | null = null;
+  private dragCancelLeftText: Phaser.GameObjects.Text | null = null;
+  private dragCancelRightBox: Phaser.GameObjects.Graphics | null = null;
+  private dragCancelRightText: Phaser.GameObjects.Text | null = null;
+  private currentQuizId: string = '';
+  private quizAnswered: boolean = false;
 
   constructor() {
     super('GameScene');
@@ -66,7 +90,7 @@ export default class GameScene extends Phaser.Scene {
       const posX = this.offsetX + tile.x * this.tileSize + this.tileSize / 2;
       const posY = this.offsetY + tile.y * this.tileSize + this.tileSize / 2;
       const spriteKey = this.getPathSpriteKey(tile);
-      
+
       this.add.image(posX, posY, spriteKey)
         .setDisplaySize(this.tileSize, this.tileSize);
     });
@@ -77,7 +101,7 @@ export default class GameScene extends Phaser.Scene {
       const posX = this.offsetX + obj.x * this.tileSize + this.tileSize / 2;
       const posY = this.offsetY + obj.y * this.tileSize + this.tileSize / 2;
       const spriteKey = this.getObjectSpriteKey(obj);
-      
+
       this.add.image(posX, posY, spriteKey)
         .setDisplaySize(this.tileSize + 4, this.tileSize + 4)
         .setDepth(1);
@@ -108,6 +132,30 @@ export default class GameScene extends Phaser.Scene {
       fontSize: '54px',
       color: '#38bdf8',
     }).setOrigin(0, 0.5).setDepth(30);
+
+    // Sleek premium Quizz button on the right side of the screen
+    const quizHUDBtn = this.add.sprite(1800, 640, 'btn_orange_round')
+      .setDepth(30)
+      .setScale(1.0)
+      .setInteractive({ useHandCursor: true });
+    const quizHUDLabel = this.add.text(1800, 640, 'QUIZ', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(31);
+
+    quizHUDBtn.on('pointerover', () => {
+      quizHUDBtn.setScale(1.08);
+      quizHUDLabel.setScale(1.08).setColor('#fef3c7');
+    });
+    quizHUDBtn.on('pointerout', () => {
+      quizHUDBtn.setScale(1.0);
+      quizHUDLabel.setScale(1.0).setColor('#ffffff');
+    });
+
+    quizHUDBtn.on('pointerdown', () => {
+      this.requestQuiz();
+    });
 
     // 5. Selectable Birds Tray Panel at Bottom Center using box_orange_square as NineSlice outer container
     this.add.nineslice(960, 1152, 'box_orange_square', undefined, 760, 170, 32, 32, 32, 32).setDepth(30);
@@ -156,7 +204,7 @@ export default class GameScene extends Phaser.Scene {
 
       rows.forEach((row, rIndex) => {
         const rowY = -42 + rIndex * 28;
-        
+
         // Key Label (left-aligned)
         const lbl = this.add.text(-120, rowY, row.label, {
           fontFamily: '"Concert One", system-ui, sans-serif',
@@ -220,9 +268,32 @@ export default class GameScene extends Phaser.Scene {
       this.activeDragSprite = this.add.sprite(pointer.x, pointer.y, `tower_${birdType}`)
         .setAlpha(0.8)
         .setDepth(40);
-      
+
       const dragScale = this.tileSize / this.activeDragSprite.width * 1.5;
       this.activeDragSprite.setScale(dragScale);
+
+      // Spawn red translucent cancel zones on both sides of the birds bar
+      this.dragCancelLeftBox = this.add.graphics().setDepth(30);
+      this.dragCancelLeftBox.fillStyle(0xef4444, 0.6);
+      this.dragCancelLeftBox.fillRoundedRect(280 - 540/2, 1152 - 170/2, 540, 170, 24);
+      this.dragCancelLeftBox.setAlpha(0.75);
+
+      this.dragCancelLeftText = this.add.text(280, 1152, 'RELEASE TO CANCEL', {
+        fontFamily: '"Concert One", system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#ffffff'
+      }).setOrigin(0.5).setDepth(31);
+
+      this.dragCancelRightBox = this.add.graphics().setDepth(30);
+      this.dragCancelRightBox.fillStyle(0xef4444, 0.6);
+      this.dragCancelRightBox.fillRoundedRect(1640 - 540/2, 1152 - 170/2, 540, 170, 24);
+      this.dragCancelRightBox.setAlpha(0.75);
+
+      this.dragCancelRightText = this.add.text(1640, 1152, 'RELEASE TO CANCEL', {
+        fontFamily: '"Concert One", system-ui, sans-serif',
+        fontSize: '26px',
+        color: '#ffffff'
+      }).setOrigin(0.5).setDepth(31);
 
       // Draw glowing overlays on all valid placement patches
       this.drawGrassHighlights();
@@ -244,6 +315,30 @@ export default class GameScene extends Phaser.Scene {
 
       // Update dragging preview location to pointer coordinates
       this.activeDragSprite.setPosition(pointer.x, pointer.y);
+
+      // Dynamic highlights for cancel zones
+      const hoverLeftCancel = pointer.y > 1050 && pointer.x < 580;
+      const hoverRightCancel = pointer.y > 1050 && pointer.x > 1340;
+
+      if (this.dragCancelLeftBox && this.dragCancelLeftText) {
+        if (hoverLeftCancel) {
+          this.dragCancelLeftBox.setAlpha(0.9);
+          this.dragCancelLeftText.setScale(1.15).setColor('#fecaca');
+        } else {
+          this.dragCancelLeftBox.setAlpha(0.75);
+          this.dragCancelLeftText.setScale(1.0).setColor('#ffffff');
+        }
+      }
+
+      if (this.dragCancelRightBox && this.dragCancelRightText) {
+        if (hoverRightCancel) {
+          this.dragCancelRightBox.setAlpha(0.9);
+          this.dragCancelRightText.setScale(1.15).setColor('#fecaca');
+        } else {
+          this.dragCancelRightBox.setAlpha(0.75);
+          this.dragCancelRightText.setScale(1.0).setColor('#ffffff');
+        }
+      }
 
       // Calculate hovered grid indices
       const gridX = Math.floor((pointer.x - this.offsetX) / this.tileSize);
@@ -303,6 +398,24 @@ export default class GameScene extends Phaser.Scene {
       this.activeDragSprite = null;
       this.activeDragBirdType = null;
 
+      // Clean up cancel zones
+      if (this.dragCancelLeftBox) {
+        this.dragCancelLeftBox.destroy();
+        this.dragCancelLeftBox = null;
+      }
+      if (this.dragCancelLeftText) {
+        this.dragCancelLeftText.destroy();
+        this.dragCancelLeftText = null;
+      }
+      if (this.dragCancelRightBox) {
+        this.dragCancelRightBox.destroy();
+        this.dragCancelRightBox = null;
+      }
+      if (this.dragCancelRightText) {
+        this.dragCancelRightText.destroy();
+        this.dragCancelRightText = null;
+      }
+
       // Stop the pulsing tween
       if (this.pulseTween) {
         this.pulseTween.stop();
@@ -323,11 +436,22 @@ export default class GameScene extends Phaser.Scene {
       this.ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+          console.log('Received message from server:', message);
 
           if (message.type === 'game.state' || message.type === 'game.session.started') {
             this.updateHUD(message.data);
           } else if (message.type === 'game.action.rejected') {
             this.showRejectMessage(message.data?.error || 'ACTION REJECTED');
+          } else if (message.type === 'game.over') {
+            this.showGameOverWindow(false);
+          } else if (message.type === 'game.victory') {
+            this.showGameOverWindow(true);
+          } else if (message.type === 'game.quiz.presented') {
+            this.showQuizWindow(message.data);
+          } else if (message.type === 'game.quiz.unavailable') {
+            this.showRejectMessage('NO QUIZZES REMAINING');
+          } else if (message.type === 'game.quiz.result') {
+            this.handleQuizResult(message.data);
           }
         } catch (err) {
           console.error('Failed to parse WebSocket message in GameScene:', err);
@@ -352,15 +476,73 @@ export default class GameScene extends Phaser.Scene {
       }
       this.towers.forEach((tower) => tower.destroy());
       this.towers.clear();
+
+      this.smogs.forEach((smog) => {
+        smog.sprite.destroy();
+        smog.healthBar.destroy();
+      });
+      this.smogs.clear();
+      this.smogMaxHealth.clear();
+
+      this.projectiles.forEach((proj) => {
+        proj.sprite.destroy();
+      });
+      this.projectiles.clear();
     });
   }
 
   /**
-   * Slowly spin all active towers inside the Phaser game update loop
+   * Phaser scene update loop: runs on every frame to interpolate moving objects smoothly
    */
   update() {
+    // 1. Update towers
     this.towers.forEach((tower) => {
       tower.update();
+    });
+
+    // 2. Interpolate moving smogs smoothly (lerp)
+    this.smogs.forEach((smog) => {
+      const { sprite, healthBar, targetX, targetY, health, maxHealth } = smog;
+
+      // Standard linear interpolation towards authoritative target
+      sprite.x = Phaser.Math.Linear(sprite.x, targetX, 0.18);
+      sprite.y = Phaser.Math.Linear(sprite.y, targetY, 0.18);
+
+      // Redraw health bar centered exactly above the interpolated sprite position
+      healthBar.clear();
+      const pct = Math.max(0, Math.min(1, health / maxHealth));
+
+      const barWidth = 60;
+      const barHeight = 8;
+      const barX = sprite.x - barWidth / 2;
+      const barY = sprite.y - this.tileSize / 2 - 12;
+
+      // Draw health bar background shadow
+      healthBar.fillStyle(0x1e293b, 1.0);
+      healthBar.fillRoundedRect(barX, barY, barWidth, barHeight, 3);
+
+      if (pct > 0) {
+        let healthColor = 0x10b981; // emerald-500
+        if (pct < 0.3) {
+          healthColor = 0xef4444; // red-500
+        } else if (pct < 0.6) {
+          healthColor = 0xf59e0b; // amber-500
+        }
+        healthBar.fillStyle(healthColor, 1.0);
+        healthBar.fillRoundedRect(barX + 1, barY + 1, (barWidth - 2) * pct, barHeight - 2, 2);
+      }
+    });
+
+    // 3. Interpolate moving projectiles smoothly
+    this.projectiles.forEach((proj) => {
+      const { sprite, targetX, targetY, targetRotation } = proj;
+
+      // Higher lerp factor for projectiles to feel crisp and fast
+      sprite.x = Phaser.Math.Linear(sprite.x, targetX, 0.28);
+      sprite.y = Phaser.Math.Linear(sprite.y, targetY, 0.28);
+
+      // Interpolate rotation angle to prevent sharp snaps
+      sprite.rotation = Phaser.Math.Angle.RotateTo(sprite.rotation, targetRotation, 0.25);
     });
   }
 
@@ -377,7 +559,7 @@ export default class GameScene extends Phaser.Scene {
         if (this.isValidGrassTile(x, y)) {
           const posX = this.offsetX + x * this.tileSize;
           const posY = this.offsetY + y * this.tileSize;
-          
+
           this.gridHighlightGraphics?.fillRect(posX, posY, this.tileSize, this.tileSize);
           this.gridHighlightGraphics?.strokeRect(posX, posY, this.tileSize, this.tileSize);
         }
@@ -441,7 +623,7 @@ export default class GameScene extends Phaser.Scene {
     const activeIds = new Set<string>();
 
     birdsList.forEach((birdData: any) => {
-      const { id, type, position } = birdData;
+      const { id, type, position, stats } = birdData;
       activeIds.add(id);
 
       const gridX = position.x;
@@ -450,15 +632,23 @@ export default class GameScene extends Phaser.Scene {
       if (!this.towers.has(id)) {
         const posX = this.offsetX + gridX * this.tileSize + this.tileSize / 2;
         const posY = this.offsetY + gridY * this.tileSize + this.tileSize / 2;
-        
+
         const tower = new Tower(this, posX, posY, id, type, gridX, gridY);
-        
+        if (stats && stats.range) {
+          tower.range = stats.range;
+        }
+
         // Retain original aspect ratio perfectly by scaling proportionally to fit the tile size!
         const towerScale = this.tileSize / tower.width * 1.3;
         tower.setScale(towerScale);
         tower.setDepth(4); // Keep towers layered appropriately
-        
+
         this.towers.set(id, tower);
+      } else {
+        const tower = this.towers.get(id)!;
+        if (stats && stats.range) {
+          tower.range = stats.range;
+        }
       }
     });
 
@@ -471,8 +661,130 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  private syncSmogs(smogsList: any[]) {
+    this.activeSmogsList = smogsList.map(smog => ({
+      id: smog.id,
+      x: smog.position.x,
+      y: smog.position.y,
+      pathIndex: smog.path_index || 0
+    }));
+
+    const activeIds = new Set<string>();
+
+    smogsList.forEach((smogData: any) => {
+      const { id, health, position } = smogData;
+      activeIds.add(id);
+
+      const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
+      const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
+
+      // Track max health statically the first time we see this smog
+      if (!this.smogMaxHealth.has(id)) {
+        this.smogMaxHealth.set(id, health);
+      }
+      const maxHealth = this.smogMaxHealth.get(id) || health || 1;
+
+      if (!this.smogs.has(id)) {
+        // Spawn smog sprite using the enemy_smog asset
+        const sprite = this.add.sprite(posX, posY, 'enemy_smog');
+        sprite.setDisplaySize(this.tileSize * 1.2, this.tileSize * 1.2);
+        sprite.setDepth(15);
+
+        // Spawn a companion graphics container for the health bar
+        const healthBar = this.add.graphics();
+        healthBar.setDepth(16);
+
+        this.smogs.set(id, {
+          sprite,
+          healthBar,
+          targetX: posX,
+          targetY: posY,
+          health,
+          maxHealth
+        });
+      } else {
+        const entry = this.smogs.get(id)!;
+        entry.targetX = posX;
+        entry.targetY = posY;
+        entry.health = health;
+        entry.maxHealth = maxHealth;
+      }
+    });
+
+    // Clean up dead/completed smogs
+    for (const [id, entry] of this.smogs.entries()) {
+      if (!activeIds.has(id)) {
+        entry.sprite.destroy();
+        entry.healthBar.destroy();
+        this.smogs.delete(id);
+        this.smogMaxHealth.delete(id);
+      }
+    }
+  }
+
+  private syncProjectiles(projectilesList: any[]) {
+    const activeIds = new Set<string>();
+
+    projectilesList.forEach((projData: any) => {
+      const { id, damage, position, direction } = projData;
+      activeIds.add(id);
+
+      const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
+      const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
+
+      // Determine projectile texture key from unique bird damage signatures
+      let birdType = 'sparrow';
+      if (damage === 6) {
+        birdType = 'woodpecker';
+      } else if (damage === 30) {
+        birdType = 'eagle';
+      } else if (damage === 7) {
+        birdType = 'peacock';
+      }
+      const textureKey = `projectile_${birdType}`;
+
+      let targetRotation = 0;
+      if (direction && (direction.x !== 0 || direction.y !== 0)) {
+        targetRotation = Math.atan2(direction.y, direction.x) + Math.PI / 2;
+      }
+
+      if (!this.projectiles.has(id)) {
+        const sprite = this.add.sprite(posX, posY, textureKey);
+        // Scale proportionally to preserve original aspect ratio
+        const scale = this.tileSize / sprite.width * 0.5;
+        sprite.setScale(scale);
+        sprite.setDepth(20);
+        sprite.setRotation(targetRotation);
+
+        this.projectiles.set(id, {
+          sprite,
+          targetX: posX,
+          targetY: posY,
+          targetRotation
+        });
+      } else {
+        const entry = this.projectiles.get(id)!;
+        entry.targetX = posX;
+        entry.targetY = posY;
+        entry.targetRotation = targetRotation;
+      }
+    });
+
+    // Clean up expired projectiles
+    for (const [id, entry] of this.projectiles.entries()) {
+      if (!activeIds.has(id)) {
+        entry.sprite.destroy();
+        this.projectiles.delete(id);
+      }
+    }
+  }
+
   private updateHUD(gameState: any) {
     if (!gameState) return;
+
+    if (gameState.session_id !== undefined) {
+      this.sessionId = gameState.session_id;
+    }
 
     if (gameState.health !== undefined) {
       this.healthText.setText(String(gameState.health));
@@ -486,25 +798,31 @@ export default class GameScene extends Phaser.Scene {
     if (gameState.birds !== undefined) {
       this.syncTowers(gameState.birds);
     }
+    if (gameState.smogs !== undefined) {
+      this.syncSmogs(gameState.smogs);
+    }
+    if (gameState.projectiles !== undefined) {
+      this.syncProjectiles(gameState.projectiles);
+    }
   }
 
   private getPathSpriteKey(tile: any): string {
     const kind = tile.kind;
     const from = tile.from;
     const to = tile.to;
-    
+
     if (kind === 'straight') {
       return tile.axis === 'vertical' ? 'path_vert' : 'path_horiz';
     }
-    
+
     if (kind === 'start') {
       return (to === 'north' || to === 'south') ? 'path_vert' : 'path_horiz';
     }
-    
+
     if (kind === 'end') {
       return (from === 'north' || from === 'south') ? 'path_vert' : 'path_horiz';
     }
-    
+
     if (kind === 'turn') {
       const dirs = new Set([from, to]);
       if (dirs.has('north') && dirs.has('east')) {
@@ -520,14 +838,14 @@ export default class GameScene extends Phaser.Scene {
         return 'path_corner_wn';
       }
     }
-    
+
     return 'path_horiz';
   }
 
   private getObjectSpriteKey(obj: any): string {
     const type = obj.type;
     const hash = obj.x * 7 + obj.y * 13;
-    
+
     if (type === 'tree') {
       const index = (hash % 3) + 1;
       return `tree_0${index}`;
@@ -544,7 +862,394 @@ export default class GameScene extends Phaser.Scene {
       const index = (hash % 5) + 1;
       return `rock_0${index}`;
     }
-    
+
     return 'tree_01';
+  }
+
+  private showGameOverWindow(isVictory: boolean) {
+    this.clearQuiz();
+    // 1. Dark overlay to block all underlying UI interactions
+    const overlay = this.add.graphics().setDepth(100);
+    overlay.fillStyle(0x020617, 0.75); // Slate-950 at 0.75 alpha
+    overlay.fillRect(0, 0, 1920, 1280);
+    overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, 1920, 1280), Phaser.Geom.Rectangle.Contains);
+
+    // 2. Orange Box Container Window
+    this.add.nineslice(960, 640, 'box_orange_square', undefined, 700, 480, 64, 64, 64, 64)
+      .setDepth(101);
+
+    // 3. Header Text
+    const titleText = isVictory ? 'VICTORY' : 'DEFEATED';
+    const titleColor = isVictory ? '#f0fc00ff' : '#f87171'; // Gold for Victory, Light Red for Defeat
+    const titleSize = isVictory ? '86px' : '64px';
+    const titleY = isVictory ? 470 : 480;
+    this.add.text(960, titleY, titleText, {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: titleSize,
+      color: titleColor
+    }).setOrigin(0.5).setDepth(102);
+
+    // 4. Subtext description
+    const descText = isVictory
+      ? 'You have successfully protected the skies!'
+      : 'The smogs have overwhelmed your defenses.';
+    const descColor = isVictory ? '#ffffff' : '#fed7aa'; // solid white for victory subtext
+    this.add.text(960, 560, descText, {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '32px',
+      color: descColor
+    }).setOrigin(0.5).setDepth(102);
+
+    // 5. Replay Button
+    const replayBtn = this.add.sprite(840, 720, 'btn_blue_round')
+      .setDepth(102)
+      .setInteractive({ useHandCursor: true });
+
+    const replayLabel = this.add.text(840, 720, 'REPLAY', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(103);
+
+    replayBtn.on('pointerover', () => {
+      replayBtn.setScale(1.08);
+      replayLabel.setScale(1.08).setColor('#e0f2fe');
+    });
+    replayBtn.on('pointerout', () => {
+      replayBtn.setScale(1.0);
+      replayLabel.setScale(1.0).setColor('#ffffff');
+    });
+
+    replayBtn.on('pointerdown', () => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({
+          type: 'game.exit',
+          data: { session_id: this.sessionId }
+        }));
+      }
+      setTimeout(() => {
+        window.location.reload();
+      }, 150);
+    });
+
+    // 6. Exit Button
+    const exitBtn = this.add.sprite(1080, 720, 'btn_blue_round')
+      .setDepth(102)
+      .setInteractive({ useHandCursor: true });
+
+    const exitLabel = this.add.text(1080, 720, 'EXIT', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(103);
+
+    exitBtn.on('pointerover', () => {
+      exitBtn.setScale(1.08);
+      exitLabel.setScale(1.08).setColor('#fecaca');
+    });
+    exitBtn.on('pointerout', () => {
+      exitBtn.setScale(1.0);
+      exitLabel.setScale(1.0).setColor('#ffffff');
+    });
+
+    exitBtn.on('pointerdown', () => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({
+          type: 'game.exit',
+          data: { session_id: this.sessionId }
+        }));
+      }
+      setTimeout(() => {
+        const params = new URLSearchParams(window.location.search);
+        const documentId = params.get('document_id');
+        const chapterId = params.get('chapter_id');
+        if (documentId && chapterId) {
+          window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
+        } else {
+          window.location.href = '/dashboard';
+        }
+      }, 150);
+    });
+  }
+
+  private requestQuiz() {
+    this.clearQuiz();
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'game.quiz.request' }));
+    }
+  }
+
+  private clearQuiz() {
+    const overlay = document.getElementById('quiz-overlay');
+    if (overlay) {
+      overlay.remove();
+    }
+    this.quizAnswered = false;
+  }
+
+  private renderKatex(text: string, element: HTMLElement) {
+    element.innerHTML = '';
+    const tempSpan = document.createElement('span');
+    tempSpan.textContent = text;
+    element.appendChild(tempSpan);
+
+    if ((window as any).renderMathInElement) {
+      try {
+        (window as any).renderMathInElement(element, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\(', right: '\\)', display: false },
+            { left: '\\[', right: '\\]', display: true }
+          ],
+          throwOnError: false
+        });
+      } catch (e) {
+        console.error('KaTeX rendering failed', e);
+      }
+    }
+  }
+
+  private showQuizWindow(promptData: any) {
+    this.clearQuiz();
+    this.currentQuizId = promptData.quiz_id;
+
+    const parent = document.getElementById('game-container') || document.body;
+
+    // Create the overlay backdrop div
+    const overlay = document.createElement('div');
+    overlay.id = 'quiz-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(2, 6, 23, 0.75)';
+    overlay.style.display = 'flex';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.zIndex = '9999';
+
+    // Create the modal container using box_whiteoutline_square
+    const modal = document.createElement('div');
+    modal.style.border = '24px solid transparent';
+    modal.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_WhiteOutline_Square.svg')";
+    modal.style.borderImageSlice = '96 fill';
+    modal.style.borderImageWidth = '24px';
+    modal.style.borderImageRepeat = 'stretch';
+    modal.style.width = '90%';
+    modal.style.maxWidth = '800px';
+    modal.style.height = 'auto';
+    modal.style.maxHeight = '90vh';
+    modal.style.overflowY = 'auto';
+    modal.style.scrollbarWidth = 'none';
+    modal.style.position = 'relative';
+    modal.style.boxSizing = 'border-box';
+    modal.style.paddingBottom = '40px';
+    modal.style.display = 'flex';
+    modal.style.flexDirection = 'column';
+    modal.style.alignItems = 'center';
+
+    // Close button
+    const closeBtn = document.createElement('div');
+    closeBtn.style.position = 'absolute';
+    closeBtn.style.top = '0px';
+    closeBtn.style.right = '0px';
+    closeBtn.style.width = '48px';
+    closeBtn.style.height = '48px';
+    closeBtn.style.backgroundImage = "url('/game/assets/gui/icons/Icon_Small_WhiteOutline_X.svg')";
+    closeBtn.style.backgroundSize = '100% 100%';
+    closeBtn.style.cursor = 'pointer';
+    closeBtn.style.transition = 'transform 0.15s ease';
+    closeBtn.addEventListener('mouseenter', () => { closeBtn.style.transform = 'scale(1.15)'; });
+    closeBtn.addEventListener('mouseleave', () => { closeBtn.style.transform = 'scale(1.0)'; });
+    closeBtn.addEventListener('click', () => { this.clearQuiz(); });
+    modal.appendChild(closeBtn);
+
+    // Question Background & Text Container
+    const questionContainer = document.createElement('div');
+    questionContainer.style.border = '16px solid transparent';
+    questionContainer.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_Blank_Square.svg')";
+    questionContainer.style.borderImageSlice = '64 fill';
+    questionContainer.style.borderImageWidth = '16px';
+    questionContainer.style.borderImageRepeat = 'stretch';
+    questionContainer.style.width = '90%';
+    questionContainer.style.maxWidth = '680px';
+    questionContainer.style.height = '320px';
+    questionContainer.style.display = 'flex';
+    questionContainer.style.justifyContent = 'center';
+    questionContainer.style.alignItems = 'center';
+    questionContainer.style.marginTop = '60px';
+    questionContainer.style.boxSizing = 'border-box';
+    questionContainer.style.padding = '20px';
+    questionContainer.style.color = '#000000ff';
+    questionContainer.style.fontFamily = '"Concert One", system-ui, sans-serif';
+    questionContainer.style.fontSize = '26px';
+    questionContainer.style.lineHeight = '1.4';
+    questionContainer.style.textAlign = 'center';
+    questionContainer.style.userSelect = 'none';
+
+    this.renderKatex(promptData.question_markdown, questionContainer);
+    modal.appendChild(questionContainer);
+
+    // Options layout
+    const isTF = promptData.quiz_type === 'true_false';
+    const options = promptData.options_markdown || [];
+
+    const optionsWrapper = document.createElement('div');
+    optionsWrapper.style.display = 'flex';
+    optionsWrapper.style.justifyContent = 'center';
+    optionsWrapper.style.alignItems = 'center';
+    optionsWrapper.style.marginTop = '40px';
+    optionsWrapper.style.width = '100%';
+
+    if (isTF) {
+      // Horizontal arrangement
+      optionsWrapper.style.flexDirection = 'row';
+      optionsWrapper.style.gap = '80px';
+
+      options.forEach((optText: string, oIndex: number) => {
+        const optBtn = document.createElement('div');
+        optBtn.id = `quiz-option-${oIndex}`;
+        optBtn.style.border = '12px solid transparent';
+        optBtn.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_Blue_Square.svg')";
+        optBtn.style.borderImageSlice = '64 fill';
+        optBtn.style.borderImageWidth = '12px';
+        optBtn.style.borderImageRepeat = 'stretch';
+        optBtn.style.width = '42%';
+        optBtn.style.maxWidth = '280px';
+        optBtn.style.height = '140px';
+        optBtn.style.display = 'flex';
+        optBtn.style.justifyContent = 'center';
+        optBtn.style.alignItems = 'center';
+        optBtn.style.boxSizing = 'border-box';
+        optBtn.style.padding = '20px';
+        optBtn.style.color = '#ffffff';
+        optBtn.style.fontFamily = '"Concert One", system-ui, sans-serif';
+        optBtn.style.fontSize = '24px';
+        optBtn.style.cursor = 'pointer';
+        optBtn.style.userSelect = 'none';
+        optBtn.style.transition = 'transform 0.15s ease';
+
+        optBtn.addEventListener('mouseenter', () => {
+          if (this.quizAnswered) return;
+          optBtn.style.transform = 'scale(1.04)';
+        });
+        optBtn.addEventListener('mouseleave', () => {
+          optBtn.style.transform = 'scale(1.0)';
+        });
+        optBtn.addEventListener('click', () => {
+          if (this.quizAnswered) return;
+          this.submitAnswer(oIndex);
+        });
+
+        this.renderKatex(optText, optBtn);
+        optionsWrapper.appendChild(optBtn);
+      });
+    } else {
+      // Vertical arrangement
+      optionsWrapper.style.flexDirection = 'column';
+      optionsWrapper.style.gap = '20px';
+
+      options.forEach((optText: string, oIndex: number) => {
+        const optBtn = document.createElement('div');
+        optBtn.id = `quiz-option-${oIndex}`;
+        optBtn.style.border = '12px solid transparent';
+        optBtn.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_Blue_Square.svg')";
+        optBtn.style.borderImageSlice = '64 fill';
+        optBtn.style.borderImageWidth = '12px';
+        optBtn.style.borderImageRepeat = 'stretch';
+        optBtn.style.width = '90%';
+        optBtn.style.maxWidth = '680px';
+        optBtn.style.height = '80px';
+        optBtn.style.display = 'flex';
+        optBtn.style.justifyContent = 'center';
+        optBtn.style.alignItems = 'center';
+        optBtn.style.boxSizing = 'border-box';
+        optBtn.style.padding = '10px';
+        optBtn.style.color = '#ffffff';
+        optBtn.style.fontFamily = '"Concert One", system-ui, sans-serif';
+        optBtn.style.fontSize = '22px';
+        optBtn.style.cursor = 'pointer';
+        optBtn.style.userSelect = 'none';
+        optBtn.style.transition = 'transform 0.15s ease';
+
+        optBtn.addEventListener('mouseenter', () => {
+          if (this.quizAnswered) return;
+          optBtn.style.transform = 'scale(1.03)';
+        });
+        optBtn.addEventListener('mouseleave', () => {
+          optBtn.style.transform = 'scale(1.0)';
+        });
+        optBtn.addEventListener('click', () => {
+          if (this.quizAnswered) return;
+          this.submitAnswer(oIndex);
+        });
+
+        this.renderKatex(optText, optBtn);
+        optionsWrapper.appendChild(optBtn);
+      });
+    }
+    modal.appendChild(optionsWrapper);
+
+    // Floating text feed area placeholder
+    const feedbackArea = document.createElement('div');
+    feedbackArea.id = 'quiz-feedback';
+    feedbackArea.style.marginTop = '20px';
+    feedbackArea.style.height = '120px';
+    feedbackArea.style.display = 'flex';
+    feedbackArea.style.justifyContent = 'center';
+    feedbackArea.style.alignItems = 'center';
+    feedbackArea.style.fontFamily = '"Concert One", system-ui, sans-serif';
+    feedbackArea.style.fontSize = '36px';
+    feedbackArea.style.fontWeight = 'bold';
+    modal.appendChild(feedbackArea);
+
+    overlay.appendChild(modal);
+    parent.appendChild(overlay);
+  }
+
+  private submitAnswer(index: number) {
+    this.quizAnswered = true;
+    const feedback = document.getElementById('quiz-feedback');
+    if (feedback) {
+      feedback.innerHTML = '<div class="spinner"></div>';
+    }
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'game.quiz.answer',
+        data: {
+          quiz_id: this.currentQuizId,
+          selected_index: index
+        }
+      }));
+    }
+  }
+
+  private handleQuizResult(resultData: any) {
+    const isCorrect = resultData.correct;
+    const selected = resultData.selected_index;
+
+    // Apply colors to the selected button
+    const selectedBtn = document.getElementById(`quiz-option-${selected}`);
+    if (selectedBtn) {
+      if (isCorrect) {
+        selectedBtn.style.filter = 'hue-rotate(260deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 16px #22c55e)';
+      } else {
+        selectedBtn.style.filter = 'hue-rotate(140deg) saturate(2.0) brightness(1.2) drop-shadow(0 0 16px #ef4444)';
+      }
+    }
+
+    // Set feedback text and colors
+    const feedback = document.getElementById('quiz-feedback');
+    if (feedback) {
+      feedback.innerText = isCorrect ? '+30 ESSENCE - CORRECT!' : 'INCORRECT';
+      feedback.style.color = isCorrect ? '#22c55e' : '#ef4444';
+    }
+
+    // Delay 2 seconds and auto close
+    setTimeout(() => {
+      this.clearQuiz();
+    }, 2000);
   }
 }
