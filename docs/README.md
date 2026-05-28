@@ -106,10 +106,30 @@ To begin the live game loop after the map is loaded, send:
 ```
 
 The server creates a Redis-backed gameplay session with `health=100`,
-`essence=0`, and `wave=0`, replies with `game.session.started`, then streams
-`game.state` snapshots over the websocket at 20 updates per second. Redis is
-used for the session checkpoint; the hot 20 Hz loop runs in the game-service
-process.
+`essence=1000`, and `wave=0`, replies with `game.session.started`, then streams
+`game.state` snapshots over the websocket at 20 updates per second. The session
+start payload includes the available bird types, stats, and attack modes.
+Redis is used for the session checkpoint; the hot 20 Hz loop runs in the
+game-service process. Reconnecting with the same `level_id` reuses the existing
+Redis session for that user and level, including placed birds and current
+essence, until the session expires.
+
+To place a tower, send the bird type and grid position:
+
+```json
+{
+  "type": "game.action.place_tower",
+  "data": {
+    "bird_type": "sparrow",
+    "x": 4,
+    "y": 7
+  }
+}
+```
+
+The server validates the placement, consumes the bird cost from essence,
+persists the placed bird snapshot to Redis, and responds with
+`game.action.accepted` or `game.action.rejected`.
 
 Level generation is idempotent per user, sub-chapter, and map algorithm version.
 If the database already has quizzes for that user's sub-chapter, the game

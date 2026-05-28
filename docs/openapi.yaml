@@ -578,8 +578,13 @@ paths:
         quiz answer data stays server-side in the dedicated game Redis cache.
         To begin authoritative gameplay, send `game.session.start` with the
         completed `level_id`. The server initializes a Redis-backed session
-        with `health=100`, `essence=0`, and `wave=0`, returns
-        `game.session.started`, then streams `game.state` snapshots at 20 Hz.
+        with `health=100`, `essence=1000`, and `wave=0`, returns
+        `game.session.started` with the available bird type stats, then streams
+        `game.state` snapshots at 20 Hz. During the session, clients can send
+        `game.action.place_tower` with a `bird_type` and grid `x`/`y`.
+        Reconnecting with the same `level_id` reuses the existing Redis session
+        for that user and level, including placed birds and current essence,
+        until the session expires.
 
         If the database already has quizzes for the authenticated user's
         sub-chapter, the service reuses the saved level instead of generating
@@ -592,11 +597,14 @@ paths:
         - $ref: "#/components/schemas/GameStartWebSocketMessage"
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
+        - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
       x-websocket-server-messages:
         - $ref: "#/components/schemas/LevelGenerationStartedMessage"
         - $ref: "#/components/schemas/GameInitialStateMessage"
         - $ref: "#/components/schemas/GameSessionStartedMessage"
         - $ref: "#/components/schemas/GameStateMessage"
+        - $ref: "#/components/schemas/GameActionAcceptedMessage"
+        - $ref: "#/components/schemas/GameActionRejectedMessage"
         - $ref: "#/components/schemas/GameErrorMessage"
       responses:
         "101":
@@ -1045,6 +1053,27 @@ components:
               format: uuid
               description: Completed level id to start an authoritative gameplay session for.
 
+    GamePlaceTowerActionMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.place_tower
+        data:
+          type: object
+          required: [bird_type, x, y]
+          properties:
+            bird_type:
+              type: string
+              enum: [sparrow, woodpecker, eagle, peacock]
+            x:
+              type: integer
+              description: Grid column.
+            y:
+              type: integer
+              description: Grid row.
+
     LevelGenerationStartedMessage:
       type: object
       required: [type, data]
@@ -1084,6 +1113,44 @@ components:
           const: game.state
         data:
           $ref: "#/components/schemas/GameState"
+
+    GameActionAcceptedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.accepted
+        data:
+          type: object
+          required: [action, bird_id, bird]
+          properties:
+            action:
+              type: string
+              example: place_tower
+            bird_id:
+              type: string
+              format: uuid
+            bird:
+              $ref: "#/components/schemas/PlacedBird"
+
+    GameActionRejectedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.rejected
+        data:
+          type: object
+          required: [action, error]
+          properties:
+            action:
+              type: string
+              example: place_tower
+            error:
+              type: string
+              example: insufficient essence
 
     GameErrorMessage:
       type: object
@@ -1210,7 +1277,7 @@ components:
     GameState:
       type: object
       description: Authoritative gameplay snapshot. After `game.session.started`, `game.state` messages are sent 20 times per second.
-      required: [session_id, level_id, health, essence, wave, tick, server_time]
+      required: [session_id, level_id, health, essence, wave, tick, server_time, birds]
       properties:
         session_id:
           type: string
@@ -1223,7 +1290,7 @@ components:
           example: 100
         essence:
           type: integer
-          example: 0
+          example: 1000
         wave:
           type: integer
           example: 0
@@ -1234,6 +1301,76 @@ components:
         server_time:
           type: string
           format: date-time
+        bird_types:
+          type: array
+          description: Present on `game.session.started`; lists available tower/bird types.
+          items:
+            $ref: "#/components/schemas/BirdTypeInfo"
+        birds:
+          type: array
+          description: Placed birds in the current session.
+          items:
+            $ref: "#/components/schemas/PlacedBird"
+
+    BirdTypeInfo:
+      type: object
+      required: [type, stats, attack]
+      properties:
+        type:
+          type: string
+          enum: [sparrow, woodpecker, eagle, peacock]
+        stats:
+          $ref: "#/components/schemas/BirdStats"
+        attack:
+          type: string
+          enum: [single, splash]
+
+    PlacedBird:
+      type: object
+      required: [id, type, position, stats, last_fired_at_tick]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [sparrow, woodpecker, eagle, peacock]
+        position:
+          $ref: "#/components/schemas/GridPosition"
+        stats:
+          $ref: "#/components/schemas/BirdStats"
+        last_fired_at_tick:
+          type: integer
+          format: int64
+
+    BirdStats:
+      type: object
+      required: [damage, projectile_speed, fire_rate, range, cost]
+      properties:
+        damage:
+          type: integer
+        projectile_speed:
+          type: number
+          format: double
+        fire_rate:
+          type: number
+          format: double
+        range:
+          type: number
+          format: double
+        cost:
+          type: integer
+
+    GridPosition:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+          format: double
+        y:
+          type: number
+          format: double
 
     GeneratedMap:
       type: object

@@ -1,3 +1,14 @@
+FROM golang:1.23-alpine AS dev
+
+WORKDIR /app
+
+COPY go.mod go.sum* ./
+RUN go mod download
+
+EXPOSE 8081
+
+CMD ["go", "run", "."]
+
 FROM golang:1.23-alpine AS builder
 
 WORKDIR /app

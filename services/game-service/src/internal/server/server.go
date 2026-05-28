@@ -11,9 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"skybloom/game-service/internal/config"
+	"skybloom/game-service/internal/gameobject"
 	"skybloom/game-service/internal/gamesession"
 	"skybloom/game-service/internal/generation"
 	"skybloom/game-service/internal/mapcache"
@@ -26,6 +28,8 @@ import (
 var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 const gameTickInterval = 50 * time.Millisecond
+
+const placeTowerAction = "place_tower"
 
 type LevelRepository interface {
 	GetBootstrap(ctx context.Context, levelID string, userID string) (repository.LevelBootstrap, error)
@@ -55,6 +59,8 @@ type QuizCache interface {
 
 type GameSessionStore interface {
 	Start(ctx context.Context, options gamesession.StartOptions) (gamesession.State, error)
+	LoadBirds(ctx context.Context, sessionID string) ([]gamesession.StoredBird, error)
+	SaveRuntimeState(ctx context.Context, sessionID string, economy gamesession.Economy, birds []gamesession.StoredBird) error
 }
 
 type Server struct {
@@ -79,13 +85,57 @@ type InitialState struct {
 }
 
 type GameState struct {
-	SessionID  string    `json:"session_id"`
-	LevelID    string    `json:"level_id"`
-	Health     int       `json:"health"`
-	Essence    int       `json:"essence"`
-	Wave       int       `json:"wave"`
-	Tick       int64     `json:"tick"`
-	ServerTime time.Time `json:"server_time"`
+	SessionID  string            `json:"session_id"`
+	LevelID    string            `json:"level_id"`
+	Health     int               `json:"health"`
+	Essence    int               `json:"essence"`
+	Wave       int               `json:"wave"`
+	Tick       int64             `json:"tick"`
+	ServerTime time.Time         `json:"server_time"`
+	BirdTypes  []BirdTypeInfo    `json:"bird_types,omitempty"`
+	Birds      []PlacedBirdState `json:"birds"`
+}
+
+type BirdTypeInfo struct {
+	Type   string               `json:"type"`
+	Stats  gameobject.BirdStats `json:"stats"`
+	Attack string               `json:"attack"`
+}
+
+type PlacedBirdState struct {
+	ID              string               `json:"id"`
+	Type            string               `json:"type"`
+	Position        gameobject.Position  `json:"position"`
+	Stats           gameobject.BirdStats `json:"stats"`
+	LastFiredAtTick int64                `json:"last_fired_at_tick"`
+}
+
+type placeTowerRequest struct {
+	BirdType string `json:"bird_type"`
+	X        int    `json:"x"`
+	Y        int    `json:"y"`
+}
+
+type clientAction struct {
+	Type       string
+	PlaceTower placeTowerRequest
+}
+
+type runningGameLoop struct {
+	stop    context.CancelFunc
+	actions chan clientAction
+}
+
+type runtimeSession struct {
+	session  gamesession.State
+	economy  gamesession.Economy
+	birds    []placedBird
+	levelMap mapgen.GeneratedMap
+}
+
+type placedBird struct {
+	birdType string
+	bird     gameobject.Bird
 }
 
 func New(cfg config.Config, levels LevelRepository, maps MapCache) *Server {
@@ -217,10 +267,10 @@ func (s *Server) cacheQuizzes(ctx context.Context, level repository.LevelBootstr
 
 func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string) {
 	conn.SetReadLimit(8192)
-	var stopGameLoop context.CancelFunc
+	var gameLoop *runningGameLoop
 	defer func() {
-		if stopGameLoop != nil {
-			stopGameLoop()
+		if gameLoop != nil {
+			gameLoop.stop()
 		}
 	}()
 	for {
@@ -250,11 +300,11 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				}
 			}
 		case "game.session.start":
-			if stopGameLoop != nil {
-				stopGameLoop()
-				stopGameLoop = nil
+			if gameLoop != nil {
+				gameLoop.stop()
+				gameLoop = nil
 			}
-			stop, err := s.handleSessionStart(ctx, conn, writeMu, userID, message.Data)
+			loop, err := s.handleSessionStart(ctx, conn, writeMu, userID, message.Data)
 			if err != nil {
 				log.Printf("game.session.start failed user_id=%s: %v", userID, err)
 				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
@@ -263,7 +313,31 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				}
 				continue
 			}
-			stopGameLoop = stop
+			gameLoop = loop
+		case "game.action.place_tower":
+			action, err := decodePlaceTowerAction(message.Data)
+			if err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, placeTowerAction, err.Error()); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if gameLoop == nil {
+				if writeErr := writeActionRejected(conn, writeMu, placeTowerAction, "game session is not running"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			select {
+			case gameLoop.actions <- clientAction{Type: placeTowerAction, PlaceTower: action}:
+			default:
+				if writeErr := writeActionRejected(conn, writeMu, placeTowerAction, "action queue is full"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+			}
 		case "ping":
 			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "pong"}); err != nil {
 				log.Printf("websocket pong write failed: %v", err)
@@ -345,7 +419,7 @@ func (s *Server) writeInitialState(ctx context.Context, conn *websocket.Conn, wr
 	return writeWebsocketJSON(conn, writeMu, Message{Type: "game.initial_state", Data: initialState})
 }
 
-func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) (context.CancelFunc, error) {
+func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) (*runningGameLoop, error) {
 	if s.sessions == nil {
 		return nil, errors.New("game session store is not configured")
 	}
@@ -375,6 +449,11 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		log.Printf("level quiz cache write failed level_id=%s generation_id=%s: %v", levelID, level.GenerationID, err)
 		return nil, errors.New("failed to load level quizzes")
 	}
+	levelMap, err := s.loadMap(callCtx, level)
+	if err != nil {
+		log.Printf("level map load failed level_id=%s generation_id=%s: %v", levelID, level.GenerationID, err)
+		return nil, errors.New("failed to load level map")
+	}
 
 	session, err := s.sessions.Start(callCtx, gamesession.StartOptions{
 		UserID:       userID,
@@ -386,47 +465,261 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		log.Printf("game session create failed level_id=%s user_id=%s: %v", levelID, userID, err)
 		return nil, errors.New("failed to start game session")
 	}
+	storedBirds, err := s.sessions.LoadBirds(callCtx, session.SessionID)
+	if err != nil {
+		log.Printf("game session birds load failed session_id=%s: %v", session.SessionID, err)
+		return nil, errors.New("failed to load game session")
+	}
+	restoredBirds, err := placedBirdsFromStored(storedBirds)
+	if err != nil {
+		log.Printf("game session birds restore failed session_id=%s: %v", session.SessionID, err)
+		return nil, errors.New("failed to restore game session")
+	}
 
-	state := gameStateFromSession(session, session.UpdatedAt)
+	runtime := runtimeSession{
+		session:  session,
+		economy:  gamesession.NewEconomy(session.Essence),
+		birds:    restoredBirds,
+		levelMap: levelMap,
+	}
+	state := gameStateFromRuntime(runtime, session.UpdatedAt, birdTypeCatalog())
 	if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.session.started", Data: state}); err != nil {
 		return nil, err
 	}
 
 	loopCtx, stop := context.WithCancel(ctx)
-	go s.runGameLoop(loopCtx, conn, writeMu, session)
-	return stop, nil
+	loop := &runningGameLoop{
+		stop:    stop,
+		actions: make(chan clientAction, 64),
+	}
+	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop.actions)
+	return loop, nil
 }
 
-func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, session gamesession.State) {
+func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, actions <-chan clientAction) {
 	ticker := time.NewTicker(gameTickInterval)
 	defer ticker.Stop()
 
-	current := session
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case action := <-actions:
+			if err := s.processClientAction(ctx, &runtime, action); err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if err := writeActionAccepted(conn, writeMu, action.Type, runtime.birds[len(runtime.birds)-1]); err != nil {
+				log.Printf("websocket action accepted write failed: %v", err)
+				return
+			}
 		case now := <-ticker.C:
-			current.Tick++
-			current.UpdatedAt = now.UTC()
-			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromSession(current, current.UpdatedAt)}); err != nil {
-				log.Printf("game state write failed session_id=%s: %v", current.SessionID, err)
+			runtime.session.Tick++
+			runtime.session.Essence = runtime.economy.Essence
+			runtime.session.UpdatedAt = now.UTC()
+			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, runtime.session.UpdatedAt, nil)}); err != nil {
+				log.Printf("game state write failed session_id=%s: %v", runtime.session.SessionID, err)
 				return
 			}
 		}
 	}
 }
 
-func gameStateFromSession(session gamesession.State, serverTime time.Time) GameState {
+func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSession, action clientAction) error {
+	switch action.Type {
+	case placeTowerAction:
+		return s.placeTower(ctx, runtime, action.PlaceTower)
+	default:
+		return errors.New("unsupported action")
+	}
+}
+
+func (s *Server) placeTower(ctx context.Context, runtime *runtimeSession, request placeTowerRequest) error {
+	if runtime == nil {
+		return errors.New("game session is not running")
+	}
+	birdType := strings.TrimSpace(request.BirdType)
+	stats, err := gameobject.BirdStatsForType(birdType)
+	if err != nil {
+		return errors.New("unknown bird type")
+	}
+	if !isInsideMap(runtime.levelMap, request.X, request.Y) {
+		return errors.New("tower position is outside the map")
+	}
+	if isEnemyPath(runtime.levelMap, request.X, request.Y) {
+		return errors.New("tower cannot be placed on the enemy path")
+	}
+	if isOccupied(runtime.birds, request.X, request.Y) {
+		return errors.New("tower position is occupied")
+	}
+
+	nextEconomy := runtime.economy
+	if !nextEconomy.Consume(stats.Cost) {
+		return errors.New("insufficient essence")
+	}
+
+	bird, err := gameobject.NewBird(uuid.NewString(), birdType, gameobject.Position{X: float64(request.X), Y: float64(request.Y)})
+	if err != nil {
+		return errors.New("failed to create bird")
+	}
+	nextBirds := append(append([]placedBird{}, runtime.birds...), placedBird{birdType: birdType, bird: bird})
+	if err := s.sessions.SaveRuntimeState(ctx, runtime.session.SessionID, nextEconomy, storedBirds(nextBirds)); err != nil {
+		log.Printf("game session placement save failed session_id=%s: %v", runtime.session.SessionID, err)
+		return errors.New("failed to save tower placement")
+	}
+
+	runtime.economy = nextEconomy
+	runtime.session.Essence = nextEconomy.Essence
+	runtime.birds = nextBirds
+	return nil
+}
+
+func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdTypes []BirdTypeInfo) GameState {
+	session := runtime.session
 	return GameState{
 		SessionID:  session.SessionID,
 		LevelID:    session.LevelID,
 		Health:     session.Health,
-		Essence:    session.Essence,
+		Essence:    runtime.economy.Essence,
 		Wave:       session.Wave,
 		Tick:       session.Tick,
 		ServerTime: serverTime.UTC(),
+		BirdTypes:  birdTypes,
+		Birds:      placedBirdStates(runtime.birds),
 	}
+}
+
+func decodePlaceTowerAction(data any) (placeTowerRequest, error) {
+	var request placeTowerRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return placeTowerRequest{}, errors.New("place tower action data must include bird_type, x, and y")
+	}
+	if strings.TrimSpace(request.BirdType) == "" {
+		return placeTowerRequest{}, errors.New("bird_type is required")
+	}
+	return request, nil
+}
+
+func birdTypeCatalog() []BirdTypeInfo {
+	birdTypes := gameobject.BirdTypes()
+	catalog := make([]BirdTypeInfo, 0, len(birdTypes))
+	for _, birdType := range birdTypes {
+		stats, err := gameobject.BirdStatsForType(birdType)
+		if err != nil {
+			continue
+		}
+		attack, err := gameobject.AttackTypeForBirdType(birdType)
+		if err != nil {
+			continue
+		}
+		catalog = append(catalog, BirdTypeInfo{
+			Type:   birdType,
+			Stats:  stats,
+			Attack: attack,
+		})
+	}
+	return catalog
+}
+
+func isInsideMap(levelMap mapgen.GeneratedMap, x int, y int) bool {
+	return x >= 0 && y >= 0 && x < levelMap.Width && y < levelMap.Height
+}
+
+func isEnemyPath(levelMap mapgen.GeneratedMap, x int, y int) bool {
+	for _, tile := range levelMap.EnemyPath {
+		if tile.X == x && tile.Y == y {
+			return true
+		}
+	}
+	return false
+}
+
+func isOccupied(birds []placedBird, x int, y int) bool {
+	for _, placed := range birds {
+		if int(placed.bird.Position.X) == x && int(placed.bird.Position.Y) == y {
+			return true
+		}
+	}
+	return false
+}
+
+func placedBirdStates(birds []placedBird) []PlacedBirdState {
+	states := make([]PlacedBirdState, 0, len(birds))
+	for _, placed := range birds {
+		states = append(states, PlacedBirdState{
+			ID:              placed.bird.ID,
+			Type:            placed.birdType,
+			Position:        placed.bird.Position,
+			Stats:           placed.bird.Stats,
+			LastFiredAtTick: placed.bird.LastFiredAtTick,
+		})
+	}
+	return states
+}
+
+func storedBirds(birds []placedBird) []gamesession.StoredBird {
+	stored := make([]gamesession.StoredBird, 0, len(birds))
+	for _, placed := range birds {
+		stored = append(stored, gamesession.StoredBird{
+			ID:              placed.bird.ID,
+			Type:            placed.birdType,
+			Position:        placed.bird.Position,
+			Stats:           placed.bird.Stats,
+			LastFiredAtTick: placed.bird.LastFiredAtTick,
+		})
+	}
+	return stored
+}
+
+func placedBirdsFromStored(stored []gamesession.StoredBird) ([]placedBird, error) {
+	birds := make([]placedBird, 0, len(stored))
+	for _, item := range stored {
+		behaviour, err := gameobject.AttackBehaviourForType(item.Type)
+		if err != nil {
+			return nil, err
+		}
+		birds = append(birds, placedBird{
+			birdType: item.Type,
+			bird: gameobject.Bird{
+				ID:              item.ID,
+				Position:        item.Position,
+				Stats:           item.Stats,
+				AttackBehaviour: behaviour,
+				LastFiredAtTick: item.LastFiredAtTick,
+			},
+		})
+	}
+	return birds, nil
+}
+
+func writeActionAccepted(conn *websocket.Conn, writeMu *sync.Mutex, action string, bird placedBird) error {
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "game.action.accepted",
+		Data: map[string]any{
+			"action":  action,
+			"bird_id": bird.bird.ID,
+			"bird": PlacedBirdState{
+				ID:              bird.bird.ID,
+				Type:            bird.birdType,
+				Position:        bird.bird.Position,
+				Stats:           bird.bird.Stats,
+				LastFiredAtTick: bird.bird.LastFiredAtTick,
+			},
+		},
+	})
+}
+
+func writeActionRejected(conn *websocket.Conn, writeMu *sync.Mutex, action string, message string) error {
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "game.action.rejected",
+		Data: map[string]string{
+			"action": action,
+			"error":  message,
+		},
+	})
 }
 
 func (s *Server) generationStatus(w http.ResponseWriter, r *http.Request) {

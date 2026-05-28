@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"skybloom/game-service/internal/config"
+	"skybloom/game-service/internal/gameobject"
 	"skybloom/game-service/internal/gamesession"
 	"skybloom/game-service/internal/generation"
 	"skybloom/game-service/internal/mapcache"
@@ -204,6 +205,12 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if startedState.Tick != 0 {
 		t.Fatalf("expected tick 0, got %d", startedState.Tick)
 	}
+	if len(startedState.BirdTypes) != 4 {
+		t.Fatalf("expected 4 bird type infos, got %d", len(startedState.BirdTypes))
+	}
+	if len(startedState.Birds) != 0 {
+		t.Fatalf("expected no placed birds at session start, got %d", len(startedState.Birds))
+	}
 	if sessions.options.UserID != "22222222-2222-2222-2222-222222222222" {
 		t.Fatalf("unexpected session user_id %q", sessions.options.UserID)
 	}
@@ -224,6 +231,242 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	}
 	if tickState.Health != gamesession.InitialHealth || tickState.Essence != gamesession.InitialEssence || tickState.Wave != gamesession.InitialWave {
 		t.Fatalf("unexpected tick state %+v", tickState)
+	}
+}
+
+func TestWebsocketPlaceTowerConsumesEssenceAndPersistsBird(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	maps := &fakeMapCache{
+		cached: mapgen.GeneratedMap{
+			Version:   mapgen.Version,
+			Seed:      99,
+			Width:     4,
+			Height:    4,
+			EnemyPath: []mapgen.PathTile{{X: 0, Y: 0, Kind: "start"}},
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, maps, nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.action.place_tower",
+		Data: map[string]any{"bird_type": gameobject.BirdTypeSparrow, "x": 1, "y": 1},
+	}); err != nil {
+		t.Fatalf("WriteJSON place tower failed: %v", err)
+	}
+
+	accepted := readMessageOfType(t, conn, "game.action.accepted")
+	body, err := json.Marshal(accepted.Data)
+	if err != nil {
+		t.Fatalf("Marshal accepted action failed: %v", err)
+	}
+	var acceptedData struct {
+		Action string `json:"action"`
+		BirdID string `json:"bird_id"`
+		Bird   struct {
+			Type     string              `json:"type"`
+			Position gameobject.Position `json:"position"`
+		} `json:"bird"`
+	}
+	if err := json.Unmarshal(body, &acceptedData); err != nil {
+		t.Fatalf("Unmarshal accepted action failed: %v", err)
+	}
+	if acceptedData.Action != placeTowerAction {
+		t.Fatalf("unexpected accepted action %q", acceptedData.Action)
+	}
+	if acceptedData.BirdID == "" {
+		t.Fatal("expected accepted action to include bird_id")
+	}
+	if acceptedData.Bird.Type != gameobject.BirdTypeSparrow {
+		t.Fatalf("unexpected bird type %q", acceptedData.Bird.Type)
+	}
+	if acceptedData.Bird.Position.X != 1 || acceptedData.Bird.Position.Y != 1 {
+		t.Fatalf("unexpected bird position %+v", acceptedData.Bird.Position)
+	}
+
+	if sessions.economy.Essence != gamesession.InitialEssence-50 {
+		t.Fatalf("unexpected persisted essence %d", sessions.economy.Essence)
+	}
+	if len(sessions.birds) != 1 {
+		t.Fatalf("expected one persisted bird, got %d", len(sessions.birds))
+	}
+	if sessions.birds[0].Type != gameobject.BirdTypeSparrow {
+		t.Fatalf("unexpected persisted bird type %q", sessions.birds[0].Type)
+	}
+}
+
+func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{
+		state: gamesession.State{
+			SessionID:    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			GenerationID: "generation-1",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Health:       gamesession.InitialHealth,
+			Essence:      950,
+			Wave:         gamesession.InitialWave,
+			Tick:         14,
+			StartedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+		},
+		birds: []gamesession.StoredBird{
+			{
+				ID:       "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+				Type:     gameobject.BirdTypeSparrow,
+				Position: gameobject.Position{X: 1, Y: 1},
+				Stats:    gameobject.BirdStats{Damage: 10, ProjectileSpeed: gameobject.StandardProjectileSpeed, FireRate: 1, Range: 3.5, Cost: 50},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+
+	started := readMessageOfType(t, conn, "game.session.started")
+	state := decodeGameState(t, started.Data)
+	if state.SessionID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
+		t.Fatalf("expected restored session id, got %q", state.SessionID)
+	}
+	if state.Essence != 950 {
+		t.Fatalf("expected restored essence 950, got %d", state.Essence)
+	}
+	if len(state.Birds) != 1 {
+		t.Fatalf("expected one restored bird, got %d", len(state.Birds))
+	}
+	if state.Birds[0].ID != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Fatalf("unexpected restored bird id %q", state.Birds[0].ID)
+	}
+	if state.Birds[0].Type != gameobject.BirdTypeSparrow {
+		t.Fatalf("unexpected restored bird type %q", state.Birds[0].Type)
+	}
+}
+
+func TestWebsocketPlaceTowerRejectsEnemyPath(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	maps := &fakeMapCache{
+		cached: mapgen.GeneratedMap{
+			Version:   mapgen.Version,
+			Seed:      99,
+			Width:     4,
+			Height:    4,
+			EnemyPath: []mapgen.PathTile{{X: 1, Y: 1, Kind: "straight"}},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, maps, nil, nil, nil, nil, &fakeGameSessionStore{}).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/ws"
+	header := http.Header{"X-Authenticated-User-Id": []string{"22222222-2222-2222-2222-222222222222"}}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial failed: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline failed: %v", err)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.action.place_tower",
+		Data: map[string]any{"bird_type": gameobject.BirdTypeSparrow, "x": 1, "y": 1},
+	}); err != nil {
+		t.Fatalf("WriteJSON place tower failed: %v", err)
+	}
+
+	rejected := readMessageOfType(t, conn, "game.action.rejected")
+	body, err := json.Marshal(rejected.Data)
+	if err != nil {
+		t.Fatalf("Marshal rejected action failed: %v", err)
+	}
+	var rejectedData struct {
+		Action string `json:"action"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &rejectedData); err != nil {
+		t.Fatalf("Unmarshal rejected action failed: %v", err)
+	}
+	if rejectedData.Action != placeTowerAction {
+		t.Fatalf("unexpected rejected action %q", rejectedData.Action)
+	}
+	if rejectedData.Error != "tower cannot be placed on the enemy path" {
+		t.Fatalf("unexpected rejection error %q", rejectedData.Error)
 	}
 }
 
@@ -296,11 +539,17 @@ func (s *fakeStarter) Start(_ context.Context, userID string, subChapterID strin
 
 type fakeGameSessionStore struct {
 	options gamesession.StartOptions
+	state   gamesession.State
+	economy gamesession.Economy
+	birds   []gamesession.StoredBird
 }
 
 func (s *fakeGameSessionStore) Start(_ context.Context, options gamesession.StartOptions) (gamesession.State, error) {
 	s.options = options
 	now := time.Now().UTC()
+	if s.state.SessionID != "" {
+		return s.state, nil
+	}
 	return gamesession.State{
 		SessionID:    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		UserID:       options.UserID,
@@ -316,6 +565,16 @@ func (s *fakeGameSessionStore) Start(_ context.Context, options gamesession.Star
 	}, nil
 }
 
+func (s *fakeGameSessionStore) LoadBirds(_ context.Context, _ string) ([]gamesession.StoredBird, error) {
+	return append([]gamesession.StoredBird{}, s.birds...), nil
+}
+
+func (s *fakeGameSessionStore) SaveRuntimeState(_ context.Context, _ string, economy gamesession.Economy, birds []gamesession.StoredBird) error {
+	s.economy = economy
+	s.birds = append([]gamesession.StoredBird{}, birds...)
+	return nil
+}
+
 func decodeGameState(t *testing.T, data any) GameState {
 	t.Helper()
 	body, err := json.Marshal(data)
@@ -327,4 +586,19 @@ func decodeGameState(t *testing.T, data any) GameState {
 		t.Fatalf("Unmarshal game state failed: %v", err)
 	}
 	return state
+}
+
+func readMessageOfType(t *testing.T, conn *websocket.Conn, messageType string) Message {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		var message Message
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatalf("ReadJSON failed looking for %s: %v", messageType, err)
+		}
+		if message.Type == messageType {
+			return message
+		}
+	}
+	t.Fatalf("did not receive message type %s", messageType)
+	return Message{}
 }
