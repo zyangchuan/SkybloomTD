@@ -1379,16 +1379,24 @@ func decodeGameState(t *testing.T, data any) GameState {
 
 func readMessageOfType(t *testing.T, conn *websocket.Conn, messageType string) Message {
 	t.Helper()
-	for i := 0; i < 20; i++ {
+	deadline := time.Now().Add(5 * time.Second)
+	seen := make([]string, 0, 10)
+	for time.Now().Before(deadline) {
+		if err := conn.SetReadDeadline(deadline); err != nil {
+			t.Fatalf("SetReadDeadline failed: %v", err)
+		}
 		var message Message
 		if err := conn.ReadJSON(&message); err != nil {
-			t.Fatalf("ReadJSON failed looking for %s: %v", messageType, err)
+			t.Fatalf("ReadJSON failed looking for %s after seeing %v: %v", messageType, seen, err)
 		}
 		if message.Type == messageType {
 			return message
 		}
+		if len(seen) < cap(seen) {
+			seen = append(seen, message.Type)
+		}
 	}
-	t.Fatalf("did not receive message type %s", messageType)
+	t.Fatalf("did not receive message type %s after seeing %v", messageType, seen)
 	return Message{}
 }
 
