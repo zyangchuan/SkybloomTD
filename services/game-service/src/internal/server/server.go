@@ -64,6 +64,7 @@ type MapCache interface {
 }
 
 type QuizCache interface {
+	Get(ctx context.Context, generationID string) (quizcache.LevelQuizzes, error)
 	PeekNext(ctx context.Context, generationID string) (quizcache.CachedQuiz, int, error)
 	Take(ctx context.Context, generationID string, quizID string) (quizcache.CachedQuiz, int, error)
 	Set(ctx context.Context, generationID string, quizzes quizcache.LevelQuizzes) error
@@ -402,6 +403,14 @@ func (s *Server) cacheQuizzes(ctx context.Context, level repository.LevelBootstr
 	if s.quizzes == nil {
 		return nil
 	}
+	if _, err := s.quizzes.Get(ctx, level.GenerationID); err == nil {
+		return nil
+	} else if !errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		return err
+	}
+	if len(level.Quizzes) == 0 {
+		return nil
+	}
 	return s.quizzes.Set(ctx, level.GenerationID, quizcache.FromLevelBootstrap(level, level.GenerationID))
 }
 
@@ -545,7 +554,8 @@ func isExpectedWebsocketClose(err error) bool {
 		websocket.CloseGoingAway,
 		websocket.CloseNoStatusReceived,
 		websocket.CloseAbnormalClosure,
-	) || strings.Contains(err.Error(), "unexpected EOF")
+	) || strings.Contains(err.Error(), "unexpected EOF") ||
+		strings.Contains(err.Error(), "connection reset by peer")
 }
 
 func (s *Server) handleStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {

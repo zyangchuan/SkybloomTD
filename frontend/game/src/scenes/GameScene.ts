@@ -49,6 +49,7 @@ export default class GameScene extends Phaser.Scene {
   private dragCancelRightText: Phaser.GameObjects.Text | null = null;
   private currentQuizId: string = '';
   private quizAnswered: boolean = false;
+  private messageHandler: ((e: MessageEvent) => void) | null = null;
 
   constructor() {
     super('GameScene');
@@ -984,30 +985,11 @@ export default class GameScene extends Phaser.Scene {
     if (overlay) {
       overlay.remove();
     }
-    this.quizAnswered = false;
-  }
-
-  private renderKatex(text: string, element: HTMLElement) {
-    element.innerHTML = '';
-    const tempSpan = document.createElement('span');
-    tempSpan.textContent = text;
-    element.appendChild(tempSpan);
-
-    if ((window as any).renderMathInElement) {
-      try {
-        (window as any).renderMathInElement(element, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '$', right: '$', display: false },
-            { left: '\\(', right: '\\)', display: false },
-            { left: '\\[', right: '\\]', display: true }
-          ],
-          throwOnError: false
-        });
-      } catch (e) {
-        console.error('KaTeX rendering failed', e);
-      }
+    if (this.messageHandler) {
+      window.removeEventListener('message', this.messageHandler);
+      this.messageHandler = null;
     }
+    this.quizAnswered = false;
   }
 
   private showQuizWindow(promptData: any) {
@@ -1024,197 +1006,47 @@ export default class GameScene extends Phaser.Scene {
     overlay.style.left = '0';
     overlay.style.width = '100%';
     overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(2, 6, 23, 0.75)';
-    overlay.style.display = 'flex';
-    overlay.style.justifyContent = 'center';
-    overlay.style.alignItems = 'center';
+    overlay.style.backgroundColor = 'transparent';
     overlay.style.zIndex = '9999';
 
-    // Create the modal container using box_whiteoutline_square
-    const modal = document.createElement('div');
-    modal.style.border = '24px solid transparent';
-    modal.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_WhiteOutline_Square.svg')";
-    modal.style.borderImageSlice = '96 fill';
-    modal.style.borderImageWidth = '24px';
-    modal.style.borderImageRepeat = 'stretch';
-    modal.style.width = '90%';
-    modal.style.maxWidth = '800px';
-    modal.style.height = 'auto';
-    modal.style.maxHeight = '90vh';
-    modal.style.overflowY = 'auto';
-    modal.style.scrollbarWidth = 'none';
-    modal.style.position = 'relative';
-    modal.style.boxSizing = 'border-box';
-    modal.style.paddingBottom = '40px';
-    modal.style.display = 'flex';
-    modal.style.flexDirection = 'column';
-    modal.style.alignItems = 'center';
+    // Create the iframe pointing to the Next.js quiz overlay page
+    const iframe = document.createElement('iframe');
+    iframe.id = 'quiz-iframe';
+    iframe.style.position = 'absolute';
+    iframe.style.top = '0';
+    iframe.style.left = '0';
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.style.backgroundColor = 'transparent';
 
-    // Close button
-    const closeBtn = document.createElement('div');
-    closeBtn.style.position = 'absolute';
-    closeBtn.style.top = '0px';
-    closeBtn.style.right = '0px';
-    closeBtn.style.width = '48px';
-    closeBtn.style.height = '48px';
-    closeBtn.style.backgroundImage = "url('/game/assets/gui/icons/Icon_Small_WhiteOutline_X.svg')";
-    closeBtn.style.backgroundSize = '100% 100%';
-    closeBtn.style.cursor = 'pointer';
-    closeBtn.style.transition = 'transform 0.15s ease';
-    closeBtn.addEventListener('mouseenter', () => { closeBtn.style.transform = 'scale(1.15)'; });
-    closeBtn.addEventListener('mouseleave', () => { closeBtn.style.transform = 'scale(1.0)'; });
-    closeBtn.addEventListener('click', () => { this.clearQuiz(); });
-    modal.appendChild(closeBtn);
+    // Build query parameters
+    const params = new URLSearchParams();
+    params.set('quiz_id', promptData.quiz_id);
+    params.set('question', promptData.question_markdown);
+    params.set('options', JSON.stringify(promptData.options_markdown || []));
+    params.set('type', promptData.quiz_type === 'true_false' ? 'tf' : 'mcq');
 
-    // Question Background & Text Container
-    const questionContainer = document.createElement('div');
-    questionContainer.style.border = '16px solid transparent';
-    questionContainer.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_Blank_Square.svg')";
-    questionContainer.style.borderImageSlice = '64 fill';
-    questionContainer.style.borderImageWidth = '16px';
-    questionContainer.style.borderImageRepeat = 'stretch';
-    questionContainer.style.width = '90%';
-    questionContainer.style.maxWidth = '680px';
-    questionContainer.style.height = '320px';
-    questionContainer.style.display = 'flex';
-    questionContainer.style.justifyContent = 'center';
-    questionContainer.style.alignItems = 'center';
-    questionContainer.style.marginTop = '60px';
-    questionContainer.style.boxSizing = 'border-box';
-    questionContainer.style.padding = '20px';
-    questionContainer.style.color = '#000000ff';
-    questionContainer.style.fontFamily = '"Concert One", system-ui, sans-serif';
-    questionContainer.style.fontSize = '26px';
-    questionContainer.style.lineHeight = '1.4';
-    questionContainer.style.textAlign = 'center';
-    questionContainer.style.userSelect = 'none';
-
-    this.renderKatex(promptData.question_markdown, questionContainer);
-    modal.appendChild(questionContainer);
-
-    // Options layout
-    const isTF = promptData.quiz_type === 'true_false';
-    const options = promptData.options_markdown || [];
-
-    const optionsWrapper = document.createElement('div');
-    optionsWrapper.style.display = 'flex';
-    optionsWrapper.style.justifyContent = 'center';
-    optionsWrapper.style.alignItems = 'center';
-    optionsWrapper.style.marginTop = '40px';
-    optionsWrapper.style.width = '100%';
-
-    if (isTF) {
-      // Horizontal arrangement
-      optionsWrapper.style.flexDirection = 'row';
-      optionsWrapper.style.gap = '80px';
-
-      options.forEach((optText: string, oIndex: number) => {
-        const optBtn = document.createElement('div');
-        optBtn.id = `quiz-option-${oIndex}`;
-        optBtn.style.border = '12px solid transparent';
-        optBtn.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_Blue_Square.svg')";
-        optBtn.style.borderImageSlice = '64 fill';
-        optBtn.style.borderImageWidth = '12px';
-        optBtn.style.borderImageRepeat = 'stretch';
-        optBtn.style.width = '42%';
-        optBtn.style.maxWidth = '280px';
-        optBtn.style.height = '140px';
-        optBtn.style.display = 'flex';
-        optBtn.style.justifyContent = 'center';
-        optBtn.style.alignItems = 'center';
-        optBtn.style.boxSizing = 'border-box';
-        optBtn.style.padding = '20px';
-        optBtn.style.color = '#ffffff';
-        optBtn.style.fontFamily = '"Concert One", system-ui, sans-serif';
-        optBtn.style.fontSize = '24px';
-        optBtn.style.cursor = 'pointer';
-        optBtn.style.userSelect = 'none';
-        optBtn.style.transition = 'transform 0.15s ease';
-
-        optBtn.addEventListener('mouseenter', () => {
-          if (this.quizAnswered) return;
-          optBtn.style.transform = 'scale(1.04)';
-        });
-        optBtn.addEventListener('mouseleave', () => {
-          optBtn.style.transform = 'scale(1.0)';
-        });
-        optBtn.addEventListener('click', () => {
-          if (this.quizAnswered) return;
-          this.submitAnswer(oIndex);
-        });
-
-        this.renderKatex(optText, optBtn);
-        optionsWrapper.appendChild(optBtn);
-      });
-    } else {
-      // Vertical arrangement
-      optionsWrapper.style.flexDirection = 'column';
-      optionsWrapper.style.gap = '20px';
-
-      options.forEach((optText: string, oIndex: number) => {
-        const optBtn = document.createElement('div');
-        optBtn.id = `quiz-option-${oIndex}`;
-        optBtn.style.border = '12px solid transparent';
-        optBtn.style.borderImageSource = "url('/game/assets/gui/boxes_banners/Box_Blue_Square.svg')";
-        optBtn.style.borderImageSlice = '64 fill';
-        optBtn.style.borderImageWidth = '12px';
-        optBtn.style.borderImageRepeat = 'stretch';
-        optBtn.style.width = '90%';
-        optBtn.style.maxWidth = '680px';
-        optBtn.style.height = '80px';
-        optBtn.style.display = 'flex';
-        optBtn.style.justifyContent = 'center';
-        optBtn.style.alignItems = 'center';
-        optBtn.style.boxSizing = 'border-box';
-        optBtn.style.padding = '10px';
-        optBtn.style.color = '#ffffff';
-        optBtn.style.fontFamily = '"Concert One", system-ui, sans-serif';
-        optBtn.style.fontSize = '22px';
-        optBtn.style.cursor = 'pointer';
-        optBtn.style.userSelect = 'none';
-        optBtn.style.transition = 'transform 0.15s ease';
-
-        optBtn.addEventListener('mouseenter', () => {
-          if (this.quizAnswered) return;
-          optBtn.style.transform = 'scale(1.03)';
-        });
-        optBtn.addEventListener('mouseleave', () => {
-          optBtn.style.transform = 'scale(1.0)';
-        });
-        optBtn.addEventListener('click', () => {
-          if (this.quizAnswered) return;
-          this.submitAnswer(oIndex);
-        });
-
-        this.renderKatex(optText, optBtn);
-        optionsWrapper.appendChild(optBtn);
-      });
-    }
-    modal.appendChild(optionsWrapper);
-
-    // Floating text feed area placeholder
-    const feedbackArea = document.createElement('div');
-    feedbackArea.id = 'quiz-feedback';
-    feedbackArea.style.marginTop = '20px';
-    feedbackArea.style.height = '120px';
-    feedbackArea.style.display = 'flex';
-    feedbackArea.style.justifyContent = 'center';
-    feedbackArea.style.alignItems = 'center';
-    feedbackArea.style.fontFamily = '"Concert One", system-ui, sans-serif';
-    feedbackArea.style.fontSize = '36px';
-    feedbackArea.style.fontWeight = 'bold';
-    modal.appendChild(feedbackArea);
-
-    overlay.appendChild(modal);
+    iframe.src = `${window.location.origin}/quiz-overlay?${params.toString()}`;
+    overlay.appendChild(iframe);
     parent.appendChild(overlay);
+
+    // Register a secure postMessage listener for child interactions
+    this.messageHandler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      const packet = event.data;
+      if (packet.type === 'quiz-submit') {
+        this.submitAnswer(packet.index);
+      } else if (packet.type === 'quiz-close') {
+        this.clearQuiz();
+      }
+    };
+    window.addEventListener('message', this.messageHandler);
   }
 
   private submitAnswer(index: number) {
     this.quizAnswered = true;
-    const feedback = document.getElementById('quiz-feedback');
-    if (feedback) {
-      feedback.innerHTML = '<div class="spinner"></div>';
-    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'game.quiz.answer',
@@ -1227,24 +1059,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private handleQuizResult(resultData: any) {
-    const isCorrect = resultData.correct;
-    const selected = resultData.selected_index;
-
-    // Apply colors to the selected button
-    const selectedBtn = document.getElementById(`quiz-option-${selected}`);
-    if (selectedBtn) {
-      if (isCorrect) {
-        selectedBtn.style.filter = 'hue-rotate(260deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 16px #22c55e)';
-      } else {
-        selectedBtn.style.filter = 'hue-rotate(140deg) saturate(2.0) brightness(1.2) drop-shadow(0 0 16px #ef4444)';
-      }
-    }
-
-    // Set feedback text and colors
-    const feedback = document.getElementById('quiz-feedback');
-    if (feedback) {
-      feedback.innerText = isCorrect ? '+30 ESSENCE - CORRECT!' : 'INCORRECT';
-      feedback.style.color = isCorrect ? '#22c55e' : '#ef4444';
+    // Send the result down to the iframe overlay
+    const iframe = document.getElementById('quiz-iframe') as HTMLIFrameElement;
+    if (iframe && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({
+        type: 'quiz-result',
+        data: resultData
+      }, '*');
     }
 
     // Delay 2 seconds and auto close

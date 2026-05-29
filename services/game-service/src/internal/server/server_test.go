@@ -1220,6 +1220,13 @@ type fakeQuizCache struct {
 	quizzes quizcache.LevelQuizzes
 }
 
+func (c *fakeQuizCache) Get(_ context.Context, generationID string) (quizcache.LevelQuizzes, error) {
+	if c.quizzes.GenerationID != generationID {
+		return quizcache.LevelQuizzes{}, quizcache.ErrQuizzesNotFound
+	}
+	return c.quizzes, nil
+}
+
 func (c *fakeQuizCache) Set(_ context.Context, generationID string, quizzes quizcache.LevelQuizzes) error {
 	quizzes.GenerationID = generationID
 	c.quizzes = quizzes
