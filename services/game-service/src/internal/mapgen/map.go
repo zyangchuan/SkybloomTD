@@ -14,6 +14,8 @@ const (
 const (
 	pathGenerationAttempts = 256
 	minTurnColumnGap       = 2
+	pathMinY               = 4
+	pathMaxY               = Height - 5
 )
 
 type GeneratedMap struct {
@@ -74,7 +76,7 @@ func generatePath(rng *rng) []point {
 }
 
 func generatePathCandidate(rng *rng) []point {
-	y := 2 + rng.Intn(Height-4)
+	y := randomPathY(rng)
 	current := point{x: 0, y: y}
 	points := []point{current}
 
@@ -140,15 +142,19 @@ func appendVertical(points *[]point, current *point, targetY int) {
 
 func nextPathY(rng *rng, currentY int) int {
 	for attempt := 0; attempt < 24; attempt++ {
-		y := 1 + rng.Intn(Height-2)
+		y := randomPathY(rng)
 		if abs(y-currentY) >= 2 {
 			return y
 		}
 	}
-	if currentY < Height/2 {
-		return min(Height-2, currentY+3)
+	if currentY <= (pathMinY+pathMaxY)/2 {
+		return min(pathMaxY, currentY+3)
 	}
-	return max(1, currentY-3)
+	return max(pathMinY, currentY-3)
+}
+
+func randomPathY(rng *rng) int {
+	return pathMinY + rng.Intn(pathMaxY-pathMinY+1)
 }
 
 func hasPathGap(points []point) bool {
@@ -171,13 +177,13 @@ func hasPathGap(points []point) bool {
 }
 
 func fallbackPath() []point {
-	points := []point{{x: 0, y: 2}}
+	points := []point{{x: 0, y: pathMinY}}
 	current := points[0]
 	for _, turn := range []point{
-		{x: 3, y: 5},
-		{x: 7, y: 8},
-		{x: 11, y: 5},
-		{x: 14, y: 2},
+		{x: 3, y: pathMaxY},
+		{x: 7, y: pathMinY},
+		{x: 11, y: pathMaxY},
+		{x: 14, y: pathMinY},
 	} {
 		appendHorizontal(&points, &current, turn.x)
 		appendVertical(&points, &current, turn.y)

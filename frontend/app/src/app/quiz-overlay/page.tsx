@@ -5,23 +5,34 @@ import { useSearchParams } from 'next/navigation';
 
 function QuizOverlayContent() {
   const searchParams = useSearchParams();
-  const quizId = searchParams.get('quiz_id') || '';
-  const rawQuestion = searchParams.get('question') || '';
-  const rawOptions = searchParams.get('options') || '[]';
-  const type = searchParams.get('type') || 'mcq';
 
-  let optionsList: string[] = [];
-  try {
-    optionsList = JSON.parse(rawOptions);
-  } catch (e) {
-    console.error('Failed to parse options in quiz overlay', e);
-  }
+  const [currentQuizId, setCurrentQuizId] = useState('');
+  const [currentQuestion, setCurrentQuestion] = useState('');
+  const [currentOptions, setCurrentOptions] = useState<string[]>([]);
+  const [currentType, setCurrentType] = useState('mcq');
 
   const [katexReady, setKatexReady] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [quizAnswered, setQuizAnswered] = useState(false);
   const [result, setResult] = useState<any | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Initialize state from search parameters
+  useEffect(() => {
+    const qid = searchParams.get('quiz_id') || '';
+    const qtext = searchParams.get('question') || '';
+    const qtype = searchParams.get('type') || 'mcq';
+    let qopts: string[] = [];
+    try {
+      qopts = JSON.parse(searchParams.get('options') || '[]');
+    } catch (e) {
+      console.error(e);
+    }
+    setCurrentQuizId(qid);
+    setCurrentQuestion(qtext);
+    setCurrentOptions(qopts);
+    setCurrentType(qtype);
+  }, [searchParams]);
 
   // Dynamically load KaTeX assets inside the iframe context
   useEffect(() => {
@@ -47,10 +58,21 @@ function QuizOverlayContent() {
     };
     document.head.appendChild(scriptJs);
 
-    // 4. Register cross-document listener to receive results from Phaser
+    // 4. Register cross-document listener to receive results and next quiz presented events from Phaser
     const handleResultPacket = (event: MessageEvent) => {
       if (event.data.type === 'quiz-result') {
         setResult(event.data.data);
+      } else if (event.data.type === 'quiz-presented') {
+        const promptData = event.data.data;
+        setCurrentQuizId(promptData.quiz_id);
+        setCurrentQuestion(promptData.question_markdown);
+        setCurrentOptions(promptData.options_markdown || []);
+        setCurrentType(promptData.quiz_type === 'true_false' ? 'tf' : 'mcq');
+        
+        // Reset answer states for the new question
+        setSelectedIndex(null);
+        setQuizAnswered(false);
+        setResult(null);
       }
     };
     window.addEventListener('message', handleResultPacket);
@@ -79,7 +101,7 @@ function QuizOverlayContent() {
         console.error('KaTeX typesetting crashed', e);
       }
     }
-  }, [katexReady, rawQuestion, rawOptions]);
+  }, [katexReady, currentQuestion, currentOptions]);
 
   const handleSelectOption = (index: number) => {
     if (quizAnswered) return;
@@ -96,9 +118,20 @@ function QuizOverlayContent() {
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 w-full h-full flex items-center justify-center p-4 bg-slate-950/75 select-none overflow-hidden"
+      className="fixed inset-0 w-full h-full flex items-center justify-center p-4 bg-transparent select-none overflow-hidden"
     >
       <style>{`
+        /* Force transparent document backdrops inside Next.js layout */
+        html, body {
+          background: transparent !important;
+          background-image: none !important;
+        }
+
+        /* Hide the moving sky clouds layout container inside this viewport */
+        .sky-clouds {
+          display: none !important;
+        }
+
         /* Dynamic premium 9-slice overlays utilizing vector SVGs */
         .modal-9slice {
           border: 24px solid transparent;
@@ -120,7 +153,17 @@ function QuizOverlayContent() {
           border-image-slice: 64 fill;
           border-image-width: 12px;
           border-image-repeat: stretch;
-          transition: transform 0.15s ease, filter 0.25s ease, opacity 0.2s ease;
+          transition: transform 0.15s ease, opacity 0.2s ease;
+        }
+        .btn-blue-simple {
+          background-image: url('/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg');
+          background-size: contain;
+          background-position: center;
+          background-repeat: no-repeat;
+          transition: transform 0.15s ease, color 0.15s ease;
+        }
+        .btn-blue-simple:hover {
+          color: #fef3c7 !important;
         }
         
         /* Interactive scaling hover actions */
@@ -138,24 +181,18 @@ function QuizOverlayContent() {
 
         /* Tactical Hue-Rotate Color Highlights */
         .highlight-correct {
-          filter: hue-rotate(260deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 16px #22c55e) !important;
-          animation: correctPulse 1.2s ease-in-out infinite !important;
+          filter: hue-rotate(260deg) saturate(1.8) brightness(1.2) !important;
         }
         .highlight-incorrect {
-          filter: hue-rotate(140deg) saturate(2.0) brightness(1.2) drop-shadow(0 0 16px #ef4444) !important;
-          animation: incorrectPulse 1.2s ease-in-out infinite !important;
+          filter: hue-rotate(140deg) saturate(2.0) brightness(1.2) !important;
+          animation: shakeWrong 0.4s ease-in-out !important;
         }
 
-        /* Pulsing Glow Animation Keyframes */
-        @keyframes correctPulse {
-          0% { transform: scale(1.0); filter: hue-rotate(260deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 8px rgba(34, 197, 94, 0.6)); }
-          50% { transform: scale(1.03); filter: hue-rotate(260deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 24px rgba(34, 197, 94, 0.95)); }
-          100% { transform: scale(1.0); filter: hue-rotate(260deg) saturate(1.8) brightness(1.2) drop-shadow(0 0 8px rgba(34, 197, 94, 0.6)); }
-        }
-        @keyframes incorrectPulse {
-          0% { transform: scale(1.0); filter: hue-rotate(140deg) saturate(2.0) brightness(1.2) drop-shadow(0 0 8px rgba(239, 68, 68, 0.6)); }
-          50% { transform: scale(1.03); filter: hue-rotate(140deg) saturate(2.0) brightness(1.2) drop-shadow(0 0 24px rgba(239, 68, 68, 0.95)); }
-          100% { transform: scale(1.0); filter: hue-rotate(140deg) saturate(2.0) brightness(1.2) drop-shadow(0 0 8px rgba(239, 68, 68, 0.6)); }
+        /* Tactical Shake Animation Keyframe for Incorrect Selections */
+        @keyframes shakeWrong {
+          0%, 100% { transform: translateX(0); }
+          20%, 60% { transform: translateX(-8px); }
+          40%, 80% { transform: translateX(8px); }
         }
 
         /* Custom solid circular loader spinner */
@@ -167,9 +204,51 @@ function QuizOverlayContent() {
           height: 48px;
           animation: spin 0.8s linear infinite;
         }
+        .button-spinner {
+          border: 4px solid rgba(255, 255, 255, 0.15);
+          border-top: 4px solid #38bdf8;
+          border-radius: 50%;
+          width: 24px;
+          height: 24px;
+          animation: spin 0.8s linear infinite;
+        }
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
+        }
+
+        /* Float rise animation for correct answer rewards */
+        @keyframes essenceFloat {
+          0% {
+            transform: translateY(30px) scale(0.7);
+            opacity: 0;
+          }
+          15% {
+            transform: translateY(0px) scale(1.15);
+            opacity: 1;
+          }
+          85% {
+            transform: translateY(-20px) scale(1.15);
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(-50px) scale(0.9);
+            opacity: 0;
+          }
+        }
+        .animate-essence-float {
+          animation: essenceFloat 2.0s forwards ease-in-out;
+        }
+
+        /* Stack math formulas vertically (below/above text) and center them */
+        .katex {
+          display: block !important;
+          text-align: center !important;
+          margin: 0.25em auto !important;
+        }
+        .katex-display {
+          display: block !important;
+          margin: 0.5em auto !important;
         }
 
         /* Premium fonts and layout rules */
@@ -183,19 +262,38 @@ function QuizOverlayContent() {
           -ms-overflow-style: none;
           scrollbar-width: none;
         }
+        .scroll-custom::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+          display: block;
+        }
+        .scroll-custom::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 4px;
+        }
+        .scroll-custom::-webkit-scrollbar-thumb {
+          background: rgba(56, 189, 248, 0.35);
+          border-radius: 4px;
+        }
+        .scroll-custom::-webkit-scrollbar-thumb:hover {
+          background: rgba(56, 189, 248, 0.65);
+        }
+        .scroll-custom {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(56, 189, 248, 0.35) rgba(255, 255, 255, 0.05);
+        }
       `}</style>
 
-      {/* Main modal container */}
       <div 
-        className="modal-9slice relative flex flex-col items-center w-full max-w-[800px] max-h-[90vh] bg-slate-900 rounded-xl scroll-hide overflow-y-auto"
-        style={{ boxSizing: 'border-box', padding: '16px' }}
+        className="modal-9slice relative flex flex-col items-center w-full max-w-[800px] max-h-[90vh] bg-slate-900 rounded-xl scroll-hide overflow-hidden"
+        style={{ boxSizing: 'border-box', padding: '16px', paddingBottom: '32px' }}
       >
         {/* Close exit button */}
         <button 
           onClick={handleClose}
           className="absolute top-2 right-2 w-12 h-12 border-none bg-transparent cursor-pointer z-50 transition-transform duration-150 hover:scale-[1.15] active:scale-[0.95]"
           style={{
-            backgroundImage: "url('/game/assets/gui/buttons_text/PremadeButtons_ExitOrange.svg')",
+            backgroundImage: "url('/game/assets/gui/icons/Icon_Small_WhiteOutline_X.svg')",
             backgroundSize: 'contain',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat'
@@ -205,19 +303,18 @@ function QuizOverlayContent() {
 
         {/* Math Question Box */}
         <div 
-          className="question-9slice flex items-center justify-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-3xl text-center text-white select-text overflow-y-auto scroll-hide mt-8"
+          className="question-9slice flex flex-col items-center justify-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-hide mt-2"
           style={{ boxSizing: 'border-box', padding: '24px' }}
         >
-          {rawQuestion}
+          {currentQuestion}
         </div>
 
-        {/* Dynamic MCQ / TF Selection layout */}
-        {type === 'tf' ? (
-          <div className="flex flex-row justify-center gap-6 w-full max-w-[680px] mt-6">
-            {optionsList.map((option, idx) => {
+        {currentType === 'tf' ? (
+          <div className="flex flex-row justify-center gap-6 w-full max-w-[680px] mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom">
+            {currentOptions.map((option, idx) => {
               const isSelected = selectedIndex === idx;
               let highlightClass = '';
-              if (isSelected && result) {
+              if (isSelected && result && result.quiz_id === currentQuizId) {
                 highlightClass = result.correct ? 'highlight-correct' : 'highlight-incorrect';
               }
               return (
@@ -225,24 +322,31 @@ function QuizOverlayContent() {
                   key={idx}
                   onClick={() => handleSelectOption(idx)}
                   disabled={quizAnswered}
-                  className={`option-9slice option-hover-tf ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex items-center justify-center w-[42%] max-w-[280px] h-[140px] bg-slate-900 font-concert text-2xl text-white text-center`}
+                  className={`option-9slice option-hover-tf ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex items-center justify-center w-[42%] max-w-[280px] h-[140px] bg-transparent font-concert text-lg text-white text-center relative`}
                   style={{ 
                     boxSizing: 'border-box', 
                     padding: '20px', 
                     opacity: quizAnswered && !isSelected ? 0.5 : 1.0 
                   }}
                 >
-                  {option}
+                  <span className={quizAnswered && isSelected && !result ? "opacity-0 pointer-events-none" : "opacity-100"}>
+                    {option}
+                  </span>
+                  {quizAnswered && isSelected && !result && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="button-spinner" />
+                    </div>
+                  )}
                 </button>
               );
             })}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-4 w-full mt-6">
-            {optionsList.map((option, idx) => {
+          <div className="flex flex-col items-center gap-4 w-full mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom">
+            {currentOptions.map((option, idx) => {
               const isSelected = selectedIndex === idx;
               let highlightClass = '';
-              if (isSelected && result) {
+              if (isSelected && result && result.quiz_id === currentQuizId) {
                 highlightClass = result.correct ? 'highlight-correct' : 'highlight-incorrect';
               }
               return (
@@ -250,41 +354,44 @@ function QuizOverlayContent() {
                   key={idx}
                   onClick={() => handleSelectOption(idx)}
                   disabled={quizAnswered}
-                  className={`option-9slice option-hover ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex items-center justify-center w-[90%] max-w-[680px] h-[80px] bg-slate-900 font-concert text-2xl text-white text-center`}
+                  className={`option-9slice option-hover ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex flex-col items-start justify-center w-[90%] max-w-[680px] bg-transparent font-concert text-lg text-white text-left relative`}
                   style={{ 
                     boxSizing: 'border-box', 
                     padding: '16px', 
                     opacity: quizAnswered && !isSelected ? 0.5 : 1.0 
                   }}
                 >
-                  {option}
+                  <span className={quizAnswered && isSelected && !result ? "opacity-0 pointer-events-none" : "opacity-100"}>
+                    {option}
+                  </span>
+                  {quizAnswered && isSelected && !result && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="button-spinner" />
+                    </div>
+                  )}
                 </button>
               );
             })}
           </div>
         )}
 
-        {/* Feedback Bottom area */}
-        <div 
-          className="flex items-center justify-center w-full h-[120px] font-concert text-2xl text-center select-text z-10"
-          style={{ paddingBottom: '40px', boxSizing: 'border-box' }}
-        >
-          {quizAnswered && !result && (
-            <div className="spinner" />
-          )}
-          {result && (
-            <div 
-              style={{
-                color: result.correct ? '#22c55e' : '#ef4444',
-                textShadow: result.correct 
-                  ? '0 0 10px rgba(34, 197, 94, 0.4)' 
-                  : '0 0 10px rgba(239, 68, 68, 0.4)'
-              }}
-            >
-              {result.feedback || (result.correct ? 'CORRECT!' : 'INCORRECT!')}
-            </div>
-          )}
-        </div>
+        {result && (
+          <button 
+            onClick={() => {
+              window.parent.postMessage({ type: 'quiz-next' }, '*');
+            }}
+            className="btn-blue-simple mt-6 py-4 px-4 bg-transparent font-concert text-[20px] text-white text-center flex items-center justify-center cursor-pointer transition-transform duration-150 hover:scale-[1.05] active:scale-[0.95] border-none outline-none select-none z-50"
+            style={{ boxSizing: 'border-box' }}
+          >
+            <span style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Next Quiz</span>
+          </button>
+        )}
+
+        {result && result.correct && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 animate-essence-float font-concert text-5xl text-emerald-400 font-bold">
+            +30 Essence
+          </div>
+        )}
       </div>
     </div>
   );
@@ -293,7 +400,7 @@ function QuizOverlayContent() {
 export default function QuizOverlayPage() {
   return (
     <Suspense fallback={
-      <div className="fixed inset-0 w-full h-full flex items-center justify-center bg-slate-950/75 select-none font-sans text-white text-2xl">
+      <div className="fixed inset-0 w-full h-full flex items-center justify-center bg-transparent select-none font-sans text-white text-2xl">
         Loading Quiz Window...
       </div>
     }>

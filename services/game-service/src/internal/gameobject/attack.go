@@ -4,7 +4,7 @@ import "math"
 
 const (
 	LockedProjectileSpeed = 16.0
-	DirectionalHitRadius  = 0.25
+	DirectionalHitRadius  = 0.35
 	SplashSpreadRadians   = math.Pi / 12
 )
 

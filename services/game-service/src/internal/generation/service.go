@@ -20,6 +20,7 @@ type Repository interface {
 	CreateGeneration(ctx context.Context, generation models.LevelGenerationRecord) error
 	FindReusableLevelWithQuizzes(ctx context.Context, userID string, subChapterID string) (models.ReusableLevel, error)
 	GetGenerationByIdempotencyKey(ctx context.Context, idempotencyKey string) (models.LevelGenerationRecord, error)
+	ClearGenerationLevelID(ctx context.Context, generationID string) error
 }
 
 type StatusStore interface {
@@ -70,6 +71,15 @@ func (s *Service) Start(ctx context.Context, userID string, subChapterID string)
 
 	existing, err := s.repository.GetGenerationByIdempotencyKey(ctx, key)
 	if err == nil {
+		if existing.LevelID != nil && *existing.LevelID != "" {
+			reusable, err := s.repository.FindReusableLevelWithQuizzes(ctx, existing.UserID, existing.SubChapterID)
+			if err != nil || reusable.LevelID != *existing.LevelID || !reusable.HasPlayableMap() {
+				if clearErr := s.repository.ClearGenerationLevelID(ctx, existing.ID); clearErr != nil {
+					return StartResult{}, clearErr
+				}
+				existing.LevelID = nil
+			}
+		}
 		return s.resultForExisting(ctx, existing)
 	}
 	if !errors.Is(err, models.ErrGenerationNotFound) {

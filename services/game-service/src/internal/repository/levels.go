@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -51,6 +52,21 @@ type QuizMistakeInput struct {
 	OptionsMarkdown  []string
 	AnswerIndex      int
 	SelectedIndex    int
+}
+
+type QuizMistakeSummaryItem struct {
+	ID               string
+	UserID           string
+	LevelID          string
+	GenerationID     string
+	QuizID           string
+	QuizIndex        int
+	QuizType         string
+	QuestionMarkdown string
+	OptionsMarkdown  []string
+	AnswerIndex      int
+	SelectedIndex    int
+	CreatedAt        *time.Time
 }
 
 type SavedLevel struct {
@@ -159,6 +175,49 @@ func (r *LevelRepository) SaveQuizMistake(ctx context.Context, input QuizMistake
 	}).Error
 }
 
+func (r *LevelRepository) ClearQuizMistakes(ctx context.Context, userID string, levelID string) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ? AND level_id = ?", userID, levelID).
+		Delete(&models.QuizMistake{}).
+		Error
+}
+
+func (r *LevelRepository) ListQuizMistakes(ctx context.Context, userID string, levelID string) ([]QuizMistakeSummaryItem, error) {
+	var mistakes []models.QuizMistake
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND level_id = ?", userID, levelID).
+		Order("quiz_index ASC, created_at ASC, id ASC").
+		Find(&mistakes).
+		Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]QuizMistakeSummaryItem, 0, len(mistakes))
+	for _, mistake := range mistakes {
+		var options []string
+		if len(mistake.OptionsMarkdown) > 0 {
+			if err := json.Unmarshal(mistake.OptionsMarkdown, &options); err != nil {
+				return nil, err
+			}
+		}
+		items = append(items, QuizMistakeSummaryItem{
+			ID:               mistake.ID,
+			UserID:           mistake.UserID,
+			LevelID:          mistake.LevelID,
+			GenerationID:     mistake.GenerationID,
+			QuizID:           mistake.QuizID,
+			QuizIndex:        mistake.QuizIndex,
+			QuizType:         mistake.QuizType,
+			QuestionMarkdown: mistake.QuestionMarkdown,
+			OptionsMarkdown:  options,
+			AnswerIndex:      mistake.AnswerIndex,
+			SelectedIndex:    mistake.SelectedIndex,
+			CreatedAt:        mistake.CreatedAt,
+		})
+	}
+	return items, nil
+}
+
 func (r *LevelRepository) CreateGeneration(ctx context.Context, generation models.LevelGenerationRecord) error {
 	return r.db.WithContext(ctx).Create(&generation).Error
 }
@@ -192,6 +251,15 @@ func (r *LevelRepository) GetGenerationByIdempotencyKey(ctx context.Context, ide
 	}
 	return generation, nil
 }
+
+func (r *LevelRepository) ClearGenerationLevelID(ctx context.Context, generationID string) error {
+	return r.db.WithContext(ctx).
+		Model(&models.LevelGenerationRecord{}).
+		Where("id = ?", generationID).
+		Update("level_id", nil).
+		Error
+}
+
 
 func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, userID string, subChapterID string) (models.ReusableLevel, error) {
 	var row struct {

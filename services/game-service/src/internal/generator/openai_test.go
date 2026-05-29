@@ -38,8 +38,8 @@ func TestGenerateLevelRetriesValidationFailure(t *testing.T) {
 	if !strings.Contains(transport.prompts[1], "Previous attempt failed validation") {
 		t.Fatalf("expected validation feedback in retry prompt, got %q", transport.prompts[1])
 	}
-	if len(generation.Quizzes) != 10 {
-		t.Fatalf("expected 10 quizzes, got %d", len(generation.Quizzes))
+	if len(generation.Quizzes) != quizCount {
+		t.Fatalf("expected %d quizzes, got %d", quizCount, len(generation.Quizzes))
 	}
 }
 
@@ -66,11 +66,13 @@ func TestGenerateLevelRepairsTrueFalseOptions(t *testing.T) {
 	if len(transport.prompts) != 1 {
 		t.Fatalf("expected one model call after repair, got %d", len(transport.prompts))
 	}
-	if got := generation.Quizzes[0].OptionsMarkdown; len(got) != 2 || got[0] != "True" || got[1] != "False" {
+	got := generation.Quizzes[0].OptionsMarkdown
+	if len(got) != 2 || !((got[0] == "True" && got[1] == "False") || (got[0] == "False" && got[1] == "True")) {
 		t.Fatalf("expected normalized true/false options, got %#v", got)
 	}
-	if generation.Quizzes[0].AnswerIndex != 0 {
-		t.Fatalf("expected answer index to stay mapped to True, got %d", generation.Quizzes[0].AnswerIndex)
+	correctOption := generation.Quizzes[0].OptionsMarkdown[generation.Quizzes[0].AnswerIndex]
+	if correctOption != "True" {
+		t.Fatalf("expected answer index to stay mapped to True, got %d (option %s)", generation.Quizzes[0].AnswerIndex, correctOption)
 	}
 }
 
@@ -151,8 +153,8 @@ func oneOptionTrueFalseGeneration() *LevelGeneration {
 }
 
 func validGeneration() LevelGeneration {
-	quizzes := make([]QuizItem, 0, 10)
-	for i := 0; i < 10; i++ {
+	quizzes := make([]QuizItem, 0, quizCount)
+	for i := 0; i < quizCount; i++ {
 		quizzes = append(quizzes, QuizItem{
 			QuizType:         "true_false",
 			QuestionMarkdown: "Question?",

@@ -73,10 +73,13 @@ type StoredProjectile struct {
 }
 
 type RuntimeState struct {
+	GenerationID      string
 	Health            int
 	Essence           int
 	Wave              int
 	Tick              int64
+	LoopStarted       bool
+	LoopPaused        bool
 	WaveStartedAtTick int64
 	WaveSpawned       int
 	NextWaveTick      int64
@@ -143,6 +146,8 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"wave":                 state.Wave,
 		"wave_number":          state.Wave,
 		"tick":                 state.Tick,
+		"loop_started":         false,
+		"loop_paused":          false,
 		"wave_started_at_tick": 0,
 		"wave_spawned":         0,
 		"next_wave_tick":       1,
@@ -194,10 +199,13 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 		return RuntimeState{}, err
 	}
 	return RuntimeState{
+		GenerationID:      state.GenerationID,
 		Health:            state.Health,
 		Essence:           state.Essence,
 		Wave:              state.Wave,
 		Tick:              state.Tick,
+		LoopStarted:       boolValue(values["loop_started"], false),
+		LoopPaused:        boolValue(values["loop_paused"], false),
 		WaveStartedAtTick: int64Value(values["wave_started_at_tick"], 0),
 		WaveSpawned:       intValue(values["wave_spawned"], 0),
 		NextWaveTick:      int64Value(values["next_wave_tick"], 0),
@@ -250,6 +258,10 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 		strconv.Itoa(runtime.Wave),
 		"tick",
 		strconv.FormatInt(runtime.Tick, 10),
+		"loop_started",
+		strconv.FormatBool(runtime.LoopStarted),
+		"loop_paused",
+		strconv.FormatBool(runtime.LoopPaused),
 		"wave_started_at_tick",
 		strconv.FormatInt(runtime.WaveStartedAtTick, 10),
 		"wave_spawned",
@@ -448,6 +460,17 @@ func int64Value(value string, fallback int64) int64 {
 		return fallback
 	}
 	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func boolValue(value string, fallback bool) bool {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}

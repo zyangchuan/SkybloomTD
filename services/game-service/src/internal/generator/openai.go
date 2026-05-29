@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ const systemPrompt = `You are an educational level generator.
 
 Use only the source text provided by the user. Produce a complete level made of:
 - a markdown summary for the level
-- at least 10 quizzes for the level
+- exactly 30 quizzes for the level
 
 Each quiz can be either:
 - mcq: exactly 3 markdown option strings
@@ -28,6 +29,8 @@ Every question_markdown value and every options_markdown item must be a markdown
 string. answer_index must be the zero-based integer index of the correct option
 in options_markdown. Do not include facts that are not supported by the source
 text.`
+
+const quizCount = 30
 
 type Config struct {
 	APIKey      string
@@ -276,7 +279,8 @@ func levelGenerationSchema() map[string]any {
 			"summary_markdown": map[string]any{"type": "string"},
 			"quizzes": map[string]any{
 				"type":     "array",
-				"minItems": 10,
+				"minItems": quizCount,
+				"maxItems": quizCount,
 				"items":    quizSchema,
 			},
 		},
@@ -284,23 +288,52 @@ func levelGenerationSchema() map[string]any {
 }
 
 func normalizeGeneration(generation *LevelGeneration) {
+	// First, normalize true_false options to exact "True" and "False" values
 	for index := range generation.Quizzes {
 		quiz := &generation.Quizzes[index]
-		if quiz.QuizType != "true_false" {
+		if quiz.QuizType == "true_false" {
+			correct := ""
+			if quiz.AnswerIndex >= 0 && quiz.AnswerIndex < len(quiz.OptionsMarkdown) {
+				correct = normalizedTrueFalseOption(quiz.OptionsMarkdown[quiz.AnswerIndex])
+			}
+			if correct == "" {
+				continue
+			}
+			quiz.OptionsMarkdown = []string{"True", "False"}
+			if correct == "true" {
+				quiz.AnswerIndex = 0
+			} else {
+				quiz.AnswerIndex = 1
+			}
+		}
+	}
+
+	// Shuffle options for all quizzes to eliminate any positional/LLM bias
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for index := range generation.Quizzes {
+		quiz := &generation.Quizzes[index]
+		if len(quiz.OptionsMarkdown) <= 1 {
 			continue
 		}
-		correct := ""
+		
+		correctText := ""
 		if quiz.AnswerIndex >= 0 && quiz.AnswerIndex < len(quiz.OptionsMarkdown) {
-			correct = normalizedTrueFalseOption(quiz.OptionsMarkdown[quiz.AnswerIndex])
+			correctText = quiz.OptionsMarkdown[quiz.AnswerIndex]
 		}
-		if correct == "" {
-			continue
-		}
-		quiz.OptionsMarkdown = []string{"True", "False"}
-		if correct == "true" {
-			quiz.AnswerIndex = 0
-		} else {
-			quiz.AnswerIndex = 1
+		
+		// Shuffle options using Fisher-Yates algorithm
+		r.Shuffle(len(quiz.OptionsMarkdown), func(i, j int) {
+			quiz.OptionsMarkdown[i], quiz.OptionsMarkdown[j] = quiz.OptionsMarkdown[j], quiz.OptionsMarkdown[i]
+		})
+		
+		// Map the AnswerIndex back to the new shuffled position
+		if correctText != "" {
+			for i, opt := range quiz.OptionsMarkdown {
+				if opt == correctText {
+					quiz.AnswerIndex = i
+					break
+				}
+			}
 		}
 	}
 }
@@ -322,8 +355,8 @@ func validateGeneration(generation LevelGeneration) error {
 	if strings.TrimSpace(generation.SummaryMarkdown) == "" {
 		return errors.New("summary_markdown cannot be empty")
 	}
-	if len(generation.Quizzes) < 10 {
-		return errors.New("generate at least 10 quizzes")
+	if len(generation.Quizzes) != quizCount {
+		return fmt.Errorf("generate exactly %d quizzes", quizCount)
 	}
 	for index, quiz := range generation.Quizzes {
 		if strings.TrimSpace(quiz.QuestionMarkdown) == "" {

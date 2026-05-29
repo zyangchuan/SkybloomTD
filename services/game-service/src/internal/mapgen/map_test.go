@@ -26,6 +26,20 @@ func TestGeneratedPathKeepsOneTileGap(t *testing.T) {
 	}
 }
 
+func TestGeneratedPathAvoidsTopAndBottomUIRows(t *testing.T) {
+	for seed := int64(0); seed < 1000; seed++ {
+		levelMap, err := Generate(seed, Version)
+		if err != nil {
+			t.Fatalf("Generate(%d) failed: %v", seed, err)
+		}
+		for index, tile := range levelMap.EnemyPath {
+			if tile.Y < pathMinY || tile.Y > pathMaxY {
+				t.Fatalf("seed %d path tile %d uses UI row: %#v", seed, index, tile)
+			}
+		}
+	}
+}
+
 func TestGeneratedObjectsStayAwayFromPath(t *testing.T) {
 	for seed := int64(0); seed < 1000; seed++ {
 		levelMap, err := Generate(seed, Version)

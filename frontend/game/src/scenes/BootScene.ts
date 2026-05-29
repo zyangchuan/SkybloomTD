@@ -16,6 +16,7 @@ export default class BootScene extends Phaser.Scene {
   init() {
     const params = new URLSearchParams(window.location.search);
     this.subChapterId = params.get('sub_chapter_id');
+    this.cameras.main.setBackgroundColor('#0f172a');
   }
 
   preload() {
@@ -23,7 +24,7 @@ export default class BootScene extends Phaser.Scene {
 
     // Background gradient/graphics
     const graphics = this.add.graphics();
-    graphics.fillGradientStyle(0x0a0e17, 0x0a0e17, 0x121824, 0x121824, 1);
+    graphics.fillStyle(0x0f172a, 1);
     graphics.fillRect(0, 0, width, height);
 
     // Preload all tile and object assets
@@ -58,6 +59,7 @@ export default class BootScene extends Phaser.Scene {
     // Preload HUD SVG icons
     this.load.svg('icon_heart', '/game/assets/gui/icons/Icon_Small_HeartFull.svg');
     this.load.svg('icon_essence', '/game/assets/gui/icons/Icon_Small_CoinDollar.svg');
+    this.load.svg('icon_pause', '/game/assets/gui/icons/Icon_Small_WhiteOutline_Pause.svg');
 
     // Preload bird item assets
     this.load.svg('box_square', '/game/assets/gui/boxes_banners/Box_Square.svg', { width: 256, height: 256 });
@@ -65,6 +67,7 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
+    this.load.svg('textbox_blank_side', '/game/assets/gui/boxes_banners/TextBox_Blank_Side.svg', { width: 450, height: 160 });
     this.load.image('head_sparrow', '/game/assets/birds/sparrow_head.png');
     this.load.image('head_woodpecker', '/game/assets/birds/woodpecker_head.png');
     this.load.image('head_eagle', '/game/assets/birds/eagle_head.png');
@@ -87,13 +90,18 @@ export default class BootScene extends Phaser.Scene {
   }
 
   create() {
+    this.sys.game.canvas.classList.remove('has-shadow');
     const { width, height } = this.scale;
 
-    this.loadingText = this.add.text(width / 2, height / 2 - 20, 'Preparing your level...', {
+    // Central card container using box_orange_square NineSlice
+    const card = this.add.nineslice(width / 2, height / 2 + 10, 'box_orange_square', 0, 900, 500, 32, 32, 32, 32);
+    card.setOrigin(0.5);
+
+    this.loadingText = this.add.text(width / 2, height / 2 - 30, 'Preparing your level...', {
       fontFamily: '"Concert One", system-ui, sans-serif',
       fontSize: '64px',
       fontStyle: 'bold',
-      color: '#38bdf8',
+      color: '#451a03',
     }).setOrigin(0.5);
 
     this.loadingTween = this.tweens.add({
@@ -105,10 +113,10 @@ export default class BootScene extends Phaser.Scene {
       ease: 'Sine.easeInOut'
     });
 
-    this.detailText = this.add.text(width / 2, height / 2 + 60, 'Connecting to server...', {
+    this.detailText = this.add.text(width / 2, height / 2 + 50, 'Connecting to server...', {
       fontFamily: '"Concert One", system-ui, sans-serif',
       fontSize: '32px',
-      color: '#64748b',
+      color: '#78350f',
     }).setOrigin(0.5);
 
     if (!this.subChapterId) {
@@ -131,7 +139,7 @@ export default class BootScene extends Phaser.Scene {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        this.detailText.setText('Connected. Starting generation...');
+        this.detailText.setText('Connected. Starting quiz generation...');
         this.startGameGeneration();
       };
 
@@ -180,11 +188,11 @@ export default class BootScene extends Phaser.Scene {
           this.detailText.setText('Level ready! Loading game session...');
           this.loadGameSession(level_id);
         } else if (status_url) {
-          this.detailText.setText('Generating map resources...');
+          this.detailText.setText('Generating map and study quizzes...');
           this.startPollingStatus(status_url);
         } else if (generation_id) {
           const fallbackStatusUrl = `/api/game-service/level-generation/${generation_id}/status`;
-          this.detailText.setText('Generating map resources (fallback)...');
+          this.detailText.setText('Generating map and study quizzes (fallback)...');
           this.startPollingStatus(fallbackStatusUrl);
         } else {
           this.showError('Invalid level generation message received.');
@@ -248,7 +256,7 @@ export default class BootScene extends Phaser.Scene {
           this.showError(data.error || 'Level generation failed on worker.');
         } else {
           if (data.map_status === 'running' || data.quiz_status === 'running') {
-            this.detailText.setText('Indexing contents and building map paths...');
+            this.detailText.setText('Indexing document content and building quizzes...');
           }
         }
       } catch (err: any) {

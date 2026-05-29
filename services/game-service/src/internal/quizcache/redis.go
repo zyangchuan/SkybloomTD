@@ -145,6 +145,15 @@ func (s *Store) Take(ctx context.Context, generationID string, quizID string) (C
 	return CachedQuiz{}, len(quizzes.Quizzes), ErrQuizNotFound
 }
 
+func (s *Store) Delete(ctx context.Context, generationID string) error {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return errors.New("quiz cache is not configured")
+	}
+	_, err := s.client.Do("DEL", key(generationID))
+	return err
+}
+
 func (s *Store) Close() error {
 	if s.client == nil {
 		return nil

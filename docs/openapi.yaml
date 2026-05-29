@@ -560,6 +560,51 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/game-service/quiz-mistakes:
+    get:
+      tags: [Game Service]
+      summary: List quiz mistakes for a level
+      description: |
+        Returns the authenticated user's saved incorrect quiz answers for the
+        requested level. This endpoint is intended for frontend mistake-summary
+        views after or during a game session.
+      operationId: listGameQuizMistakes
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: level_id
+          in: query
+          required: true
+          description: Completed level id to summarize mistakes for.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Mistake summary for the requested level.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuizMistakeSummary"
+        "400":
+          description: Missing or invalid level id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Mistake summary dependencies are unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/game-service/ws:
     get:
       tags: [Game Service]
@@ -578,31 +623,43 @@ paths:
         quiz answer data stays server-side in the dedicated game Redis cache.
         To begin authoritative gameplay, send `game.session.start` with the
         completed `level_id`. The server initializes a Redis-backed session
-        with `health=100`, `essence=1000`, and `wave=0`, returns
-        `game.session.started` with the available bird type stats, then streams
-        `game.state` snapshots at 20 Hz. During the session, clients can send
-        `game.action.place_tower` with a `bird_type` and grid `x`/`y`.
+        with `health=100`, `essence=1000`, `wave=0`, and
+        `loop_started=false` and `loop_paused=false`, then returns
+        `game.session.started` with the available bird type stats. The 20 Hz
+        gameplay ticker starts only after the player answers a quiz correctly;
+        `game.quiz.result` includes `loop_started=true` when that happens.
+        During the session, clients can send `game.action.place_tower` with a
+        `bird_type` and grid `x`/`y`, or send `game.pause` to persist
+        `loop_paused=true` and stop advancing ticks until a later resume flow is
+        added.
         Reconnecting with the same `level_id` reuses the existing Redis session
         for that user and level, including placed birds, active smogs, active
-        projectiles, health, wave, tick, and current essence, until the session
-        expires. The gameplay loop runs three smog waves. The first wave starts
-        at the beginning of the session, and each later wave starts three
-        seconds after the previous wave has been cleared. Each smog that
-        reaches the path end removes 10 health. When health reaches 0, the
-        server stops the loop and sends `game.over`. When all three waves are
-        cleared with health remaining, the server stops the loop and sends
-        `game.victory`. Clients can send `game.exit` to stop the running loop
-        and delete the Redis gameplay session; cached maps are left to expire
-        by TTL. During a running session, clients can send `game.quiz.request`
-        to receive one quiz prompt without answer data, then send
-        `game.quiz.answer` with the selected option index. Correct answers
-        award 30 essence; incorrect answers are saved for a later mistakes
+        projectiles, health, wave, tick, current essence, loop start state, and
+        pause state, until the session expires. The gameplay loop runs three
+        smog waves, each split into three subwaves of grouped spawns. The first
+        wave starts
+        on the first gameplay tick after the loop is unlocked, and each later
+        wave starts three seconds after the previous wave has been cleared. Map
+        generation keeps the enemy path out of the top four and bottom four
+        rows so UI overlays do not cover it. Each smog that reaches the path
+        end removes 10 health. When health reaches 0, the server stops the loop
+        and sends `game.over`. When all three waves are cleared with health
+        remaining, the server stops the loop and sends `game.victory`. Clients
+        can send `game.exit` to stop the running loop
+        and delete the Redis gameplay session and level quiz cache; cached
+        maps are left to expire by TTL. This lets play-again repopulate the
+        full quiz set from PostgreSQL. During a running session, clients can
+        send `game.quiz.request` to receive one quiz prompt without answer
+        data, then send `game.quiz.answer` with the selected option index.
+        Correct answers award 30 essence and unlock the gameplay loop if it has
+        not started yet; incorrect answers are saved for a later mistakes
         summary. Answered quizzes are removed from Redis.
 
         If the database already has quizzes for the authenticated user's
         sub-chapter, the service reuses the saved level instead of generating
-        a new quiz set. Quiz answer data is copied into the dedicated game
-        Redis cache for authoritative validation during play.
+        a new quiz set. New quiz generations request exactly 30 quizzes. Quiz
+        answer data is copied into the dedicated game Redis cache for
+        authoritative validation during play.
       operationId: openGameWebSocket
       security:
         - cookieAuth: []
@@ -611,6 +668,7 @@ paths:
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
+        - $ref: "#/components/schemas/GamePauseWebSocketMessage"
         - $ref: "#/components/schemas/GameExitWebSocketMessage"
         - $ref: "#/components/schemas/GameQuizRequestMessage"
         - $ref: "#/components/schemas/GameQuizAnswerMessage"
@@ -621,6 +679,7 @@ paths:
         - $ref: "#/components/schemas/GameStateMessage"
         - $ref: "#/components/schemas/GameOverMessage"
         - $ref: "#/components/schemas/GameVictoryMessage"
+        - $ref: "#/components/schemas/GamePausedMessage"
         - $ref: "#/components/schemas/GameExitedMessage"
         - $ref: "#/components/schemas/GameQuizPresentedMessage"
         - $ref: "#/components/schemas/GameQuizResultMessage"
@@ -1096,6 +1155,14 @@ components:
               type: integer
               description: Grid row.
 
+    GamePauseWebSocketMessage:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: game.pause
+
     GameExitWebSocketMessage:
       type: object
       required: [type]
@@ -1197,6 +1264,16 @@ components:
           const: game.victory
         data:
           $ref: "#/components/schemas/GameVictoryState"
+
+    GamePausedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.paused
+        data:
+          $ref: "#/components/schemas/GamePausedState"
 
     GameExitedMessage:
       type: object
@@ -1400,8 +1477,8 @@ components:
 
     GameState:
       type: object
-      description: Authoritative gameplay snapshot. After `game.session.started`, `game.state` messages are sent 20 times per second.
-      required: [session_id, level_id, health, essence, wave, tick, server_time, birds, smogs, projectiles]
+      description: Authoritative gameplay snapshot. After the first correct quiz answer starts the loop, `game.state` messages are sent 20 times per second.
+      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, birds, smogs, projectiles]
       properties:
         session_id:
           type: string
@@ -1422,6 +1499,12 @@ components:
           type: integer
           format: int64
           example: 0
+        loop_started:
+          type: boolean
+          description: False until the player answers a quiz correctly and unlocks the gameplay ticker.
+        loop_paused:
+          type: boolean
+          description: True when the server has paused the gameplay ticker and is no longer advancing ticks, enemies, combat, or wave spawning.
         server_time:
           type: string
           format: date-time
@@ -1497,6 +1580,25 @@ components:
           type: string
           example: all_waves_cleared
 
+    GamePausedState:
+      type: object
+      required: [session_id, level_id, tick, loop_started, loop_paused]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        level_id:
+          type: string
+          format: uuid
+        tick:
+          type: integer
+          format: int64
+        loop_started:
+          type: boolean
+        loop_paused:
+          type: boolean
+          example: true
+
     GameExitedState:
       type: object
       required: [deleted, reason]
@@ -1534,7 +1636,7 @@ components:
 
     QuizResult:
       type: object
-      required: [quiz_id, correct, selected_index, essence_awarded, remaining]
+      required: [quiz_id, correct, selected_index, essence_awarded, remaining, loop_started]
       properties:
         quiz_id:
           type: string
@@ -1553,6 +1655,9 @@ components:
         remaining:
           type: integer
           description: Number of quizzes left after deleting the answered quiz.
+        loop_started:
+          type: boolean
+          description: True after a correct answer unlocks or confirms the gameplay loop.
 
     QuizUnavailable:
       type: object
@@ -1561,6 +1666,74 @@ components:
         reason:
           type: string
           example: no_quizzes_remaining
+
+    QuizMistakeSummary:
+      type: object
+      required: [level_id, count, mistakes]
+      properties:
+        level_id:
+          type: string
+          format: uuid
+        count:
+          type: integer
+          description: Number of saved mistakes returned.
+        mistakes:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuizMistake"
+
+    QuizMistake:
+      type: object
+      required:
+        - id
+        - level_id
+        - generation_id
+        - quiz_id
+        - quiz_index
+        - quiz_type
+        - question_markdown
+        - options_markdown
+        - answer_index
+        - selected_index
+        - correct_option_markdown
+        - selected_option_markdown
+      properties:
+        id:
+          type: string
+          format: uuid
+        level_id:
+          type: string
+          format: uuid
+        generation_id:
+          type: string
+          description: Level generation id that produced the quiz.
+        quiz_id:
+          type: string
+          format: uuid
+        quiz_index:
+          type: integer
+        quiz_type:
+          type: string
+          enum: [mcq, true_false]
+        question_markdown:
+          type: string
+        options_markdown:
+          type: array
+          items:
+            type: string
+        answer_index:
+          type: integer
+          description: Zero-based correct option index.
+        selected_index:
+          type: integer
+          description: Zero-based option index chosen by the player.
+        correct_option_markdown:
+          type: string
+        selected_option_markdown:
+          type: string
+        created_at:
+          type: string
+          format: date-time
 
     BirdTypeInfo:
       type: object

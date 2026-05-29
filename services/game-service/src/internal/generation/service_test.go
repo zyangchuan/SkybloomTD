@@ -58,6 +58,19 @@ func TestStartReturnsCompletedGenerationWithoutRepublishing(t *testing.T) {
 		MapAlgorithmVersion: mapgen.Version,
 		LevelID:             &levelID,
 	}
+	generationID := "generation-1"
+	mapSeed := int64(123)
+	mapVersion := mapgen.Version
+	repo.reusable = &models.ReusableLevel{
+		LevelID:                "level-1",
+		UserID:                 "user-1",
+		SubChapterID:           "sub-1",
+		GenerationID:           &generationID,
+		MapSeed:                &mapSeed,
+		MapAlgorithmVersion:    &mapVersion,
+		GenerationRecordExists: true,
+		QuizCount:              10,
+	}
 
 	result, err := service.Start(ctx, "user-1", "sub-1")
 	if err != nil {
@@ -193,6 +206,18 @@ func (r *fakeRepository) FindReusableLevelWithQuizzes(_ context.Context, userID 
 	}
 	return *r.reusable, nil
 }
+
+func (r *fakeRepository) ClearGenerationLevelID(_ context.Context, generationID string) error {
+	for k, v := range r.byKey {
+		if v.ID == generationID {
+			v.LevelID = nil
+			r.byKey[k] = v
+			return nil
+		}
+	}
+	return nil
+}
+
 
 type fakeStatuses struct {
 	byGeneration map[string]models.GenerationStatus

@@ -851,7 +851,7 @@ func TestAdvanceRuntimeTickDamagesHealthWhenSmogEscapes(t *testing.T) {
 		},
 		economy:           gamesession.NewEconomy(100),
 		waveStartedAtTick: 120,
-		waveSpawned:       12,
+		waveSpawned:       36,
 		nextWaveTick:      120,
 		path: []gameobject.Position{
 			{X: 0, Y: 0},
@@ -886,7 +886,7 @@ func TestAdvanceRuntimeTickWaitsThreeSecondsAfterWaveCleared(t *testing.T) {
 		},
 		economy:           gamesession.NewEconomy(100),
 		waveStartedAtTick: 1,
-		waveSpawned:       5,
+		waveSpawned:       15,
 		nextWaveTick:      1,
 		path: []gameobject.Position{
 			{X: 0, Y: 0},
@@ -950,16 +950,16 @@ func TestAdvanceRuntimeTickSpawnsSmogsEverySecond(t *testing.T) {
 		t.Fatalf("expected first tick to spawn one smog, got %d", len(runtime.smogs))
 	}
 
-	for i := 0; i < 19; i++ {
+	for i := 0; i < 39; i++ {
 		advanceRuntimeTick(&runtime, time.Now().UTC())
 	}
 	if len(runtime.smogs) != 1 {
-		t.Fatalf("expected no second smog before one second, got %d", len(runtime.smogs))
+		t.Fatalf("expected no second smog before two seconds, got %d", len(runtime.smogs))
 	}
 
 	advanceRuntimeTick(&runtime, time.Now().UTC())
 	if len(runtime.smogs) != 2 {
-		t.Fatalf("expected second smog after one second, got %d", len(runtime.smogs))
+		t.Fatalf("expected second smog after two seconds, got %d", len(runtime.smogs))
 	}
 }
 
@@ -989,7 +989,7 @@ func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
 			UpdatedAt:    time.Now().UTC(),
 		},
 		waveStartedAtTick: 120,
-		waveSpawned:       12,
+		waveSpawned:       36,
 		nextWaveTick:      120,
 	}
 	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, nil, nil, nil, nil, sessions).Router()
@@ -1155,6 +1155,82 @@ func TestWebsocketRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestQuizMistakesEndpointReturnsAuthenticatedLevelMistakes(t *testing.T) {
+	levels := &fakeLevelRepository{
+		mistakes: []repository.QuizMistakeInput{
+			{
+				UserID:           "22222222-2222-2222-2222-222222222222",
+				LevelID:          "11111111-1111-1111-1111-111111111111",
+				GenerationID:     "generation-1",
+				QuizID:           "66666666-6666-6666-6666-666666666666",
+				QuizIndex:        1,
+				QuizType:         "mcq",
+				QuestionMarkdown: "Pick A",
+				OptionsMarkdown:  []string{"A", "B", "C"},
+				AnswerIndex:      0,
+				SelectedIndex:    2,
+			},
+			{
+				UserID:           "33333333-3333-3333-3333-333333333333",
+				LevelID:          "11111111-1111-1111-1111-111111111111",
+				GenerationID:     "generation-2",
+				QuizID:           "77777777-7777-7777-7777-777777777777",
+				QuizIndex:        2,
+				QuizType:         "true_false",
+				QuestionMarkdown: "Other user's mistake",
+				OptionsMarkdown:  []string{"True", "False"},
+				AnswerIndex:      1,
+				SelectedIndex:    0,
+			},
+		},
+	}
+	handler := New(config.Config{}, levels, &fakeMapCache{}).Router()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/quiz-mistakes?level_id=11111111-1111-1111-1111-111111111111", nil)
+	request.Header.Set("X-Authenticated-User-Id", "22222222-2222-2222-2222-222222222222")
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", response.Code, response.Body.String())
+	}
+	var summary QuizMistakeSummaryState
+	if err := json.Unmarshal(response.Body.Bytes(), &summary); err != nil {
+		t.Fatalf("Unmarshal mistake summary failed: %v", err)
+	}
+	if summary.LevelID != "11111111-1111-1111-1111-111111111111" || summary.Count != 1 {
+		t.Fatalf("unexpected summary %+v", summary)
+	}
+	if len(summary.Mistakes) != 1 {
+		t.Fatalf("expected one mistake, got %d", len(summary.Mistakes))
+	}
+	mistake := summary.Mistakes[0]
+	if mistake.QuizID != "66666666-6666-6666-6666-666666666666" || mistake.SelectedIndex != 2 {
+		t.Fatalf("unexpected mistake %+v", mistake)
+	}
+	if mistake.CorrectOptionMarkdown != "A" || mistake.SelectedOptionMarkdown != "C" {
+		t.Fatalf("unexpected option text %+v", mistake)
+	}
+}
+
+func TestQuizMistakesEndpointValidatesRequest(t *testing.T) {
+	handler := New(config.Config{}, &fakeLevelRepository{}, &fakeMapCache{}).Router()
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/quiz-mistakes?level_id=11111111-1111-1111-1111-111111111111", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d", unauthorized.Code)
+	}
+
+	missingLevel := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/quiz-mistakes", nil)
+	request.Header.Set("X-Authenticated-User-Id", "22222222-2222-2222-2222-222222222222")
+	handler.ServeHTTP(missingLevel, request)
+	if missingLevel.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", missingLevel.Code)
+	}
+}
+
 type fakeLevelRepository struct {
 	bootstrap           repository.LevelBootstrap
 	mistakeMu           sync.Mutex
@@ -1191,6 +1267,47 @@ func (r *fakeLevelRepository) SaveQuizMistake(ctx context.Context, input reposit
 	r.mistakeMu.Lock()
 	defer r.mistakeMu.Unlock()
 	r.mistakes = append(r.mistakes, input)
+	return nil
+}
+
+func (r *fakeLevelRepository) ListQuizMistakes(_ context.Context, userID string, levelID string) ([]repository.QuizMistakeSummaryItem, error) {
+	r.mistakeMu.Lock()
+	defer r.mistakeMu.Unlock()
+
+	items := make([]repository.QuizMistakeSummaryItem, 0, len(r.mistakes))
+	for _, mistake := range r.mistakes {
+		if mistake.UserID != userID || mistake.LevelID != levelID {
+			continue
+		}
+		items = append(items, repository.QuizMistakeSummaryItem{
+			ID:               mistake.QuizID,
+			UserID:           mistake.UserID,
+			LevelID:          mistake.LevelID,
+			GenerationID:     mistake.GenerationID,
+			QuizID:           mistake.QuizID,
+			QuizIndex:        mistake.QuizIndex,
+			QuizType:         mistake.QuizType,
+			QuestionMarkdown: mistake.QuestionMarkdown,
+			OptionsMarkdown:  append([]string(nil), mistake.OptionsMarkdown...),
+			AnswerIndex:      mistake.AnswerIndex,
+			SelectedIndex:    mistake.SelectedIndex,
+		})
+	}
+	return items, nil
+}
+
+func (r *fakeLevelRepository) ClearQuizMistakes(_ context.Context, userID string, levelID string) error {
+	r.mistakeMu.Lock()
+	defer r.mistakeMu.Unlock()
+
+	filtered := make([]repository.QuizMistakeInput, 0, len(r.mistakes))
+	for _, mistake := range r.mistakes {
+		if mistake.UserID == userID && mistake.LevelID == levelID {
+			continue
+		}
+		filtered = append(filtered, mistake)
+	}
+	r.mistakes = filtered
 	return nil
 }
 

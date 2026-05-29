@@ -41,6 +41,7 @@ export default class GameScene extends Phaser.Scene {
   private activeDragSprite: Phaser.GameObjects.Sprite | null = null;
   private activeDragBirdType: string | null = null;
   private gridHighlightGraphics: Phaser.GameObjects.Graphics | null = null;
+  private dragRangeGraphics: Phaser.GameObjects.Graphics | null = null;
   private closestCellHighlight: Phaser.GameObjects.Graphics | null = null;
   private pulseTween: Phaser.Tweens.Tween | null = null;
   private dragCancelLeftBox: Phaser.GameObjects.Graphics | null = null;
@@ -49,7 +50,17 @@ export default class GameScene extends Phaser.Scene {
   private dragCancelRightText: Phaser.GameObjects.Text | null = null;
   private currentQuizId: string = '';
   private quizAnswered: boolean = false;
+  private quizPromptContainer: Phaser.GameObjects.Container | null = null;
+  private pauseWindowOpen: boolean = false;
   private messageHandler: ((e: MessageEvent) => void) | null = null;
+  private levelId: string = '';
+
+  private birdStats: Record<string, { damage: number, range: number, fireRate: string, attack: string, cost: number, color: string }> = {
+    sparrow: { damage: 10, range: 3.5, fireRate: '1.0/s', attack: 'SINGLE', cost: 50, color: '#38bdf8' },
+    woodpecker: { damage: 6, range: 3.5, fireRate: '2.0/s', attack: 'SINGLE', cost: 65, color: '#fb7185' },
+    eagle: { damage: 30, range: 6.0, fireRate: '0.4/s', attack: 'SINGLE', cost: 130, color: '#fb923c' },
+    peacock: { damage: 7, range: 3.5, fireRate: '1.0/s', attack: 'SPLASH', cost: 90, color: '#c084fc' }
+  };
 
   constructor() {
     super('GameScene');
@@ -57,6 +68,7 @@ export default class GameScene extends Phaser.Scene {
 
   create(data: { initialState: any, ws: WebSocket, levelId: string }) {
     this.ws = data.ws;
+    this.levelId = data.levelId;
     const mapData = data.initialState?.map;
     if (!mapData) {
       console.error('No map data available in initial state.');
@@ -103,9 +115,49 @@ export default class GameScene extends Phaser.Scene {
       const posY = this.offsetY + obj.y * this.tileSize + this.tileSize / 2;
       const spriteKey = this.getObjectSpriteKey(obj);
 
-      this.add.image(posX, posY, spriteKey)
-        .setDisplaySize(this.tileSize + 4, this.tileSize + 4)
-        .setDepth(1);
+      const obstacleImg = this.add.image(posX, posY, spriteKey);
+      
+      // Determine a reasonable target dimension based on obstacle type to keep size natural
+      let targetHeight = this.tileSize;
+      let targetWidth = this.tileSize;
+      let useHeightAsBase = true; // whether to match targetHeight and scale width, or match targetWidth and scale height
+
+      if (obj.type === 'tree') {
+        // Trees should be nice and tall! Make the height about 1.85x of tileSize
+        targetHeight = this.tileSize * 1.85;
+        useHeightAsBase = true;
+      } else if (obj.type === 'bush') {
+        // Bushes should fit snug within the tile, slightly smaller (e.g. 0.85x of tileSize)
+        targetWidth = this.tileSize * 0.85;
+        useHeightAsBase = false;
+      } else if (obj.type === 'rock') {
+        // Rocks should look sturdy and robust, making rock_04 and rock_05 smaller!
+        if (spriteKey === 'rock_04' || spriteKey === 'rock_05') {
+          targetWidth = this.tileSize * 0.38;
+        } else {
+          targetWidth = this.tileSize * 0.85;
+        }
+        useHeightAsBase = false;
+      } else if (obj.type === 'tree_stump') {
+        // Stumps are flat and low (e.g. 0.8x of tileSize)
+        targetWidth = this.tileSize * 0.8;
+        useHeightAsBase = false;
+      } else {
+        // Default fallback to fill the grid cell elegantly
+        targetHeight = this.tileSize;
+        useHeightAsBase = true;
+      }
+
+      // Calculate scale to maintain aspect ratio perfectly
+      if (useHeightAsBase) {
+        const scale = targetHeight / obstacleImg.height;
+        obstacleImg.setScale(scale);
+      } else {
+        const scale = targetWidth / obstacleImg.width;
+        obstacleImg.setScale(scale);
+      }
+
+      obstacleImg.setDepth(1);
     });
 
     // 4. Render sleek, premium top-left HUD panel using box_orange_square as a NineSlice container
@@ -116,7 +168,7 @@ export default class GameScene extends Phaser.Scene {
     this.healthText = this.add.text(124, 69, '100', {
       fontFamily: '"Concert One", system-ui, sans-serif',
       fontSize: '54px',
-      color: '#f87171',
+      color: '#7c0000ff',
     }).setOrigin(0, 0.5).setDepth(30);
 
     // Essence Icon & Text
@@ -124,15 +176,28 @@ export default class GameScene extends Phaser.Scene {
     this.essenceText = this.add.text(336, 69, '0', {
       fontFamily: '"Concert One", system-ui, sans-serif',
       fontSize: '54px',
-      color: '#fbbf24',
+      color: '#a35700ff',
     }).setOrigin(0, 0.5).setDepth(30);
 
     // Wave Text (No Icon)
     this.waveText = this.add.text(484, 69, 'WAVE 0', {
       fontFamily: '"Concert One", system-ui, sans-serif',
       fontSize: '54px',
-      color: '#38bdf8',
+      color: '#451a03',
     }).setOrigin(0, 0.5).setDepth(30);
+
+    // Beautiful Pause HUD Button at top right
+    const pauseBtnBg = this.add.nineslice(1840, 69, 'box_orange_square', undefined, 100, 90, 32, 32, 32, 32)
+      .setDepth(30)
+      .setInteractive({ useHandCursor: true });
+    
+    this.add.image(1840, 69, 'icon_pause')
+      .setDisplaySize(50, 50)
+      .setDepth(31);
+
+    pauseBtnBg.on('pointerdown', () => {
+      this.showPauseWindow();
+    });
 
     // Sleek premium Quizz button on the right side of the screen
     const quizHUDBtn = this.add.sprite(1800, 640, 'btn_orange_round')
@@ -155,7 +220,33 @@ export default class GameScene extends Phaser.Scene {
     });
 
     quizHUDBtn.on('pointerdown', () => {
+      this.hideQuizPrompt();
       this.requestQuiz();
+    });
+
+    // Mirror TextBox_Blank_Side horizontally (points left by default, flipX=true points right directly at QUIZ button)
+    const promptContainer = this.add.container(1750, 500).setDepth(35);
+    const promptBg = this.add.image(0, 0, 'textbox_blank_side')
+      .setFlipX(true)
+      .setOrigin(0.5);
+    const promptText = this.add.text(0, -10, 'Answer one quiz correctly\nto start the game!', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '22px',
+      color: '#000000ff',
+      align: 'center'
+    }).setOrigin(0.5);
+
+    promptContainer.add([promptBg, promptText]);
+    this.quizPromptContainer = promptContainer;
+
+    // Smooth vertical floating animation above the quiz button
+    this.tweens.add({
+      targets: promptContainer,
+      y: { from: 500, to: 490 },
+      duration: 1000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
     });
 
     // 5. Selectable Birds Tray Panel at Bottom Center using box_orange_square as NineSlice outer container
@@ -166,13 +257,6 @@ export default class GameScene extends Phaser.Scene {
     const boxY = 1152;
     const boxSize = 136;
     const headSize = 98;
-
-    const birdStats: Record<string, { damage: number, range: number, fireRate: string, attack: string, cost: number, color: string }> = {
-      sparrow: { damage: 10, range: 3.5, fireRate: '1.0/s', attack: 'SINGLE', cost: 50, color: '#38bdf8' },
-      woodpecker: { damage: 6, range: 3.5, fireRate: '2.0/s', attack: 'SINGLE', cost: 65, color: '#fb7185' },
-      eagle: { damage: 30, range: 6.0, fireRate: '0.4/s', attack: 'SINGLE', cost: 130, color: '#fb923c' },
-      peacock: { damage: 7, range: 3.5, fireRate: '1.0/s', attack: 'SPLASH', cost: 90, color: '#c084fc' }
-    };
 
     birds.forEach((bird, index) => {
       const boxX = startX + index * 170 + boxSize / 2;
@@ -186,7 +270,7 @@ export default class GameScene extends Phaser.Scene {
       tooltipContainer.add(tooltipBg);
 
       // Title/Header
-      const statsInfo = birdStats[bird];
+      const statsInfo = this.birdStats[bird];
       const title = this.add.text(0, -82, bird.toUpperCase(), {
         fontFamily: '"Concert One", system-ui, sans-serif',
         fontSize: '32px',
@@ -265,6 +349,9 @@ export default class GameScene extends Phaser.Scene {
 
       this.activeDragBirdType = birdType;
 
+      // Initialize drag range graphics layer
+      this.dragRangeGraphics = this.add.graphics().setDepth(39);
+
       // Spawn temporary visual placement preview
       this.activeDragSprite = this.add.sprite(pointer.x, pointer.y, `tower_${birdType}`)
         .setAlpha(0.8)
@@ -316,6 +403,23 @@ export default class GameScene extends Phaser.Scene {
 
       // Update dragging preview location to pointer coordinates
       this.activeDragSprite.setPosition(pointer.x, pointer.y);
+
+      // Render drag range radius circle (light blue translucent with dark blue border)
+      if (this.dragRangeGraphics && this.activeDragBirdType) {
+        this.dragRangeGraphics.clear();
+        const stats = this.birdStats[this.activeDragBirdType];
+        if (stats) {
+          const radius = stats.range * this.tileSize;
+          
+          // Light blue fill: 0x93c5fd at 0.3 opacity
+          this.dragRangeGraphics.fillStyle(0x93c5fd, 0.3);
+          this.dragRangeGraphics.fillCircle(pointer.x, pointer.y, radius);
+          
+          // Blue border: 0x2563eb at 0.8 opacity, 3px line width
+          this.dragRangeGraphics.lineStyle(3, 0x2563eb, 0.8);
+          this.dragRangeGraphics.strokeCircle(pointer.x, pointer.y, radius);
+        }
+      }
 
       // Dynamic highlights for cancel zones
       const hoverLeftCancel = pointer.y > 1050 && pointer.x < 580;
@@ -372,6 +476,10 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.input.on('dragend', (pointer: Phaser.Input.Pointer) => {
+      if (this.dragRangeGraphics) {
+        this.dragRangeGraphics.destroy();
+        this.dragRangeGraphics = null;
+      }
       if (!this.activeDragSprite) return;
 
       const gridX = Math.floor((pointer.x - this.offsetX) / this.tileSize);
@@ -444,12 +552,13 @@ export default class GameScene extends Phaser.Scene {
           } else if (message.type === 'game.action.rejected') {
             this.showRejectMessage(message.data?.error || 'ACTION REJECTED');
           } else if (message.type === 'game.over') {
-            this.showGameOverWindow(false);
+            this.showMistakesSummaryWindow(false);
           } else if (message.type === 'game.victory') {
-            this.showGameOverWindow(true);
+            this.showMistakesSummaryWindow(true);
           } else if (message.type === 'game.quiz.presented') {
             this.showQuizWindow(message.data);
           } else if (message.type === 'game.quiz.unavailable') {
+            this.clearQuiz();
             this.showRejectMessage('NO QUIZZES REMAINING');
           } else if (message.type === 'game.quiz.result') {
             this.handleQuizResult(message.data);
@@ -688,7 +797,7 @@ export default class GameScene extends Phaser.Scene {
       if (!this.smogs.has(id)) {
         // Spawn smog sprite using the enemy_smog asset
         const sprite = this.add.sprite(posX, posY, 'enemy_smog');
-        sprite.setDisplaySize(this.tileSize * 1.2, this.tileSize * 1.2);
+        sprite.setDisplaySize(this.tileSize * 1.4, this.tileSize * 1.4);
         sprite.setDepth(15);
 
         // Spawn a companion graphics container for the health bar
@@ -867,114 +976,102 @@ export default class GameScene extends Phaser.Scene {
     return 'tree_01';
   }
 
-  private showGameOverWindow(isVictory: boolean) {
+  private showMistakesSummaryWindow(isVictory: boolean) {
     this.clearQuiz();
-    // 1. Dark overlay to block all underlying UI interactions
-    const overlay = this.add.graphics().setDepth(100);
-    overlay.fillStyle(0x020617, 0.75); // Slate-950 at 0.75 alpha
-    overlay.fillRect(0, 0, 1920, 1280);
-    overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, 1920, 1280), Phaser.Geom.Rectangle.Contains);
 
-    // 2. Orange Box Container Window
-    this.add.nineslice(960, 640, 'box_orange_square', undefined, 700, 480, 64, 64, 64, 64)
-      .setDepth(101);
+    const parent = document.getElementById('game-container') || document.body;
 
-    // 3. Header Text
-    const titleText = isVictory ? 'VICTORY' : 'DEFEATED';
-    const titleColor = isVictory ? '#f0fc00ff' : '#f87171'; // Gold for Victory, Light Red for Defeat
-    const titleSize = isVictory ? '86px' : '64px';
-    const titleY = isVictory ? 470 : 480;
-    this.add.text(960, titleY, titleText, {
-      fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: titleSize,
-      color: titleColor
-    }).setOrigin(0.5).setDepth(102);
+    // Create the overlay backdrop div
+    const overlay = document.createElement('div');
+    overlay.id = 'mistakes-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(2, 6, 23, 0.75)'; // Slate-950 at 0.75 alpha backdrop
+    overlay.style.zIndex = '9999';
 
-    // 4. Subtext description
-    const descText = isVictory
-      ? 'You have successfully protected the skies!'
-      : 'The smogs have overwhelmed your defenses.';
-    const descColor = isVictory ? '#ffffff' : '#fed7aa'; // solid white for victory subtext
-    this.add.text(960, 560, descText, {
-      fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '32px',
-      color: descColor
-    }).setOrigin(0.5).setDepth(102);
+    // Create the iframe pointing to the Next.js mistakes summary page
+    const iframe = document.createElement('iframe');
+    iframe.id = 'mistakes-iframe';
+    iframe.style.position = 'absolute';
+    iframe.style.top = '0';
+    iframe.style.left = '0';
+    iframe.style.width = '100%';
+    iframe.style.height = '100%';
+    iframe.style.border = 'none';
+    iframe.style.backgroundColor = 'transparent';
 
-    // 5. Replay Button
-    const replayBtn = this.add.sprite(840, 720, 'btn_blue_round')
-      .setDepth(102)
-      .setInteractive({ useHandCursor: true });
+    // Build query parameters
+    const params = new URLSearchParams();
+    params.set('level_id', this.levelId);
+    params.set('session_id', this.sessionId);
+    params.set('victory', isVictory ? 'true' : 'false');
 
-    const replayLabel = this.add.text(840, 720, 'REPLAY', {
-      fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '24px',
-      color: '#ffffff'
-    }).setOrigin(0.5).setDepth(103);
+    iframe.src = `${window.location.origin}/mistakes-summary?${params.toString()}`;
+    overlay.appendChild(iframe);
+    parent.appendChild(overlay);
 
-    replayBtn.on('pointerover', () => {
-      replayBtn.setScale(1.08);
-      replayLabel.setScale(1.08).setColor('#e0f2fe');
-    });
-    replayBtn.on('pointerout', () => {
-      replayBtn.setScale(1.0);
-      replayLabel.setScale(1.0).setColor('#ffffff');
-    });
+    // Register a secure postMessage listener for child interactions (replay/exit)
+    this.messageHandler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
 
-    replayBtn.on('pointerdown', () => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: 'game.exit',
-          data: { session_id: this.sessionId }
-        }));
-      }
-      setTimeout(() => {
-        window.location.reload();
-      }, 150);
-    });
-
-    // 6. Exit Button
-    const exitBtn = this.add.sprite(1080, 720, 'btn_blue_round')
-      .setDepth(102)
-      .setInteractive({ useHandCursor: true });
-
-    const exitLabel = this.add.text(1080, 720, 'EXIT', {
-      fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '24px',
-      color: '#ffffff'
-    }).setOrigin(0.5).setDepth(103);
-
-    exitBtn.on('pointerover', () => {
-      exitBtn.setScale(1.08);
-      exitLabel.setScale(1.08).setColor('#fecaca');
-    });
-    exitBtn.on('pointerout', () => {
-      exitBtn.setScale(1.0);
-      exitLabel.setScale(1.0).setColor('#ffffff');
-    });
-
-    exitBtn.on('pointerdown', () => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: 'game.exit',
-          data: { session_id: this.sessionId }
-        }));
-      }
-      setTimeout(() => {
-        const params = new URLSearchParams(window.location.search);
-        const documentId = params.get('document_id');
-        const chapterId = params.get('chapter_id');
-        if (documentId && chapterId) {
-          window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
-        } else {
-          window.location.href = '/dashboard';
+      const packet = event.data;
+      if (packet.type === 'game-replay') {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({
+            type: 'game.exit',
+            data: { session_id: this.sessionId }
+          }));
         }
-      }, 150);
-    });
+        setTimeout(() => {
+          window.location.reload();
+        }, 150);
+      } else if (packet.type === 'game-exit') {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify({
+            type: 'game.exit',
+            data: { session_id: this.sessionId }
+          }));
+        }
+        setTimeout(() => {
+          const searchParams = new URLSearchParams(window.location.search);
+          const documentId = searchParams.get('document_id');
+          const chapterId = searchParams.get('chapter_id');
+          if (documentId && chapterId) {
+            window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
+          } else {
+            window.location.href = '/dashboard';
+          }
+        }, 150);
+      }
+    };
+    window.addEventListener('message', this.messageHandler);
   }
 
-  private requestQuiz() {
-    this.clearQuiz();
+  private hideQuizPrompt() {
+    if (this.quizPromptContainer) {
+      const container = this.quizPromptContainer;
+      this.tweens.add({
+        targets: container,
+        alpha: 0,
+        scale: 0.8,
+        duration: 250,
+        onComplete: () => {
+          container.destroy();
+          if (this.quizPromptContainer === container) {
+            this.quizPromptContainer = null;
+          }
+        }
+      });
+    }
+  }
+
+  private requestQuiz(keepIframe: boolean = false) {
+    if (!keepIframe) {
+      this.clearQuiz();
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'game.quiz.request' }));
     }
@@ -985,6 +1082,10 @@ export default class GameScene extends Phaser.Scene {
     if (overlay) {
       overlay.remove();
     }
+    const mistakesOverlay = document.getElementById('mistakes-overlay');
+    if (mistakesOverlay) {
+      mistakesOverlay.remove();
+    }
     if (this.messageHandler) {
       window.removeEventListener('message', this.messageHandler);
       this.messageHandler = null;
@@ -993,6 +1094,18 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private showQuizWindow(promptData: any) {
+    // If the iframe already exists on screen, just post message directly to update its content!
+    const existingIframe = document.getElementById('quiz-iframe') as HTMLIFrameElement;
+    if (existingIframe && existingIframe.contentWindow) {
+      this.currentQuizId = promptData.quiz_id;
+      this.quizAnswered = false;
+      existingIframe.contentWindow.postMessage({
+        type: 'quiz-presented',
+        data: promptData
+      }, '*');
+      return;
+    }
+
     this.clearQuiz();
     this.currentQuizId = promptData.quiz_id;
 
@@ -1040,12 +1153,15 @@ export default class GameScene extends Phaser.Scene {
         this.submitAnswer(packet.index);
       } else if (packet.type === 'quiz-close') {
         this.clearQuiz();
+      } else if (packet.type === 'quiz-next') {
+        this.requestQuiz(true);
       }
     };
     window.addEventListener('message', this.messageHandler);
   }
 
   private submitAnswer(index: number) {
+    if (this.quizAnswered) return;
     this.quizAnswered = true;
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
@@ -1067,10 +1183,117 @@ export default class GameScene extends Phaser.Scene {
         data: resultData
       }, '*');
     }
+    if (resultData && resultData.correct) {
+      this.hideQuizPrompt();
+    }
+  }
 
-    // Delay 2 seconds and auto close
-    setTimeout(() => {
-      this.clearQuiz();
-    }, 2000);
+  private showPauseWindow() {
+    // If a quiz overlay is currently displayed, do not pause or open overlapping windows
+    if (document.getElementById('quiz-overlay') || this.pauseWindowOpen) {
+      return;
+    }
+    this.pauseWindowOpen = true;
+
+    // Send pause message to the websocket
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'game.pause' }));
+    }
+
+    // 1. Sleek semi-transparent black backdrop overlay covering the entire possible viewport
+    const pauseBackdrop = this.add.graphics();
+    pauseBackdrop.fillStyle(0x000000, 0.65);
+    pauseBackdrop.fillRect(-2000, -2000, 6000, 5000);
+    // Block all clicks/pointer inputs below the overlay
+    pauseBackdrop.setInteractive(new Phaser.Geom.Rectangle(-2000, -2000, 6000, 5000), Phaser.Geom.Rectangle.Contains);
+    pauseBackdrop.setDepth(100);
+
+    // 2. Main Orange Square Container Box (500x420) using NineSlice for more vertical spacing
+    const pauseDialog = this.add.nineslice(960, 540, 'box_orange_square', undefined, 500, 420, 64, 64, 64, 64)
+      .setDepth(101);
+
+    // 3. Header text: PAUSED (using a deep brown color matching the theme beautifully)
+    const pauseTitle = this.add.text(960, 390, 'PAUSED', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '56px',
+      color: '#451a03'
+    }).setOrigin(0.5).setDepth(102);
+
+    // 4. RESUME button using ButtonText_Small_Blue_Round.svg (btn_blue_round)
+    const resumeBtn = this.add.sprite(960, 495, 'btn_blue_round')
+      .setScale(1.1)
+      .setDepth(102)
+      .setInteractive({ useHandCursor: true });
+    const resumeLabel = this.add.text(960, 495, 'RESUME', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '24px',
+      color: '#ffffff'
+    }).setOrigin(0.5).setDepth(103);
+
+    resumeBtn.on('pointerover', () => {
+      resumeBtn.setScale(1.18);
+      resumeLabel.setScale(1.08).setColor('#fef3c7');
+    });
+    resumeBtn.on('pointerout', () => {
+      resumeBtn.setScale(1.1);
+      resumeLabel.setScale(1.0).setColor('#ffffff');
+    });
+
+    resumeBtn.on('pointerdown', () => {
+      // Send resume message to websocket
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: 'game.resume' }));
+      }
+      
+      // Cleanup all pause window components cleanly
+      pauseBackdrop.destroy();
+      pauseDialog.destroy();
+      pauseTitle.destroy();
+      resumeBtn.destroy();
+      resumeLabel.destroy();
+      exitBtn.destroy();
+      exitLabel.destroy();
+      this.pauseWindowOpen = false;
+    });
+
+    // 5. EXIT button using ButtonText_Small_Blank_Round.svg (btn_blank_round) with black text
+    const exitBtn = this.add.sprite(960, 620, 'btn_blank_round')
+      .setScale(1.1)
+      .setDepth(102)
+      .setInteractive({ useHandCursor: true });
+    const exitLabel = this.add.text(960, 620, 'EXIT GAME', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '24px',
+      color: '#000000'
+    }).setOrigin(0.5).setDepth(103);
+
+    exitBtn.on('pointerover', () => {
+      exitBtn.setScale(1.18);
+      exitLabel.setScale(1.08);
+    });
+    exitBtn.on('pointerout', () => {
+      exitBtn.setScale(1.1);
+      exitLabel.setScale(1.0);
+    });
+
+    exitBtn.on('pointerdown', () => {
+      // Send same game.exit message as the end-of-game Exit Button
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({
+          type: 'game.exit',
+          data: { session_id: this.sessionId }
+        }));
+      }
+      setTimeout(() => {
+        const searchParams = new URLSearchParams(window.location.search);
+        const documentId = searchParams.get('document_id');
+        const chapterId = searchParams.get('chapter_id');
+        if (documentId && chapterId) {
+          window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
+        } else {
+          window.location.href = '/dashboard';
+        }
+      }, 150);
+    });
   }
 }

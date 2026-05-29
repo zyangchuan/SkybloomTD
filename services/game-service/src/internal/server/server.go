@@ -35,7 +35,8 @@ const awardQuizEssenceAction = "award_quiz_essence"
 
 const (
 	waveClearDelayTicks     = int64(60)
-	smogSpawnIntervalTicks  = int64(20)
+	smogSpawnIntervalTicks  = int64(40)
+	groupGapTicks           = int64(160)
 	baseHealthDamage        = 10
 	correctQuizEssenceAward = 30
 )
@@ -43,6 +44,8 @@ const (
 type LevelRepository interface {
 	GetBootstrap(ctx context.Context, levelID string, userID string) (repository.LevelBootstrap, error)
 	SaveQuizMistake(ctx context.Context, input repository.QuizMistakeInput) error
+	ListQuizMistakes(ctx context.Context, userID string, levelID string) ([]repository.QuizMistakeSummaryItem, error)
+	ClearQuizMistakes(ctx context.Context, userID string, levelID string) error
 	Ping(ctx context.Context) error
 }
 
@@ -341,6 +344,7 @@ func (s *Server) Router() http.Handler {
 	mux.HandleFunc("/ready", s.ready)
 	mux.HandleFunc("/ws", s.websocket)
 	mux.HandleFunc("/level-generation/", s.generationStatus)
+	mux.HandleFunc("/quiz-mistakes", s.quizMistakes)
 	return mux
 }
 
@@ -643,6 +647,11 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	// Flush/Clear old quiz mistakes for this level and user so they start the new run with a clean slate
+	if err := s.levels.ClearQuizMistakes(callCtx, userID, levelID); err != nil {
+		log.Printf("failed to clear quiz mistakes level_id=%s user_id=%s: %v", levelID, userID, err)
+	}
+
 	level, err := s.levels.GetBootstrap(callCtx, levelID, userID)
 	if errors.Is(err, models.ErrLevelNotFound) {
 		return nil, errors.New("level not found")
@@ -808,6 +817,12 @@ func (s *Server) handleGameExit(ctx context.Context, loop *runningGameLoop, requ
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	if loop != nil {
+		if err := s.levels.ClearQuizMistakes(callCtx, loop.userID, loop.levelID); err != nil {
+			log.Printf("failed to clear quiz mistakes on exit level_id=%s user_id=%s: %v", loop.levelID, loop.userID, err)
+		}
+	}
+
 	if err := s.sessions.Delete(callCtx, sessionID); err != nil {
 		return GameExitedState{}, errors.New("failed to exit game session")
 	}
@@ -1078,9 +1093,9 @@ type waveDefinition struct {
 
 func waveDefinitions() []waveDefinition {
 	return []waveDefinition{
-		{Wave: 1, Count: 5, Health: 30, Speed: 0.8},
-		{Wave: 2, Count: 8, Health: 45, Speed: 0.95},
-		{Wave: 3, Count: 12, Health: 60, Speed: 1.1},
+		{Wave: 1, Count: 15, Health: 30, Speed: 0.8},
+		{Wave: 2, Count: 24, Health: 45, Speed: 0.95},
+		{Wave: 3, Count: 36, Health: 60, Speed: 1.1},
 	}
 }
 
@@ -1121,7 +1136,19 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 		events = append(events, GameEvent{Type: "wave.started", Wave: wave.Wave})
 	}
 
-	nextSpawnTick := runtime.waveStartedAtTick + int64(runtime.waveSpawned)*smogSpawnIntervalTicks
+	// Calculate subwave/group spawn ticks dynamically
+	groupSize := wave.Count / 3
+	if groupSize < 1 {
+		groupSize = 1
+	}
+	groupIndex := int64(runtime.waveSpawned / groupSize)
+	indexInGroup := int64(runtime.waveSpawned % groupSize)
+
+	groupDurationTicks := int64(groupSize) * smogSpawnIntervalTicks
+	groupStartIntervalTicks := groupDurationTicks + groupGapTicks
+
+	nextSpawnTick := runtime.waveStartedAtTick + (groupIndex * groupStartIntervalTicks) + (indexInGroup * smogSpawnIntervalTicks)
+
 	if runtime.session.Tick < nextSpawnTick {
 		return events
 	}
@@ -1753,6 +1780,99 @@ func (s *Server) generationStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+type QuizMistakeSummaryState struct {
+	LevelID  string              `json:"level_id"`
+	Count    int                 `json:"count"`
+	Mistakes []QuizMistakeSummaryItem `json:"mistakes"`
+}
+
+type QuizMistakeSummaryItem struct {
+	ID                     string     `json:"id"`
+	LevelID                string     `json:"level_id"`
+	GenerationID           string     `json:"generation_id"`
+	QuizID                 string     `json:"quiz_id"`
+	QuizIndex              int        `json:"quiz_index"`
+	QuizType               string     `json:"quiz_type"`
+	QuestionMarkdown       string     `json:"question_markdown"`
+	OptionsMarkdown        []string   `json:"options_markdown"`
+	AnswerIndex            int        `json:"answer_index"`
+	SelectedIndex          int        `json:"selected_index"`
+	CorrectOptionMarkdown  string     `json:"correct_option_markdown"`
+	SelectedOptionMarkdown string     `json:"selected_option_markdown"`
+	CreatedAt              *time.Time `json:"created_at"`
+}
+
+func (s *Server) quizMistakes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	userID := s.authenticatedUserID(r)
+	if userID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
+		return
+	}
+	if s.levels == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "quiz mistake summary is not configured"})
+		return
+	}
+
+	levelID := strings.TrimSpace(r.URL.Query().Get("level_id"))
+	if levelID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level_id is required"})
+		return
+	}
+	if !uuidPattern.MatchString(levelID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level_id must be a valid UUID"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	mistakes, err := s.levels.ListQuizMistakes(ctx, userID, levelID)
+	if err != nil {
+		log.Printf("quiz mistake summary lookup failed level_id=%s user_id=%s: %v", levelID, userID, err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "failed to read quiz mistake summary"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, quizMistakeSummaryState(levelID, mistakes))
+}
+
+func quizMistakeSummaryState(levelID string, mistakes []repository.QuizMistakeSummaryItem) QuizMistakeSummaryState {
+	items := make([]QuizMistakeSummaryItem, 0, len(mistakes))
+	for _, mistake := range mistakes {
+		items = append(items, QuizMistakeSummaryItem{
+			ID:                     mistake.ID,
+			LevelID:                mistake.LevelID,
+			GenerationID:           mistake.GenerationID,
+			QuizID:                 mistake.QuizID,
+			QuizIndex:              mistake.QuizIndex,
+			QuizType:               mistake.QuizType,
+			QuestionMarkdown:       mistake.QuestionMarkdown,
+			OptionsMarkdown:        append([]string(nil), mistake.OptionsMarkdown...),
+			AnswerIndex:            mistake.AnswerIndex,
+			SelectedIndex:          mistake.SelectedIndex,
+			CorrectOptionMarkdown:  optionMarkdown(mistake.OptionsMarkdown, mistake.AnswerIndex),
+			SelectedOptionMarkdown: optionMarkdown(mistake.OptionsMarkdown, mistake.SelectedIndex),
+			CreatedAt:              mistake.CreatedAt,
+		})
+	}
+	return QuizMistakeSummaryState{
+		LevelID:  levelID,
+		Count:    len(items),
+		Mistakes: items,
+	}
+}
+
+func optionMarkdown(options []string, index int) string {
+	if index < 0 || index >= len(options) {
+		return ""
+	}
+	return options[index]
 }
 
 func (s *Server) authenticatedUserID(r *http.Request) string {
