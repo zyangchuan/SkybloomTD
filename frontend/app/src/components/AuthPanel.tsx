@@ -36,6 +36,10 @@ function rememberAuthRedirectPath() {
 }
 
 function getAuthCallbackURL() {
+  const envUrl = process.env.NEXT_PUBLIC_SUPABASE_REDIRECT_URL || process.env.SUPABASE_REDIRECT_URL;
+  if (envUrl) {
+    return envUrl;
+  }
   return `${window.location.origin}/auth/callback`;
 }
 
