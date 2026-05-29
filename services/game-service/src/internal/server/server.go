@@ -402,9 +402,6 @@ func (s *Server) cacheQuizzes(ctx context.Context, level repository.LevelBootstr
 	if s.quizzes == nil {
 		return nil
 	}
-	if len(level.Quizzes) == 0 {
-		return errors.New("level has no quizzes")
-	}
 	return s.quizzes.Set(ctx, level.GenerationID, quizcache.FromLevelBootstrap(level, level.GenerationID))
 }
 
@@ -417,7 +414,7 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 	for {
 		var message Message
 		if err := conn.ReadJSON(&message); err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+			if !isExpectedWebsocketClose(err) {
 				log.Printf("websocket read failed: %v", err)
 			}
 			return
@@ -539,6 +536,16 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 			}
 		}
 	}
+}
+
+func isExpectedWebsocketClose(err error) bool {
+	return websocket.IsCloseError(
+		err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseNoStatusReceived,
+		websocket.CloseAbnormalClosure,
+	) || strings.Contains(err.Error(), "unexpected EOF")
 }
 
 func (s *Server) handleStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {

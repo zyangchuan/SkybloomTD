@@ -251,6 +251,51 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	}
 }
 
+func TestWebsocketSessionStartAllowsEmptyQuizList(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON quiz request failed: %v", err)
+	}
+	unavailable := readMessageOfType(t, conn, "game.quiz.unavailable")
+	body, err := json.Marshal(unavailable.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz unavailable failed: %v", err)
+	}
+	var state QuizUnavailableState
+	if err := json.Unmarshal(body, &state); err != nil {
+		t.Fatalf("Unmarshal quiz unavailable failed: %v", err)
+	}
+	if state.Reason != "no_quizzes_remaining" {
+		t.Fatalf("unexpected unavailable reason %q", state.Reason)
+	}
+}
+
 func TestWebsocketPlaceTowerConsumesEssenceAndPersistsBird(t *testing.T) {
 	levels := &fakeLevelRepository{
 		bootstrap: repository.LevelBootstrap{
