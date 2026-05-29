@@ -493,6 +493,23 @@ func (r *LevelRepository) Insert(
 				saved = existing
 				return nil
 			}
+
+			// Clean up any stale level/quiz records associated with this generation ID
+			var existingLevelIDs []string
+			if err := tx.Model(&models.Level{}).
+				Where("generation_id = ?", options.GenerationID).
+				Pluck("id", &existingLevelIDs).
+				Error; err != nil {
+				return err
+			}
+			if len(existingLevelIDs) > 0 {
+				if err := tx.Where("level_id IN ?", existingLevelIDs).Delete(&models.Quiz{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("id IN ?", existingLevelIDs).Delete(&models.Level{}).Error; err != nil {
+					return err
+				}
+			}
 		}
 
 		if err := tx.Create(&level).Error; err != nil {

@@ -274,6 +274,7 @@ type runtimeSession struct {
 	projectiles []gameobject.Projectile
 	levelMap    mapgen.GeneratedMap
 	path        []gameobject.Position
+	loopStarted bool
 
 	waveStartedAtTick int64
 	waveSpawned       int
@@ -705,6 +706,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		projectiles: restoredProjectiles,
 		levelMap:    levelMap,
 		path:        gamePath(levelMap),
+		loopStarted: storedRuntime.LoopStarted,
 
 		waveStartedAtTick: storedRuntime.WaveStartedAtTick,
 		waveSpawned:       storedRuntime.WaveSpawned,
@@ -765,6 +767,7 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 					return
 				}
 			case awardQuizEssenceAction:
+				runtime.loopStarted = true
 				essence, err := s.awardEssence(ctx, &runtime, action.EssenceReward)
 				if action.Result != nil {
 					action.Result <- actionResult{Essence: essence, Err: err}
@@ -1057,6 +1060,8 @@ func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) e
 		Essence:           runtime.economy.Essence,
 		Wave:              runtime.session.Wave,
 		Tick:              runtime.session.Tick,
+		LoopStarted:       runtime.loopStarted,
+		LoopPaused:        false,
 		WaveStartedAtTick: runtime.waveStartedAtTick,
 		WaveSpawned:       runtime.waveSpawned,
 		NextWaveTick:      runtime.nextWaveTick,
@@ -1101,6 +1106,9 @@ func waveDefinitions() []waveDefinition {
 
 func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
 	if runtime == nil {
+		return nil
+	}
+	if !runtime.loopStarted {
 		return nil
 	}
 	runtime.session.Tick++
