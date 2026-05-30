@@ -548,7 +548,7 @@ export default class GameScene extends Phaser.Scene {
           console.log('Received message from server:', message);
 
           if (message.type === 'game.state' || message.type === 'game.session.started') {
-            this.updateHUD(message.data);
+            if (!this.pauseWindowOpen) this.updateHUD(message.data);
           } else if (message.type === 'game.action.rejected') {
             this.showRejectMessage(message.data?.error || 'ACTION REJECTED');
           } else if (message.type === 'game.over') {
@@ -605,6 +605,8 @@ export default class GameScene extends Phaser.Scene {
    * Phaser scene update loop: runs on every frame to interpolate moving objects smoothly
    */
   update() {
+    if (this.pauseWindowOpen) return;
+
     // 1. Update towers
     this.towers.forEach((tower) => {
       tower.update();
@@ -1194,6 +1196,8 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
     this.pauseWindowOpen = true;
+    this.tweens.pauseAll();
+    this.anims.pauseAll();
 
     // Send pause message to the websocket
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -1245,6 +1249,10 @@ export default class GameScene extends Phaser.Scene {
         this.ws.send(JSON.stringify({ type: 'game.resume' }));
       }
       
+
+      this.tweens.resumeAll();
+      this.anims.resumeAll();
+
       // Cleanup all pause window components cleanly
       pauseBackdrop.destroy();
       pauseDialog.destroy();
