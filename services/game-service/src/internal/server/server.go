@@ -22,6 +22,7 @@ import (
 	"skybloom/game-service/internal/mapgen"
 	"skybloom/game-service/internal/models"
 	"skybloom/game-service/internal/quizcache"
+	"skybloom/game-service/internal/quiztext"
 	"skybloom/game-service/internal/repository"
 )
 
@@ -1000,8 +1001,8 @@ func quizMistakeInput(loop *runningGameLoop, quiz quizcache.CachedQuiz, selected
 		QuizID:           quiz.ID,
 		QuizIndex:        quiz.QuizIndex,
 		QuizType:         quiz.QuizType,
-		QuestionMarkdown: quiz.QuestionMarkdown,
-		OptionsMarkdown:  append([]string(nil), quiz.OptionsMarkdown...),
+		QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
+		OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown),
 		AnswerIndex:      quiz.AnswerIndex,
 		SelectedIndex:    selectedIndex,
 	}
@@ -1590,8 +1591,8 @@ func quizPromptState(quiz quizcache.CachedQuiz, remaining int) QuizPromptState {
 	return QuizPromptState{
 		QuizID:           quiz.ID,
 		QuizType:         quiz.QuizType,
-		QuestionMarkdown: quiz.QuestionMarkdown,
-		OptionsMarkdown:  append([]string{}, quiz.OptionsMarkdown...),
+		QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
+		OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown),
 		Remaining:        remaining,
 	}
 }
@@ -1815,8 +1816,8 @@ func (s *Server) generationStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type QuizMistakeSummaryState struct {
-	LevelID  string              `json:"level_id"`
-	Count    int                 `json:"count"`
+	LevelID  string                   `json:"level_id"`
+	Count    int                      `json:"count"`
 	Mistakes []QuizMistakeSummaryItem `json:"mistakes"`
 }
 
@@ -1877,6 +1878,7 @@ func (s *Server) quizMistakes(w http.ResponseWriter, r *http.Request) {
 func quizMistakeSummaryState(levelID string, mistakes []repository.QuizMistakeSummaryItem) QuizMistakeSummaryState {
 	items := make([]QuizMistakeSummaryItem, 0, len(mistakes))
 	for _, mistake := range mistakes {
+		options := quiztext.SanitizeMarkdownSlice(mistake.OptionsMarkdown)
 		items = append(items, QuizMistakeSummaryItem{
 			ID:                     mistake.ID,
 			LevelID:                mistake.LevelID,
@@ -1884,12 +1886,12 @@ func quizMistakeSummaryState(levelID string, mistakes []repository.QuizMistakeSu
 			QuizID:                 mistake.QuizID,
 			QuizIndex:              mistake.QuizIndex,
 			QuizType:               mistake.QuizType,
-			QuestionMarkdown:       mistake.QuestionMarkdown,
-			OptionsMarkdown:        append([]string(nil), mistake.OptionsMarkdown...),
+			QuestionMarkdown:       quiztext.SanitizeMarkdown(mistake.QuestionMarkdown),
+			OptionsMarkdown:        options,
 			AnswerIndex:            mistake.AnswerIndex,
 			SelectedIndex:          mistake.SelectedIndex,
-			CorrectOptionMarkdown:  optionMarkdown(mistake.OptionsMarkdown, mistake.AnswerIndex),
-			SelectedOptionMarkdown: optionMarkdown(mistake.OptionsMarkdown, mistake.SelectedIndex),
+			CorrectOptionMarkdown:  optionMarkdown(options, mistake.AnswerIndex),
+			SelectedOptionMarkdown: optionMarkdown(options, mistake.SelectedIndex),
 			CreatedAt:              mistake.CreatedAt,
 		})
 	}

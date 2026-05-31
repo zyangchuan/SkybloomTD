@@ -12,6 +12,7 @@ import (
 
 	"skybloom/game-service/internal/generator"
 	"skybloom/game-service/internal/models"
+	"skybloom/game-service/internal/quiztext"
 	"skybloom/game-service/internal/source"
 )
 
@@ -127,8 +128,8 @@ func (r *LevelRepository) GetBootstrap(ctx context.Context, levelID string, user
 			ID:               quiz.ID,
 			QuizIndex:        quiz.QuizIndex,
 			QuizType:         quiz.QuizType,
-			QuestionMarkdown: quiz.QuestionMarkdown,
-			OptionsMarkdown:  options,
+			QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
+			OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(options),
 			AnswerIndex:      quiz.AnswerIndex,
 		})
 	}
@@ -156,7 +157,7 @@ func (r *LevelRepository) Ping(ctx context.Context) error {
 }
 
 func (r *LevelRepository) SaveQuizMistake(ctx context.Context, input QuizMistakeInput) error {
-	optionsJSON, err := json.Marshal(input.OptionsMarkdown)
+	optionsJSON, err := json.Marshal(quiztext.SanitizeMarkdownSlice(input.OptionsMarkdown))
 	if err != nil {
 		return err
 	}
@@ -168,7 +169,7 @@ func (r *LevelRepository) SaveQuizMistake(ctx context.Context, input QuizMistake
 		QuizID:           input.QuizID,
 		QuizIndex:        input.QuizIndex,
 		QuizType:         input.QuizType,
-		QuestionMarkdown: input.QuestionMarkdown,
+		QuestionMarkdown: quiztext.SanitizeMarkdown(input.QuestionMarkdown),
 		OptionsMarkdown:  optionsJSON,
 		AnswerIndex:      input.AnswerIndex,
 		SelectedIndex:    input.SelectedIndex,
@@ -208,8 +209,8 @@ func (r *LevelRepository) ListQuizMistakes(ctx context.Context, userID string, l
 			QuizID:           mistake.QuizID,
 			QuizIndex:        mistake.QuizIndex,
 			QuizType:         mistake.QuizType,
-			QuestionMarkdown: mistake.QuestionMarkdown,
-			OptionsMarkdown:  options,
+			QuestionMarkdown: quiztext.SanitizeMarkdown(mistake.QuestionMarkdown),
+			OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(options),
 			AnswerIndex:      mistake.AnswerIndex,
 			SelectedIndex:    mistake.SelectedIndex,
 			CreatedAt:        mistake.CreatedAt,
@@ -259,7 +260,6 @@ func (r *LevelRepository) ClearGenerationLevelID(ctx context.Context, generation
 		Update("level_id", nil).
 		Error
 }
-
 
 func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, userID string, subChapterID string) (models.ReusableLevel, error) {
 	var row struct {
@@ -441,7 +441,7 @@ func (r *LevelRepository) Insert(
 		DocumentID:      sourceContext.DocumentID,
 		ChapterID:       sourceContext.ChapterID,
 		SubChapterID:    sourceContext.SubChapterID,
-		SummaryMarkdown: generation.SummaryMarkdown,
+		SummaryMarkdown: quiztext.SanitizeMarkdown(generation.SummaryMarkdown),
 		SourceChunkIDs:  chunkIDs,
 		SourceMetadata:  sourceMetadata,
 		Model:           model,
@@ -456,7 +456,7 @@ func (r *LevelRepository) Insert(
 
 	quizzes := make([]models.Quiz, 0, len(generation.Quizzes))
 	for index, quiz := range generation.Quizzes {
-		optionsJSON, err := json.Marshal(quiz.OptionsMarkdown)
+		optionsJSON, err := json.Marshal(quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown))
 		if err != nil {
 			return SavedLevel{}, err
 		}
@@ -465,7 +465,7 @@ func (r *LevelRepository) Insert(
 			LevelID:          levelID,
 			QuizIndex:        index,
 			QuizType:         quiz.QuizType,
-			QuestionMarkdown: quiz.QuestionMarkdown,
+			QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
 			OptionsMarkdown:  optionsJSON,
 			AnswerIndex:      quiz.AnswerIndex,
 		})

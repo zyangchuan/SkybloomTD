@@ -60,7 +60,7 @@ func Load() (Config, error) {
 		GameSessionTTL:             envDurationSeconds("GAME_SESSION_TTL_SECONDS", 2*time.Hour),
 		OpenAIAPIKey:               strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
 		OpenAIBaseURL:              strings.TrimRight(envOrDefault("OPENAI_BASE_URL", "https://api.openai.com/v1"), "/"),
-		Model:                      envOrDefault("LEVEL_LLM_MODEL", "gpt-4o-mini"),
+		Model:                      envOrDefault("LEVEL_LLM_MODEL", "gpt-5.4-mini"),
 		Temperature:                envFloat("LEVEL_LLM_TEMPERATURE", 0.2),
 		Timeout:                    time.Duration(envFloat("LEVEL_LLM_TIMEOUT_SECONDS", 60)) * time.Second,
 		MaxRetries:                 envInt("LEVEL_LLM_MAX_RETRIES", 3),

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"skybloom/game-service/internal/quiztext"
 	"skybloom/game-service/internal/redisclient"
 	"skybloom/game-service/internal/repository"
 )
@@ -61,8 +62,8 @@ func FromLevelBootstrap(level repository.LevelBootstrap, generationID string) Le
 			ID:               quiz.ID,
 			QuizIndex:        quiz.QuizIndex,
 			QuizType:         quiz.QuizType,
-			QuestionMarkdown: quiz.QuestionMarkdown,
-			OptionsMarkdown:  quiz.OptionsMarkdown,
+			QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
+			OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown),
 			AnswerIndex:      quiz.AnswerIndex,
 		})
 	}
@@ -97,12 +98,14 @@ func (s *Store) Get(ctx context.Context, generationID string) (LevelQuizzes, err
 	if err := json.Unmarshal([]byte(body), &quizzes); err != nil {
 		return LevelQuizzes{}, err
 	}
+	sanitizeLevelQuizzes(&quizzes)
 	return quizzes, nil
 }
 
 func (s *Store) Set(ctx context.Context, generationID string, quizzes LevelQuizzes) error {
 	_ = ctx
 	quizzes.GenerationID = generationID
+	sanitizeLevelQuizzes(&quizzes)
 	if s == nil || s.client == nil {
 		return errors.New("quiz cache is not configured")
 	}
@@ -163,4 +166,12 @@ func (s *Store) Close() error {
 
 func key(generationID string) string {
 	return fmt.Sprintf("level-quizzes:v1:generation:%s", generationID)
+}
+
+func sanitizeLevelQuizzes(quizzes *LevelQuizzes) {
+	for index := range quizzes.Quizzes {
+		quiz := &quizzes.Quizzes[index]
+		quiz.QuestionMarkdown = quiztext.SanitizeMarkdown(quiz.QuestionMarkdown)
+		quiz.OptionsMarkdown = quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown)
+	}
 }

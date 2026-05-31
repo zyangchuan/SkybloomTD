@@ -76,6 +76,37 @@ func TestGenerateLevelRepairsTrueFalseOptions(t *testing.T) {
 	}
 }
 
+func TestGenerateLevelSanitizesKatexMarkdown(t *testing.T) {
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    "https://openai.test/v1",
+		Model:      "test-model",
+		Timeout:    5 * time.Second,
+		MaxRetries: 1,
+	})
+	transport := &fakeOpenAITransport{t: t, firstGeneration: brokenKatexGeneration()}
+	client.httpClient = &http.Client{Transport: transport}
+
+	generation, err := client.GenerateLevel(context.Background(), source.SourceContext{
+		Status:          "retrieved",
+		SubChapterID:    "sub-1",
+		SourceText:      "Lesson text",
+		SubChapterTitle: "Lesson",
+	})
+	if err != nil {
+		t.Fatalf("GenerateLevel failed: %v", err)
+	}
+
+	gotQuestion := generation.Quizzes[0].QuestionMarkdown
+	wantQuestion := `Differentiate $dy = \cos(u) \cdot \frac{du}{dx}$`
+	if gotQuestion != wantQuestion {
+		t.Fatalf("expected sanitized question %q, got %q", wantQuestion, gotQuestion)
+	}
+	if !hasOption(generation.Quizzes[0].OptionsMarkdown, `$\frac{du}{dx} + \sin(x)$`) {
+		t.Fatalf("expected sanitized option, got %#v", generation.Quizzes[0].OptionsMarkdown)
+	}
+}
+
 type fakeOpenAITransport struct {
 	t               *testing.T
 	prompts         []string
@@ -152,6 +183,21 @@ func oneOptionTrueFalseGeneration() *LevelGeneration {
 	return &generation
 }
 
+func brokenKatexGeneration() *LevelGeneration {
+	generation := validGeneration()
+	generation.Quizzes[0] = QuizItem{
+		QuizType:         "mcq",
+		QuestionMarkdown: `Differentiate $dy = \cos(u) \cdot 𝖿rac{du}{dx}$`,
+		OptionsMarkdown: []string{
+			"$\frac{du}{dx} + \textsin(x)$",
+			`$u + 1$`,
+			`$x + 1$`,
+		},
+		AnswerIndex: 0,
+	}
+	return &generation
+}
+
 func validGeneration() LevelGeneration {
 	quizzes := make([]QuizItem, 0, quizCount)
 	for i := 0; i < quizCount; i++ {
@@ -166,4 +212,13 @@ func validGeneration() LevelGeneration {
 		SummaryMarkdown: "Summary",
 		Quizzes:         quizzes,
 	}
+}
+
+func hasOption(options []string, want string) bool {
+	for _, option := range options {
+		if option == want {
+			return true
+		}
+	}
+	return false
 }

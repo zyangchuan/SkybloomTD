@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"skybloom/game-service/internal/quiztext"
 	"skybloom/game-service/internal/source"
 )
 
@@ -28,7 +29,15 @@ Each quiz can be either:
 Every question_markdown value and every options_markdown item must be a markdown
 string. answer_index must be the zero-based integer index of the correct option
 in options_markdown. Do not include facts that are not supported by the source
-text.`
+text.
+
+When using math, produce KaTeX-compatible LaTeX only:
+- wrap math in $...$, $$...$$, \(...\), or \[...\]
+- use ASCII command names such as \frac, \sqrt, \sin, \cos, \tan, \ln, \log, and \cdot
+- never use Unicode mathematical alphabet characters inside commands, for example 𝖿rac
+- never write trig functions as \textsin or \text{sin}; use \sin
+- do not put dangling quotes or backticks inside math delimiters
+- because this is JSON, every displayed LaTeX backslash must be escaped as \\ in the JSON string`
 
 const quizCount = 30
 
@@ -288,6 +297,13 @@ func levelGenerationSchema() map[string]any {
 }
 
 func normalizeGeneration(generation *LevelGeneration) {
+	generation.SummaryMarkdown = quiztext.SanitizeMarkdown(generation.SummaryMarkdown)
+	for index := range generation.Quizzes {
+		quiz := &generation.Quizzes[index]
+		quiz.QuestionMarkdown = quiztext.SanitizeMarkdown(quiz.QuestionMarkdown)
+		quiz.OptionsMarkdown = quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown)
+	}
+
 	// First, normalize true_false options to exact "True" and "False" values
 	for index := range generation.Quizzes {
 		quiz := &generation.Quizzes[index]
@@ -315,17 +331,17 @@ func normalizeGeneration(generation *LevelGeneration) {
 		if len(quiz.OptionsMarkdown) <= 1 {
 			continue
 		}
-		
+
 		correctText := ""
 		if quiz.AnswerIndex >= 0 && quiz.AnswerIndex < len(quiz.OptionsMarkdown) {
 			correctText = quiz.OptionsMarkdown[quiz.AnswerIndex]
 		}
-		
+
 		// Shuffle options using Fisher-Yates algorithm
 		r.Shuffle(len(quiz.OptionsMarkdown), func(i, j int) {
 			quiz.OptionsMarkdown[i], quiz.OptionsMarkdown[j] = quiz.OptionsMarkdown[j], quiz.OptionsMarkdown[i]
 		})
-		
+
 		// Map the AnswerIndex back to the new shuffled position
 		if correctText != "" {
 			for i, opt := range quiz.OptionsMarkdown {

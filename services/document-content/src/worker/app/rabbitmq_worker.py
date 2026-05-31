@@ -12,6 +12,13 @@ from .task_status import set_task_status
 LOG = logging.getLogger(__name__)
 
 
+def prewarm_ocr() -> None:
+    LOG.info("prewarming PaddleOCR pipeline")
+    from .ocr.processing import pipeline
+
+    LOG.info("PaddleOCR pipeline ready: %s", type(pipeline).__name__)
+
+
 def process_job(
     job: dict[str, Any],
     process_ocr_fn: Callable[..., dict[str, Any]] | None = None,
@@ -56,6 +63,8 @@ def process_job(
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    prewarm_ocr()
+
     params = pika.URLParameters(RABBITMQ_URL)
     connection = pika.BlockingConnection(params)
     channel = connection.channel()
