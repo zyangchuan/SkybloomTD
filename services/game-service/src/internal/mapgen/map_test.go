@@ -26,7 +26,7 @@ func TestGeneratedPathKeepsOneTileGap(t *testing.T) {
 	}
 }
 
-func TestGeneratedPathAvoidsTopAndBottomUIRows(t *testing.T) {
+func TestGeneratedPathUsesConfiguredTopAndBottomMargin(t *testing.T) {
 	for seed := int64(0); seed < 1000; seed++ {
 		levelMap, err := Generate(seed, Version)
 		if err != nil {

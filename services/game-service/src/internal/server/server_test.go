@@ -297,26 +297,9 @@ func TestWebsocketSessionStartAllowsEmptyQuizList(t *testing.T) {
 }
 
 func TestWebsocketPlaceTowerConsumesEssenceAndPersistsBird(t *testing.T) {
-	levels := &fakeLevelRepository{
-		bootstrap: repository.LevelBootstrap{
-			LevelID:             "11111111-1111-1111-1111-111111111111",
-			UserID:              "22222222-2222-2222-2222-222222222222",
-			SubChapterID:        "55555555-5555-5555-5555-555555555555",
-			GenerationID:        "generation-1",
-			MapSeed:             12345,
-			MapAlgorithmVersion: mapgen.Version,
-		},
-	}
-	maps := &fakeMapCache{
-		cached: mapgen.GeneratedMap{
-			Version:   mapgen.Version,
-			Seed:      99,
-			Width:     4,
-			Height:    4,
-			EnemyPath: []mapgen.PathTile{{X: 0, Y: 0, Kind: "start"}},
-		},
-	}
-	sessions := &fakeGameSessionStore{}
+	levels := standardLevels()
+	maps := smallMap()
+	sessions := quietSession()
 	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, maps, nil, nil, nil, nil, sessions).Router()
 	httpServer := startHTTPServer(t, handler)
 	defer httpServer.Close()
@@ -1049,7 +1032,7 @@ func TestAdvanceRuntimeTickReportsBirdAttackAndSmogDamage(t *testing.T) {
 		},
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
-		birds:   []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
+		birds:       []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
 		smogs: []gameobject.Smog{
 			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 0.1, Y: 0}},
 		},

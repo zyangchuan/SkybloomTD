@@ -643,7 +643,7 @@ paths:
         wave starts
         on the first gameplay tick after the loop is unlocked, and each later
         wave starts three seconds after the previous wave has been cleared. Map
-        generation keeps the enemy path out of the top four and bottom four
+        generation keeps the enemy path out of the top two and bottom two
         rows so UI overlays do not cover it. Each smog that reaches the path
         end removes 10 health. When health reaches 0, the server stops the loop
         and sends `game.over`. When all three waves are cleared with health

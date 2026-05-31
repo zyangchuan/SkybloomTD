@@ -141,7 +141,7 @@ three subwaves of grouped smog spawns, with larger gaps between individual
 smogs and a pause between subwaves. The first wave starts on the first gameplay
 tick after the loop is unlocked, and each later wave starts three seconds after
 the previous wave has been cleared. Smogs move along the generated enemy path,
-which avoids the top four and bottom four map rows so UI overlays do not cover
+which avoids the top two and bottom two map rows so UI overlays do not cover
 the path. Each smog that reaches the end removes 10 health. When health reaches
 0, the loop stops and the server sends `game.over`. When all three waves are
 cleared with health remaining, the loop stops and the server sends

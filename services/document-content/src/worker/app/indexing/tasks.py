@@ -1,12 +1,10 @@
 from pathlib import Path
 from typing import Any
 
-from ..config import CHUNK_MAX_CHARS, CHUNK_OVERLAP_LINES, ENABLE_EMBEDDINGS
 from ..ocr.output import remove_document_output
 from ..uploads.s3 import download_text_from_s3
 from .db import DocumentIndexRecord, insert_document_index
-from .embeddings import create_embeddings
-from .sections import chunk_chapters, parse_markdown_sections
+from .sections import parse_markdown_sections
 
 
 def markdown_s3_key(s3_upload: dict[str, Any]) -> str:
@@ -48,17 +46,6 @@ def index_ocr_output(upload_result: dict[str, Any]):
     s3_key = markdown_s3_key(s3_upload)
     markdown = read_markdown(upload_result, s3_bucket, s3_key)
     chapters, sub_chapters = parse_markdown_sections(markdown)
-    chunks = chunk_chapters(
-        markdown,
-        chapters,
-        max_chars=CHUNK_MAX_CHARS,
-        overlap_lines=CHUNK_OVERLAP_LINES,
-    )
-    embeddings = (
-        create_embeddings([chunk.text for chunk in chunks])
-        if ENABLE_EMBEDDINGS
-        else [None] * len(chunks)
-    )
 
     document_index = insert_document_index(
         DocumentIndexRecord(
@@ -69,8 +56,6 @@ def index_ocr_output(upload_result: dict[str, Any]):
             filename=upload_result.get("filename") or "output.md",
             chapters=chapters,
             sub_chapters=sub_chapters,
-            chunks=chunks,
-            embeddings=embeddings,
         )
     )
     local_output_cleanup = remove_document_output(Path(upload_result["output_dir"]))

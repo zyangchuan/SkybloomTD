@@ -52,22 +52,3 @@ def database_url_from_parts() -> str | None:
 DATABASE_URL = normalize_database_url(
     os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
 ) or database_url_from_parts()
-
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
-EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "64"))
-ENABLE_EMBEDDINGS = os.getenv("ENABLE_EMBEDDINGS", "false").lower() in {
-    "1",
-    "true",
-    "yes",
-    "on",
-}
-
-CHUNK_MAX_CHARS = int(os.getenv("CHUNK_MAX_CHARS", "6000"))
-CHUNK_OVERLAP_LINES = int(os.getenv("CHUNK_OVERLAP_LINES", "4"))
-
-SECTIONING_LLM_MODEL = os.getenv("SECTIONING_LLM_MODEL", "gpt-4o-mini")
-SECTIONING_LLM_TIMEOUT_SECONDS = float(
-    os.getenv("SECTIONING_LLM_TIMEOUT_SECONDS", "120")
-)
-SECTIONING_LLM_MAX_RETRIES = int(os.getenv("SECTIONING_LLM_MAX_RETRIES", "2"))

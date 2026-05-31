@@ -14,8 +14,8 @@ const (
 const (
 	pathGenerationAttempts = 256
 	minTurnColumnGap       = 2
-	pathMinY               = 4
-	pathMaxY               = Height - 5
+	pathMinY               = 2
+	pathMaxY               = Height - 3
 )
 
 type GeneratedMap struct {

@@ -132,9 +132,6 @@ func (r *DocumentRepository) DeleteDocumentCascade(ctx context.Context, document
 		if err := tx.Exec(`DELETE FROM levels WHERE document_id = ?`, documentID).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`DELETE FROM chunks WHERE document_id = ?`, documentID).Error; err != nil {
-			return err
-		}
 		if err := tx.Exec(`DELETE FROM sub_chapters WHERE document_id = ?`, documentID).Error; err != nil {
 			return err
 		}
