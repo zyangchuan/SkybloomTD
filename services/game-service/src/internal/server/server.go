@@ -42,6 +42,8 @@ const (
 	groupGapTicks           = int64(160)
 	baseHealthDamage        = 10
 	correctQuizEssenceAward = 30
+	baseSmogHealth          = 30
+	baseSmogSpeed           = 0.8
 )
 
 type LevelRepository interface {
@@ -1129,10 +1131,35 @@ type waveDefinition struct {
 
 func waveDefinitions() []waveDefinition {
 	return []waveDefinition{
-		{Wave: 1, Count: 15, Health: 30, Speed: 0.8},
-		{Wave: 2, Count: 24, Health: 45, Speed: 0.95},
-		{Wave: 3, Count: 36, Health: 60, Speed: 1.1},
+		scaledWaveDefinition(1, 15),
+		scaledWaveDefinition(2, 24),
+		scaledWaveDefinition(3, 36),
 	}
+}
+
+func scaledWaveDefinition(wave int, count int) waveDefinition {
+	return waveDefinition{
+		Wave:   wave,
+		Count:  count,
+		Health: scaledSmogHealth(wave),
+		Speed:  scaledSmogSpeed(wave),
+	}
+}
+
+func scaledSmogHealth(wave int) int {
+	waveOffset := wave - 1
+	if waveOffset < 0 {
+		waveOffset = 0
+	}
+	return baseSmogHealth + (waveOffset * 20) + (waveOffset * waveOffset * 5)
+}
+
+func scaledSmogSpeed(wave int) float64 {
+	waveOffset := float64(wave - 1)
+	if waveOffset < 0 {
+		waveOffset = 0
+	}
+	return baseSmogSpeed + (waveOffset * 0.17) + (waveOffset * waveOffset * 0.03)
 }
 
 func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
