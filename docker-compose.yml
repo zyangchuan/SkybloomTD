@@ -17,7 +17,7 @@ services:
       - game-service
       - game-generation-worker
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/nginx-health | grep -q ok"]
+      test: ["CMD-SHELL", "wget -q -O - \"$${NGINX_HEALTHCHECK_URL}\" | grep -q ok"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -27,18 +27,11 @@ services:
   frontend:
     container_name: frontend
     image: skybloomtd-frontend:latest
-    command: npm run dev
     build:
       context: ./frontend/app
       dockerfile: Dockerfile
-    env_file:
-      - ./frontend/app/.env
     expose:
       - "3000"
-    volumes:
-      - ./frontend/app:/app
-      - /app/node_modules
-      - /app/.next
     restart: unless-stopped
     networks:
       - services-network
@@ -46,16 +39,10 @@ services:
   game:
     container_name: game
     image: skybloomtd-game:latest
-    command: npm run dev
     build:
       context: ./frontend/game
-    ports:
-      - "${GAME_CLIENT_PORT:-5173}:5173"
     expose:
       - "5173"
-    volumes:
-      - ./frontend/game:/app
-      - /app/node_modules
     restart: unless-stopped
     networks:
       - services-network
@@ -68,10 +55,7 @@ services:
     image: document-content-api:latest
     expose:
       - "8000"
-    env_file:
-      - .env
     environment:
-      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
       DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
     volumes:
       - ./services/document-content/temp:/temp
@@ -86,8 +70,6 @@ services:
     image: document-content-grpc:latest
     expose:
       - "50051"
-    env_file:
-      - .env
     environment:
       CONTENT_GRPC_HOST: 0.0.0.0
       CONTENT_GRPC_PORT: 50051
@@ -95,7 +77,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "nc -z 127.0.0.1 50051",
+          "nc -z \"$${DOCUMENT_CONTENT_GRPC_HEALTHCHECK_HOST}\" \"$${DOCUMENT_CONTENT_GRPC_HEALTHCHECK_PORT}\"",
         ]
       interval: 10s
       timeout: 5s
@@ -114,26 +96,14 @@ services:
       dockerfile: Dockerfile
     image: document-content-worker:latest
     command: python -m app.rabbitmq_worker
-    env_file:
-      - .env
     environment:
-      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
       DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
-      - ./services/document-content/src/worker:/app
       - ./services/document-content/output:/output
       - ./services/document-content/temp:/temp
       - models:/root/.paddlex
-      - /usr/lib/wsl/lib:/usr/lib/wsl/lib
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: ["gpu"]
     networks:
       - services-network
 
@@ -145,14 +115,9 @@ services:
     image: game-service:latest
     expose:
       - "8081"
-    env_file:
-      - .env
     environment:
       GAME_SERVICE_PORT: 8081
-      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
       GAME_GENERATION_QUEUE: ${GAME_GENERATION_QUEUE:-game.generation.generate}
-      GAME_STATUS_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      GAME_MAP_REDIS_URL: redis://game-redis:6379/0
       GAME_GENERATION_STATUS_TTL_SECONDS: ${GAME_GENERATION_STATUS_TTL_SECONDS:-86400}
       LEVEL_MAP_CACHE_TTL_SECONDS: ${LEVEL_MAP_CACHE_TTL_SECONDS:-86400}
       LEVEL_QUIZ_CACHE_TTL_SECONDS: ${LEVEL_QUIZ_CACHE_TTL_SECONDS:-86400}
@@ -168,17 +133,11 @@ services:
       context: ./services/game-service/src
       dockerfile: Dockerfile.worker
     image: game-generation-worker:latest
-    env_file:
-      - .env
     environment:
-      RABBITMQ_URL: ${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
       GAME_GENERATION_QUEUE: ${GAME_GENERATION_QUEUE:-game.generation.generate}
-      GAME_STATUS_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      GAME_MAP_REDIS_URL: redis://game-redis:6379/0
       GAME_GENERATION_STATUS_TTL_SECONDS: ${GAME_GENERATION_STATUS_TTL_SECONDS:-86400}
       LEVEL_MAP_CACHE_TTL_SECONDS: ${LEVEL_MAP_CACHE_TTL_SECONDS:-86400}
       LEVEL_QUIZ_CACHE_TTL_SECONDS: ${LEVEL_QUIZ_CACHE_TTL_SECONDS:-86400}
-      DOCUMENT_CONTENT_GRPC_ADDR: document-content-grpc:50051
     depends_on:
       document-content-grpc:
         condition: service_healthy
@@ -207,8 +166,6 @@ services:
     image: user-service:latest
     expose:
       - "8080"
-    env_file:
-      - .env
     environment:
       USER_SERVICE_PORT: 8080
       GIN_MODE: release
@@ -220,5 +177,5 @@ networks:
     name: skybloom-services-network
 
 volumes:
-  models:
   game-redis-data:
+  models:

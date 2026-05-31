@@ -3,6 +3,12 @@ import { NextResponse } from 'next/server';
 
 const cookieName = process.env.AUTH_ACCESS_TOKEN_COOKIE || 'skybloom_access_token';
 const maxAgeSeconds = 60 * 60;
+const cookieSecure = parseBoolean(process.env.AUTH_COOKIE_SECURE, false);
+
+function parseBoolean(value: string | undefined, fallback: boolean) {
+  if (!value) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
 
 export async function POST(request: Request) {
   const { access_token } = await request.json().catch(() => ({ access_token: '' }));
@@ -14,7 +20,7 @@ export async function POST(request: Request) {
   const cookieStore = await cookies();
   cookieStore.set(cookieName, access_token.trim(), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure,
     sameSite: 'lax',
     path: '/',
     maxAge: maxAgeSeconds,
@@ -27,7 +33,7 @@ export async function DELETE() {
   const cookieStore = await cookies();
   cookieStore.set(cookieName, '', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: cookieSecure,
     sameSite: 'lax',
     path: '/',
     maxAge: 0,

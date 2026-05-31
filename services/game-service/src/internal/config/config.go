@@ -65,7 +65,7 @@ func Load() (Config, error) {
 		Timeout:                    time.Duration(envFloat("LEVEL_LLM_TIMEOUT_SECONDS", 60)) * time.Second,
 		MaxRetries:                 envInt("LEVEL_LLM_MAX_RETRIES", 3),
 		LevelSourceMaxChars:        int32(envInt("LEVEL_SOURCE_MAX_CHARS", 24000)),
-		DocumentContentGRPCAddr:    envOrDefault("DOCUMENT_CONTENT_GRPC_ADDR", envOrDefault("OCR_CONTENT_GRPC_ADDR", "localhost:50051")),
+		DocumentContentGRPCAddr:    envOrDefault("DOCUMENT_CONTENT_GRPC_ADDR", envOrDefault("OCR_CONTENT_GRPC_ADDR", "document-content-grpc:50051")),
 		DocumentContentGRPCTimeout: time.Duration(envFloat("DOCUMENT_CONTENT_GRPC_TIMEOUT_SECONDS", envFloat("OCR_CONTENT_GRPC_TIMEOUT_SECONDS", 30))) * time.Second,
 		PublicAPIBasePath:          envOrDefault("GAME_SERVICE_PUBLIC_API_BASE_PATH", "/api/game-service"),
 		AllowedOrigins:             envCSV("GAME_SERVICE_ALLOWED_ORIGINS"),

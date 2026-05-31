@@ -1,0 +1,106 @@
+services:
+  reverse-proxy:
+    env_file:
+      - ./.env.local
+
+  frontend:
+    command: npm run dev
+    env_file:
+      - ./.env.local
+      - ./frontend/app/.env.local
+    volumes:
+      - ./frontend/app:/app
+      - /app/node_modules
+      - /app/.next
+
+  game:
+    command: npm run dev
+    env_file:
+      - ./.env.local
+    ports:
+      - "${GAME_CLIENT_PORT:-5173}:5173"
+    volumes:
+      - ./frontend/game:/app
+      - /app/node_modules
+
+  document-content-api:
+    env_file:
+      - ./.env.local
+    depends_on:
+      - rabbitmq
+      - redis
+
+  document-content-grpc:
+    env_file:
+      - ./.env.local
+    depends_on:
+      - redis
+
+  document-content-worker:
+    env_file:
+      - ./.env.local
+    volumes:
+      - ./services/document-content/src/worker:/app
+      - ./services/document-content/output:/output
+      - ./services/document-content/temp:/temp
+      - models:/root/.paddlex
+      - /usr/lib/wsl/lib:/usr/lib/wsl/lib
+    depends_on:
+      - rabbitmq
+      - redis
+
+  game-service:
+    env_file:
+      - ./.env.local
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      game-redis:
+        condition: service_started
+
+  game-generation-worker:
+    env_file:
+      - ./.env.local
+    depends_on:
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      document-content-grpc:
+        condition: service_healthy
+      game-redis:
+        condition: service_started
+
+  user-service:
+    env_file:
+      - ./.env.local
+
+  rabbitmq:
+    container_name: rabbitmq
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+    networks:
+      - services-network
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - services-network
+
+volumes:
+  rabbitmq-data:
+  redis-data:

@@ -1,0 +1,52 @@
+services:
+  reverse-proxy:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped
+
+  frontend:
+    command: sh -c "npm run build && npm run start"
+    env_file:
+      - ./.env.production
+      - ./frontend/app/.env.production
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+
+  game:
+    command: sh -c "npm run build && npm run preview -- --host 0.0.0.0 --port 5173"
+    env_file:
+      - ./.env.production
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+
+  document-content-api:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped
+
+  document-content-grpc:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped
+
+  document-content-worker:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped
+
+  game-service:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped
+
+  game-generation-worker:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped
+
+  user-service:
+    env_file:
+      - ./.env.production
+    restart: unless-stopped

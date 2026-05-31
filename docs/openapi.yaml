@@ -13,8 +13,11 @@ info:
     `user-service /auth/verify` and forwards trusted identity headers to
     private services.
 servers:
-  - url: http://localhost
-    description: Local Docker Compose reverse proxy
+  - url: "{publicBaseUrl}"
+    description: Public reverse proxy base URL
+    variables:
+      publicBaseUrl:
+        default: http://your-server-domain
 tags:
   - name: System
     description: Public health and documentation endpoints.
@@ -611,8 +614,8 @@ paths:
       summary: Open the authoritative game websocket
       description: |
         WebSocket endpoint for the game client. Browser clients should connect
-        to `ws://localhost/api/game-service/ws` locally, or `wss://...` in
-        production. Authentication is supplied by the `skybloom_access_token`
+        to the websocket base URL from `SKYBLOOM_PUBLIC_WS_BASE_URL` with
+        `/api/game-service/ws` appended. Authentication is supplied by the `skybloom_access_token`
         cookie.
 
         After the connection opens, send `game.start` with a `sub_chapter_id`.

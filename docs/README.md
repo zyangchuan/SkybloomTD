@@ -2,16 +2,35 @@
 
 The public API contract is in `docs/openapi.yaml`.
 
-When the Docker stack is running, Nginx also serves it at:
+## Environment Profiles
+
+Local compose runs use `.env.local` with `docker-compose.local.yml`:
 
 ```text
-http://localhost/openapi.yaml
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
+```
+
+Production compose runs use `.env.production` with
+`docker-compose.production.yml`:
+
+```text
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
+```
+
+The tracked `*.example` files show the expected keys. The real `.env.local`
+and `.env.production` files stay ignored so secrets do not get committed.
+
+When the Docker stack is running, Nginx also serves it from the public base URL
+configured in `SKYBLOOM_PUBLIC_BASE_URL`:
+
+```text
+$SKYBLOOM_PUBLIC_BASE_URL/openapi.yaml
 ```
 
 Swagger UI is available at:
 
 ```text
-http://localhost/docs
+$SKYBLOOM_PUBLIC_BASE_URL/docs
 ```
 
 All browser-facing API calls should go through the reverse proxy on port 80.
@@ -55,7 +74,7 @@ GET /api/document-content/chapters/{chapter_id}/sub-chapters
 The game client connects to the authoritative websocket endpoint:
 
 ```text
-ws://localhost/api/game-service/ws
+$SKYBLOOM_PUBLIC_WS_BASE_URL/api/game-service/ws
 ```
 
 After connecting, start or reuse level generation by sending:
