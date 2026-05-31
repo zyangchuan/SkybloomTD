@@ -1,10 +1,15 @@
 import mimetypes
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
 import boto3
+from botocore.config import Config
 
 from ..config import AWS_REGION, AWS_S3_BUCKET, AWS_S3_ENDPOINT_URL, AWS_S3_PREFIX
+
+
+LOG = logging.getLogger(__name__)
 
 
 def s3_client():
@@ -13,6 +18,7 @@ def s3_client():
         kwargs["region_name"] = AWS_REGION
     if AWS_S3_ENDPOINT_URL:
         kwargs["endpoint_url"] = AWS_S3_ENDPOINT_URL
+    kwargs["config"] = Config(s3={"addressing_style": "path"})
     return boto3.client("s3", **kwargs)
 
 
@@ -89,5 +95,6 @@ def download_text_from_s3(bucket: str, key: str) -> str:
 
 def download_file_from_s3(bucket: str, key: str, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
+    LOG.info("downloading source file from s3 bucket=%s key=%s", bucket, key)
     s3_client().download_file(bucket, key, str(destination))
     return destination

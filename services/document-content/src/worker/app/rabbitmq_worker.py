@@ -29,13 +29,6 @@ def process_job(
         None,
     ] = set_task_status,
 ) -> dict[str, Any]:
-    if process_ocr_fn is None:
-        from .ocr.tasks import process_ocr as process_ocr_fn
-    if upload_ocr_output_fn is None:
-        from .uploads.tasks import upload_ocr_output as upload_ocr_output_fn
-    if index_ocr_output_fn is None:
-        from .indexing.tasks import index_ocr_output as index_ocr_output_fn
-
     task_id = job.get("task_id")
     source = job["source"]
     user_id = job["user_id"]
@@ -45,6 +38,13 @@ def process_job(
     set_task_status_fn(task_id, document_id, "processing", None)
 
     try:
+        if process_ocr_fn is None:
+            from .ocr.tasks import process_ocr as process_ocr_fn
+        if upload_ocr_output_fn is None:
+            from .uploads.tasks import upload_ocr_output as upload_ocr_output_fn
+        if index_ocr_output_fn is None:
+            from .indexing.tasks import index_ocr_output as index_ocr_output_fn
+
         ocr_result = process_ocr_fn(source, user_id, document_id, filename)
         upload_result = upload_ocr_output_fn(ocr_result)
         result = index_ocr_output_fn(upload_result)
@@ -82,6 +82,12 @@ def main() -> None:
         job: dict[str, Any] = {}
         try:
             job = json.loads(body.decode("utf-8"))
+            LOG.info(
+                "document job received task_id=%s document_id=%s redelivered=%s",
+                job.get("task_id"),
+                job.get("document_id"),
+                method.redelivered,
+            )
             result = process_job(job)
         except Exception:
             LOG.exception(

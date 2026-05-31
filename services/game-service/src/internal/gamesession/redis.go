@@ -19,7 +19,7 @@ var ErrSessionNotFound = errors.New("game session not found")
 
 const (
 	InitialHealth  = 100
-	InitialEssence = 1000
+	InitialEssence = 30
 	InitialWave    = 0
 )
 
