@@ -96,7 +96,11 @@ def candidate_payload(candidate: Any, sequence_number: int) -> dict[str, Any]:
     }
 
 
-def generate_document_outline(candidates: Sequence[Any]) -> dict[str, Any]:
+def generate_document_outline(
+    candidates: Sequence[Any],
+    previous_outline: dict[str, Any] | None = None,
+    validation_error: str | None = None,
+) -> dict[str, Any]:
     from openai import OpenAI
 
     client = OpenAI(
@@ -108,19 +112,32 @@ def generate_document_outline(candidates: Sequence[Any]) -> dict[str, Any]:
         for sequence_number, candidate in enumerate(candidates, start=1)
     ]
 
+    if previous_outline is None:
+        user_content = (
+            "Create a clean table of contents from the ordered OCR "
+            "Markdown headings below. Return normalized chapters and "
+            "sub-chapters with start_heading_id values only.\n\n"
+            f"{json.dumps({'headings': headings}, ensure_ascii=True)}"
+        )
+    else:
+        repair_payload = {
+            "headings": headings,
+            "previous_outline": previous_outline,
+        }
+        user_content = (
+            "Repair the generated outline below so it passes validation. "
+            "Keep the same intent when possible, but every start_heading_id "
+            "must be one of the ids in the ordered OCR Markdown headings. "
+            "Return the full corrected outline, not a patch.\n\n"
+            f"Validation error: {validation_error or 'unknown validation error'}\n\n"
+            f"{json.dumps(repair_payload, ensure_ascii=True)}"
+        )
+
     response = client.chat.completions.create(
         model=SECTIONING_LLM_MODEL,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": (
-                    "Create a clean table of contents from the ordered OCR "
-                    "Markdown headings below. Return normalized chapters and "
-                    "sub-chapters with start_heading_id values only.\n\n"
-                    f"{json.dumps({'headings': headings}, ensure_ascii=True)}"
-                ),
-            },
+            {"role": "user", "content": user_content},
         ],
         response_format={
             "type": "json_schema",

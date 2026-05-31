@@ -1,9 +1,13 @@
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 
+from ..config import SECTIONING_OUTLINE_MAX_REPAIRS
+
 HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 CLASSIFIABLE_HEADING_MAX_LEVEL = 3
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -92,10 +96,16 @@ def extract_heading_candidates(lines: list[str]) -> list[HeadingCandidate]:
 
 def generate_outline_with_llm(
     candidates: list[HeadingCandidate],
+    previous_outline: dict[str, Any] | None = None,
+    validation_error: str | None = None,
 ) -> dict[str, Any]:
     from .sectioning_llm import generate_document_outline
 
-    return generate_document_outline(candidates)
+    return generate_document_outline(
+        candidates,
+        previous_outline=previous_outline,
+        validation_error=validation_error,
+    )
 
 
 def clean_outline_title(value: Any, field_name: str) -> str:
@@ -274,9 +284,33 @@ def parse_markdown_sections(
     if not candidates:
         raise ValueError("Cannot section markdown because no classifiable headings were found")
 
-    outline = generate_outline_with_llm(candidates)
-    return build_sections_from_generated_outline(
-        lines,
-        candidates,
-        outline,
-    )
+    previous_outline: dict[str, Any] | None = None
+    validation_error: str | None = None
+    max_attempts = max(0, SECTIONING_OUTLINE_MAX_REPAIRS) + 1
+
+    for attempt in range(1, max_attempts + 1):
+        outline = generate_outline_with_llm(
+            candidates,
+            previous_outline=previous_outline,
+            validation_error=validation_error,
+        )
+        try:
+            return build_sections_from_generated_outline(
+                lines,
+                candidates,
+                outline,
+            )
+        except ValueError as exc:
+            if attempt >= max_attempts:
+                raise
+            validation_error = str(exc)
+            previous_outline = outline
+            LOG.info(
+                "generated outline failed validation; requesting repair "
+                "attempt=%s max_attempts=%s error=%s",
+                attempt + 1,
+                max_attempts,
+                validation_error,
+            )
+
+    raise ValueError("Generated outline repair loop ended without a valid outline")
