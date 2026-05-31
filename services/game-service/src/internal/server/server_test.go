@@ -461,6 +461,9 @@ func TestWebsocketQuizRequestAndCorrectAnswerAwardsEssence(t *testing.T) {
 	if !resultState.Correct {
 		t.Fatalf("expected correct result, got %+v", resultState)
 	}
+	if resultState.CorrectIndex != 0 || resultState.CorrectOptionMarkdown != "True" || resultState.SelectedOptionMarkdown != "True" {
+		t.Fatalf("unexpected answer details %+v", resultState)
+	}
 	if resultState.EssenceAwarded != correctQuizEssenceAward {
 		t.Fatalf("expected essence award %d, got %d", correctQuizEssenceAward, resultState.EssenceAwarded)
 	}
@@ -537,6 +540,9 @@ func TestWebsocketQuizIncorrectAnswerRecordsMistake(t *testing.T) {
 	}
 	if resultState.Correct {
 		t.Fatalf("expected incorrect result, got %+v", resultState)
+	}
+	if resultState.CorrectIndex != 0 || resultState.CorrectOptionMarkdown != "A" || resultState.SelectedOptionMarkdown != "B" {
+		t.Fatalf("unexpected answer details %+v", resultState)
 	}
 	if len(quizzes.quizzes.Quizzes) != 0 {
 		t.Fatalf("expected answered quiz to be removed, got %d quizzes", len(quizzes.quizzes.Quizzes))

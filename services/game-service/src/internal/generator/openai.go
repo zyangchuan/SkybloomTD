@@ -327,29 +327,39 @@ func normalizeGeneration(generation *LevelGeneration) {
 	// Shuffle options for all quizzes to eliminate any positional/LLM bias
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for index := range generation.Quizzes {
-		quiz := &generation.Quizzes[index]
-		if len(quiz.OptionsMarkdown) <= 1 {
-			continue
-		}
+		shuffleQuizOptions(r, &generation.Quizzes[index])
+	}
+}
 
-		correctText := ""
-		if quiz.AnswerIndex >= 0 && quiz.AnswerIndex < len(quiz.OptionsMarkdown) {
-			correctText = quiz.OptionsMarkdown[quiz.AnswerIndex]
-		}
+type quizOption struct {
+	markdown string
+	correct  bool
+}
 
-		// Shuffle options using Fisher-Yates algorithm
-		r.Shuffle(len(quiz.OptionsMarkdown), func(i, j int) {
-			quiz.OptionsMarkdown[i], quiz.OptionsMarkdown[j] = quiz.OptionsMarkdown[j], quiz.OptionsMarkdown[i]
+func shuffleQuizOptions(r *rand.Rand, quiz *QuizItem) {
+	if len(quiz.OptionsMarkdown) <= 1 {
+		return
+	}
+	if quiz.AnswerIndex < 0 || quiz.AnswerIndex >= len(quiz.OptionsMarkdown) {
+		return
+	}
+
+	options := make([]quizOption, 0, len(quiz.OptionsMarkdown))
+	for index, option := range quiz.OptionsMarkdown {
+		options = append(options, quizOption{
+			markdown: option,
+			correct:  index == quiz.AnswerIndex,
 		})
+	}
 
-		// Map the AnswerIndex back to the new shuffled position
-		if correctText != "" {
-			for i, opt := range quiz.OptionsMarkdown {
-				if opt == correctText {
-					quiz.AnswerIndex = i
-					break
-				}
-			}
+	r.Shuffle(len(options), func(i, j int) {
+		options[i], options[j] = options[j], options[i]
+	})
+
+	for index, option := range options {
+		quiz.OptionsMarkdown[index] = option.markdown
+		if option.correct {
+			quiz.AnswerIndex = index
 		}
 	}
 }
@@ -396,11 +406,26 @@ func validateGeneration(generation LevelGeneration) error {
 				return fmt.Errorf("quiz %d true_false options must be True and False", index)
 			}
 		}
+		if hasDuplicateOptions(quiz.OptionsMarkdown) {
+			return fmt.Errorf("quiz %d options_markdown must contain unique options", index)
+		}
 		if quiz.AnswerIndex < 0 || quiz.AnswerIndex >= len(quiz.OptionsMarkdown) {
 			return fmt.Errorf("quiz %d answer_index must point to an option", index)
 		}
 	}
 	return nil
+}
+
+func hasDuplicateOptions(options []string) bool {
+	seen := map[string]struct{}{}
+	for _, option := range options {
+		key := strings.ToLower(strings.Join(strings.Fields(option), " "))
+		if _, ok := seen[key]; ok {
+			return true
+		}
+		seen[key] = struct{}{}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

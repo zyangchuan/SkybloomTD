@@ -107,6 +107,34 @@ func TestGenerateLevelSanitizesKatexMarkdown(t *testing.T) {
 	}
 }
 
+func TestGenerateLevelRetriesDuplicateOptions(t *testing.T) {
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    "https://openai.test/v1",
+		Model:      "test-model",
+		Timeout:    5 * time.Second,
+		MaxRetries: 1,
+	})
+	transport := &fakeOpenAITransport{t: t, firstGeneration: duplicateOptionsGeneration()}
+	client.httpClient = &http.Client{Transport: transport}
+
+	generation, err := client.GenerateLevel(context.Background(), source.SourceContext{
+		Status:          "retrieved",
+		SubChapterID:    "sub-1",
+		SourceText:      "Lesson text",
+		SubChapterTitle: "Lesson",
+	})
+	if err != nil {
+		t.Fatalf("GenerateLevel failed: %v", err)
+	}
+	if len(transport.prompts) != 2 {
+		t.Fatalf("expected duplicate options to trigger a retry, got %d prompts", len(transport.prompts))
+	}
+	if len(generation.Quizzes) != quizCount {
+		t.Fatalf("expected %d quizzes, got %d", quizCount, len(generation.Quizzes))
+	}
+}
+
 type fakeOpenAITransport struct {
 	t               *testing.T
 	prompts         []string
@@ -194,6 +222,17 @@ func brokenKatexGeneration() *LevelGeneration {
 			`$x + 1$`,
 		},
 		AnswerIndex: 0,
+	}
+	return &generation
+}
+
+func duplicateOptionsGeneration() *LevelGeneration {
+	generation := validGeneration()
+	generation.Quizzes[0] = QuizItem{
+		QuizType:         "mcq",
+		QuestionMarkdown: "Pick the unique answer.",
+		OptionsMarkdown:  []string{"A", "A", "C"},
+		AnswerIndex:      2,
 	}
 	return &generation
 }

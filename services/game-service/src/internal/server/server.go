@@ -201,12 +201,15 @@ type QuizUnavailableState struct {
 }
 
 type QuizResultState struct {
-	QuizID         string `json:"quiz_id"`
-	Correct        bool   `json:"correct"`
-	SelectedIndex  int    `json:"selected_index"`
-	EssenceAwarded int    `json:"essence_awarded"`
-	Essence        int    `json:"essence,omitempty"`
-	Remaining      int    `json:"remaining"`
+	QuizID                 string `json:"quiz_id"`
+	Correct                bool   `json:"correct"`
+	SelectedIndex          int    `json:"selected_index"`
+	CorrectIndex           int    `json:"correct_index"`
+	SelectedOptionMarkdown string `json:"selected_option_markdown"`
+	CorrectOptionMarkdown  string `json:"correct_option_markdown"`
+	EssenceAwarded         int    `json:"essence_awarded"`
+	Essence                int    `json:"essence,omitempty"`
+	Remaining              int    `json:"remaining"`
 }
 
 type placeTowerRequest struct {
@@ -932,12 +935,15 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	if err := writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.result",
 		Data: QuizResultState{
-			QuizID:         answeredQuiz.ID,
-			Correct:        correct,
-			SelectedIndex:  request.SelectedIndex,
-			EssenceAwarded: essenceAwarded,
-			Essence:        essence,
-			Remaining:      remaining,
+			QuizID:                 answeredQuiz.ID,
+			Correct:                correct,
+			SelectedIndex:          request.SelectedIndex,
+			CorrectIndex:           answeredQuiz.AnswerIndex,
+			SelectedOptionMarkdown: optionMarkdown(answeredQuiz.OptionsMarkdown, request.SelectedIndex),
+			CorrectOptionMarkdown:  optionMarkdown(answeredQuiz.OptionsMarkdown, answeredQuiz.AnswerIndex),
+			EssenceAwarded:         essenceAwarded,
+			Essence:                essence,
+			Remaining:              remaining,
 		},
 	}); err != nil {
 		return err

@@ -3,36 +3,104 @@
 import React, { Suspense, useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+type QuizState = {
+  quizId: string;
+  question: string;
+  options: string[];
+  type: string;
+};
+
+type QuizPromptData = {
+  quiz_id: string;
+  question_markdown: string;
+  options_markdown?: string[];
+  quiz_type?: string;
+};
+
+type QuizResult = {
+  quiz_id: string;
+  correct: boolean;
+  selected_index: number;
+  correct_index?: number;
+  selected_option_markdown?: string;
+  correct_option_markdown?: string;
+  essence_awarded?: number;
+  essence?: number;
+  remaining?: number;
+};
+
+type QuizOverlayMessage =
+  | { type: 'quiz-result'; data: QuizResult }
+  | { type: 'quiz-presented'; data: QuizPromptData };
+
+type SearchParamsReader = {
+  get(name: string): string | null;
+};
+
+type MathRendererWindow = Window & {
+  renderMathInElement?: (
+    element: HTMLElement,
+    options: {
+      delimiters: Array<{ left: string; right: string; display: boolean }>;
+      throwOnError: boolean;
+    }
+  ) => void;
+};
+
+function parseOptions(value: string | null): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((option): option is string => typeof option === 'string');
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+}
+
+function quizStateFromSearchParams(searchParams: SearchParamsReader): QuizState {
+  return {
+    quizId: searchParams.get('quiz_id') || '',
+    question: searchParams.get('question') || '',
+    options: parseOptions(searchParams.get('options')),
+    type: searchParams.get('type') || 'mcq'
+  };
+}
+
+function quizStateFromPrompt(promptData: QuizPromptData): QuizState {
+  return {
+    quizId: promptData.quiz_id,
+    question: promptData.question_markdown,
+    options: promptData.options_markdown || [],
+    type: promptData.quiz_type === 'true_false' ? 'tf' : 'mcq'
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isQuizOverlayMessage(value: unknown): value is QuizOverlayMessage {
+  if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.data)) {
+    return false;
+  }
+  return value.type === 'quiz-result' || value.type === 'quiz-presented';
+}
+
 function QuizOverlayContent() {
   const searchParams = useSearchParams();
 
-  const [currentQuizId, setCurrentQuizId] = useState('');
-  const [currentQuestion, setCurrentQuestion] = useState('');
-  const [currentOptions, setCurrentOptions] = useState<string[]>([]);
-  const [currentType, setCurrentType] = useState('mcq');
+  const [currentQuiz, setCurrentQuiz] = useState(() => quizStateFromSearchParams(searchParams));
+  const currentQuizId = currentQuiz.quizId;
+  const currentQuestion = currentQuiz.question;
+  const currentOptions = currentQuiz.options;
+  const currentType = currentQuiz.type;
 
   const [katexReady, setKatexReady] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [quizAnswered, setQuizAnswered] = useState(false);
-  const [result, setResult] = useState<any | null>(null);
+  const [result, setResult] = useState<QuizResult | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Initialize state from search parameters
-  useEffect(() => {
-    const qid = searchParams.get('quiz_id') || '';
-    const qtext = searchParams.get('question') || '';
-    const qtype = searchParams.get('type') || 'mcq';
-    let qopts: string[] = [];
-    try {
-      qopts = JSON.parse(searchParams.get('options') || '[]');
-    } catch (e) {
-      console.error(e);
-    }
-    setCurrentQuizId(qid);
-    setCurrentQuestion(qtext);
-    setCurrentOptions(qopts);
-    setCurrentType(qtype);
-  }, [searchParams]);
 
   // Dynamically load KaTeX assets inside the iframe context
   useEffect(() => {
@@ -60,14 +128,11 @@ function QuizOverlayContent() {
 
     // 4. Register cross-document listener to receive results and next quiz presented events from Phaser
     const handleResultPacket = (event: MessageEvent) => {
+      if (!isQuizOverlayMessage(event.data)) return;
       if (event.data.type === 'quiz-result') {
         setResult(event.data.data);
       } else if (event.data.type === 'quiz-presented') {
-        const promptData = event.data.data;
-        setCurrentQuizId(promptData.quiz_id);
-        setCurrentQuestion(promptData.question_markdown);
-        setCurrentOptions(promptData.options_markdown || []);
-        setCurrentType(promptData.quiz_type === 'true_false' ? 'tf' : 'mcq');
+        setCurrentQuiz(quizStateFromPrompt(event.data.data));
         
         // Reset answer states for the new question
         setSelectedIndex(null);
@@ -86,9 +151,10 @@ function QuizOverlayContent() {
 
   // Run the KaTeX auto-typesetter when content or script is ready
   useEffect(() => {
-    if (katexReady && containerRef.current && (window as any).renderMathInElement) {
+    const mathWindow = window as MathRendererWindow;
+    if (katexReady && containerRef.current && mathWindow.renderMathInElement) {
       try {
-        (window as any).renderMathInElement(containerRef.current, {
+        mathWindow.renderMathInElement(containerRef.current, {
           delimiters: [
             { left: '$$', right: '$$', display: true },
             { left: '$', right: '$', display: false },
@@ -102,6 +168,29 @@ function QuizOverlayContent() {
       }
     }
   }, [katexReady, currentQuestion, currentOptions]);
+
+  const resultForCurrentQuiz = result && result.quiz_id === currentQuizId ? result : null;
+
+  const optionHighlightClass = (index: number) => {
+    if (!resultForCurrentQuiz) return '';
+    if (selectedIndex === index) {
+      return resultForCurrentQuiz.correct ? 'highlight-correct' : 'highlight-incorrect';
+    }
+    if (!resultForCurrentQuiz.correct && resultForCurrentQuiz.correct_index === index) {
+      return 'highlight-correct';
+    }
+    return '';
+  };
+
+  const optionOpacity = (index: number) => {
+    const isSelected = selectedIndex === index;
+    const isCorrectAnswer = Boolean(
+      resultForCurrentQuiz &&
+      !resultForCurrentQuiz.correct &&
+      resultForCurrentQuiz.correct_index === index
+    );
+    return quizAnswered && !isSelected && !isCorrectAnswer ? 0.5 : 1.0;
+  };
 
   const handleSelectOption = (index: number) => {
     if (quizAnswered) return;
@@ -313,10 +402,7 @@ function QuizOverlayContent() {
           <div className="flex flex-row justify-center gap-6 w-full max-w-[680px] mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom">
             {currentOptions.map((option, idx) => {
               const isSelected = selectedIndex === idx;
-              let highlightClass = '';
-              if (isSelected && result && result.quiz_id === currentQuizId) {
-                highlightClass = result.correct ? 'highlight-correct' : 'highlight-incorrect';
-              }
+              const highlightClass = optionHighlightClass(idx);
               return (
                 <button
                   key={idx}
@@ -326,7 +412,7 @@ function QuizOverlayContent() {
                   style={{ 
                     boxSizing: 'border-box', 
                     padding: '20px', 
-                    opacity: quizAnswered && !isSelected ? 0.5 : 1.0 
+                    opacity: optionOpacity(idx)
                   }}
                 >
                   <span className={quizAnswered && isSelected && !result ? "opacity-0 pointer-events-none" : "opacity-100"}>
@@ -345,10 +431,7 @@ function QuizOverlayContent() {
           <div className="flex flex-col items-center gap-4 w-full mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom">
             {currentOptions.map((option, idx) => {
               const isSelected = selectedIndex === idx;
-              let highlightClass = '';
-              if (isSelected && result && result.quiz_id === currentQuizId) {
-                highlightClass = result.correct ? 'highlight-correct' : 'highlight-incorrect';
-              }
+              const highlightClass = optionHighlightClass(idx);
               return (
                 <button
                   key={idx}
@@ -358,7 +441,7 @@ function QuizOverlayContent() {
                   style={{ 
                     boxSizing: 'border-box', 
                     padding: '16px', 
-                    opacity: quizAnswered && !isSelected ? 0.5 : 1.0 
+                    opacity: optionOpacity(idx)
                   }}
                 >
                   <span className={quizAnswered && isSelected && !result ? "opacity-0 pointer-events-none" : "opacity-100"}>
