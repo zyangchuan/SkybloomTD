@@ -135,6 +135,66 @@ func TestGenerateLevelRetriesDuplicateOptions(t *testing.T) {
 	}
 }
 
+func TestGenerateLevelRepairsAnswerIndexFromCorrectOption(t *testing.T) {
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    "https://openai.test/v1",
+		Model:      "test-model",
+		Timeout:    5 * time.Second,
+		MaxRetries: 1,
+	})
+	transport := &fakeOpenAITransport{t: t, firstGeneration: wrongIndexWithCorrectOptionGeneration()}
+	client.httpClient = &http.Client{Transport: transport}
+
+	generation, err := client.GenerateLevel(context.Background(), source.SourceContext{
+		Status:          "retrieved",
+		SubChapterID:    "sub-1",
+		SourceText:      "Lesson text",
+		SubChapterTitle: "Lesson",
+	})
+	if err != nil {
+		t.Fatalf("GenerateLevel failed: %v", err)
+	}
+	if len(transport.prompts) != 1 {
+		t.Fatalf("expected answer index repair without retry, got %d prompts", len(transport.prompts))
+	}
+	quiz := generation.Quizzes[0]
+	if quiz.CorrectOptionMarkdown != quiz.OptionsMarkdown[quiz.AnswerIndex] {
+		t.Fatalf("expected correct option and answer index to match, got index=%d correct=%q options=%#v", quiz.AnswerIndex, quiz.CorrectOptionMarkdown, quiz.OptionsMarkdown)
+	}
+	if quiz.CorrectOptionMarkdown != "C" {
+		t.Fatalf("expected correct option C, got %q", quiz.CorrectOptionMarkdown)
+	}
+}
+
+func TestGenerateLevelRetriesCorrectOptionMismatch(t *testing.T) {
+	client := NewClient(Config{
+		APIKey:     "test-key",
+		BaseURL:    "https://openai.test/v1",
+		Model:      "test-model",
+		Timeout:    5 * time.Second,
+		MaxRetries: 1,
+	})
+	transport := &fakeOpenAITransport{t: t, firstGeneration: correctOptionMismatchGeneration()}
+	client.httpClient = &http.Client{Transport: transport}
+
+	_, err := client.GenerateLevel(context.Background(), source.SourceContext{
+		Status:          "retrieved",
+		SubChapterID:    "sub-1",
+		SourceText:      "Lesson text",
+		SubChapterTitle: "Lesson",
+	})
+	if err != nil {
+		t.Fatalf("GenerateLevel failed: %v", err)
+	}
+	if len(transport.prompts) != 2 {
+		t.Fatalf("expected correct option mismatch to trigger a retry, got %d prompts", len(transport.prompts))
+	}
+	if !strings.Contains(transport.prompts[1], "correct_option_markdown") {
+		t.Fatalf("expected correct option feedback in retry prompt, got %q", transport.prompts[1])
+	}
+}
+
 type fakeOpenAITransport struct {
 	t               *testing.T
 	prompts         []string
@@ -202,6 +262,7 @@ func openAIResponseBody(t *testing.T, generation LevelGeneration) string {
 func invalidTrueFalseGeneration() LevelGeneration {
 	generation := validGeneration()
 	generation.Quizzes[0].OptionsMarkdown = []string{"Maybe"}
+	generation.Quizzes[0].CorrectOptionMarkdown = "Maybe"
 	return generation
 }
 
@@ -221,7 +282,8 @@ func brokenKatexGeneration() *LevelGeneration {
 			`$u + 1$`,
 			`$x + 1$`,
 		},
-		AnswerIndex: 0,
+		AnswerIndex:           0,
+		CorrectOptionMarkdown: "$\frac{du}{dx} + \textsin(x)$",
 	}
 	return &generation
 }
@@ -229,10 +291,35 @@ func brokenKatexGeneration() *LevelGeneration {
 func duplicateOptionsGeneration() *LevelGeneration {
 	generation := validGeneration()
 	generation.Quizzes[0] = QuizItem{
-		QuizType:         "mcq",
-		QuestionMarkdown: "Pick the unique answer.",
-		OptionsMarkdown:  []string{"A", "A", "C"},
-		AnswerIndex:      2,
+		QuizType:              "mcq",
+		QuestionMarkdown:      "Pick the unique answer.",
+		OptionsMarkdown:       []string{"A", "A", "C"},
+		AnswerIndex:           2,
+		CorrectOptionMarkdown: "C",
+	}
+	return &generation
+}
+
+func wrongIndexWithCorrectOptionGeneration() *LevelGeneration {
+	generation := validGeneration()
+	generation.Quizzes[0] = QuizItem{
+		QuizType:              "mcq",
+		QuestionMarkdown:      "Pick C.",
+		OptionsMarkdown:       []string{"A", "B", "C"},
+		AnswerIndex:           0,
+		CorrectOptionMarkdown: "C",
+	}
+	return &generation
+}
+
+func correctOptionMismatchGeneration() *LevelGeneration {
+	generation := validGeneration()
+	generation.Quizzes[0] = QuizItem{
+		QuizType:              "mcq",
+		QuestionMarkdown:      "Pick C.",
+		OptionsMarkdown:       []string{"A", "B", "C"},
+		AnswerIndex:           2,
+		CorrectOptionMarkdown: "D",
 	}
 	return &generation
 }
@@ -241,10 +328,11 @@ func validGeneration() LevelGeneration {
 	quizzes := make([]QuizItem, 0, quizCount)
 	for i := 0; i < quizCount; i++ {
 		quizzes = append(quizzes, QuizItem{
-			QuizType:         "true_false",
-			QuestionMarkdown: "Question?",
-			OptionsMarkdown:  []string{"True", "False"},
-			AnswerIndex:      i % 2,
+			QuizType:              "true_false",
+			QuestionMarkdown:      "Question?",
+			OptionsMarkdown:       []string{"True", "False"},
+			AnswerIndex:           i % 2,
+			CorrectOptionMarkdown: []string{"True", "False"}[i%2],
 		})
 	}
 	return LevelGeneration{

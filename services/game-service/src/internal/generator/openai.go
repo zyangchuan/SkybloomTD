@@ -18,7 +18,17 @@ import (
 
 const systemPrompt = `You are an educational level generator.
 
-Use only the source text provided by the user. Produce a complete level made of:
+The source text provided by the user is extracted with OCR and may contain
+malformed symbols, broken spacing, incorrect LaTeX, or obvious recognition
+mistakes. Treat the source as the lesson topic and evidence, but not as
+infallible. Use your stable subject-matter knowledge to repair OCR mistakes,
+especially in formulas, notation, definitions, and answer choices. If the OCR
+content conflicts with well-known facts or rules, use the corrected fact or
+rule. Do not invent a new topic that is unrelated to the source; when a source
+line is too damaged to recover confidently, generate quizzes from clearer
+nearby content instead.
+
+Produce a complete level made of:
 - a markdown summary for the level
 - exactly 30 quizzes for the level
 
@@ -28,8 +38,10 @@ Each quiz can be either:
 
 Every question_markdown value and every options_markdown item must be a markdown
 string. answer_index must be the zero-based integer index of the correct option
-in options_markdown. Do not include facts that are not supported by the source
-text.
+in options_markdown. correct_option_markdown must exactly equal the correct
+string from options_markdown. Before finalizing each quiz, solve it yourself and
+verify that the chosen correct option is actually correct. If the OCR-derived
+answer appears wrong, rewrite the options and answer key to the corrected answer.
 
 When using math, produce KaTeX-compatible LaTeX only:
 - wrap math in $...$, $$...$$, \(...\), or \[...\]
@@ -61,10 +73,11 @@ type LevelGeneration struct {
 }
 
 type QuizItem struct {
-	QuizType         string   `json:"quiz_type"`
-	QuestionMarkdown string   `json:"question_markdown"`
-	OptionsMarkdown  []string `json:"options_markdown"`
-	AnswerIndex      int      `json:"answer_index"`
+	QuizType              string   `json:"quiz_type"`
+	QuestionMarkdown      string   `json:"question_markdown"`
+	OptionsMarkdown       []string `json:"options_markdown"`
+	AnswerIndex           int      `json:"answer_index"`
+	CorrectOptionMarkdown string   `json:"correct_option_markdown"`
 }
 
 func NewClient(cfg Config) *Client {
@@ -128,7 +141,7 @@ func (c *Client) GenerateLevel(ctx context.Context, sourceContext source.SourceC
 
 func promptWithValidationFailure(prompt string, validationErr error) string {
 	return fmt.Sprintf(
-		"%s\n\nPrevious attempt failed validation: %s\nRegenerate the full level and obey every schema rule exactly. For true_false quizzes, options_markdown must contain exactly two strings: True and False. For mcq quizzes, options_markdown must contain exactly three strings.",
+		"%s\n\nPrevious attempt failed validation: %s\nRegenerate the full level and obey every schema rule exactly. For true_false quizzes, options_markdown must contain exactly two strings: True and False. For mcq quizzes, options_markdown must contain exactly three strings. For every quiz, correct_option_markdown must exactly equal one option, and answer_index must point to that same option after you independently solve and verify the question.",
 		prompt,
 		validationErr.Error(),
 	)
@@ -224,7 +237,7 @@ func responseOutputText(data []byte) (string, error) {
 }
 
 func levelGenerationSchema() map[string]any {
-	requiredQuizFields := []string{"quiz_type", "question_markdown", "options_markdown", "answer_index"}
+	requiredQuizFields := []string{"quiz_type", "question_markdown", "options_markdown", "answer_index", "correct_option_markdown"}
 	mcqQuizSchema := map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
@@ -246,6 +259,7 @@ func levelGenerationSchema() map[string]any {
 				"minimum": 0,
 				"maximum": 2,
 			},
+			"correct_option_markdown": map[string]any{"type": "string"},
 		},
 	}
 	trueFalseQuizSchema := map[string]any{
@@ -271,6 +285,10 @@ func levelGenerationSchema() map[string]any {
 				"type":    "integer",
 				"minimum": 0,
 				"maximum": 1,
+			},
+			"correct_option_markdown": map[string]any{
+				"type": "string",
+				"enum": []string{"True", "False"},
 			},
 		},
 	}
@@ -302,25 +320,16 @@ func normalizeGeneration(generation *LevelGeneration) {
 		quiz := &generation.Quizzes[index]
 		quiz.QuestionMarkdown = quiztext.SanitizeMarkdown(quiz.QuestionMarkdown)
 		quiz.OptionsMarkdown = quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown)
+		quiz.CorrectOptionMarkdown = quiztext.SanitizeMarkdown(quiz.CorrectOptionMarkdown)
 	}
 
 	// First, normalize true_false options to exact "True" and "False" values
 	for index := range generation.Quizzes {
 		quiz := &generation.Quizzes[index]
 		if quiz.QuizType == "true_false" {
-			correct := ""
-			if quiz.AnswerIndex >= 0 && quiz.AnswerIndex < len(quiz.OptionsMarkdown) {
-				correct = normalizedTrueFalseOption(quiz.OptionsMarkdown[quiz.AnswerIndex])
-			}
-			if correct == "" {
-				continue
-			}
-			quiz.OptionsMarkdown = []string{"True", "False"}
-			if correct == "true" {
-				quiz.AnswerIndex = 0
-			} else {
-				quiz.AnswerIndex = 1
-			}
+			normalizeTrueFalseQuiz(quiz)
+		} else {
+			normalizeAnswerIndexFromCorrectOption(quiz)
 		}
 	}
 
@@ -340,9 +349,11 @@ func shuffleQuizOptions(r *rand.Rand, quiz *QuizItem) {
 	if len(quiz.OptionsMarkdown) <= 1 {
 		return
 	}
-	if quiz.AnswerIndex < 0 || quiz.AnswerIndex >= len(quiz.OptionsMarkdown) {
+	correctIndex := matchingOptionIndex(quiz.OptionsMarkdown, quiz.CorrectOptionMarkdown)
+	if correctIndex < 0 {
 		return
 	}
+	quiz.AnswerIndex = correctIndex
 
 	options := make([]quizOption, 0, len(quiz.OptionsMarkdown))
 	for index, option := range quiz.OptionsMarkdown {
@@ -360,6 +371,7 @@ func shuffleQuizOptions(r *rand.Rand, quiz *QuizItem) {
 		quiz.OptionsMarkdown[index] = option.markdown
 		if option.correct {
 			quiz.AnswerIndex = index
+			quiz.CorrectOptionMarkdown = option.markdown
 		}
 	}
 }
@@ -374,6 +386,32 @@ func normalizedTrueFalseOption(option string) string {
 		return "false"
 	default:
 		return ""
+	}
+}
+
+func normalizeTrueFalseQuiz(quiz *QuizItem) {
+	correct := normalizedTrueFalseOption(quiz.CorrectOptionMarkdown)
+	if correct == "" && quiz.AnswerIndex >= 0 && quiz.AnswerIndex < len(quiz.OptionsMarkdown) {
+		correct = normalizedTrueFalseOption(quiz.OptionsMarkdown[quiz.AnswerIndex])
+	}
+	if correct == "" {
+		return
+	}
+
+	quiz.OptionsMarkdown = []string{"True", "False"}
+	if correct == "true" {
+		quiz.AnswerIndex = 0
+		quiz.CorrectOptionMarkdown = "True"
+	} else {
+		quiz.AnswerIndex = 1
+		quiz.CorrectOptionMarkdown = "False"
+	}
+}
+
+func normalizeAnswerIndexFromCorrectOption(quiz *QuizItem) {
+	if index := matchingOptionIndex(quiz.OptionsMarkdown, quiz.CorrectOptionMarkdown); index >= 0 {
+		quiz.AnswerIndex = index
+		quiz.CorrectOptionMarkdown = quiz.OptionsMarkdown[index]
 	}
 }
 
@@ -412,14 +450,38 @@ func validateGeneration(generation LevelGeneration) error {
 		if quiz.AnswerIndex < 0 || quiz.AnswerIndex >= len(quiz.OptionsMarkdown) {
 			return fmt.Errorf("quiz %d answer_index must point to an option", index)
 		}
+		correctIndex := matchingOptionIndex(quiz.OptionsMarkdown, quiz.CorrectOptionMarkdown)
+		if correctIndex < 0 {
+			return fmt.Errorf("quiz %d correct_option_markdown must exactly match one option", index)
+		}
+		if quiz.AnswerIndex != correctIndex {
+			return fmt.Errorf("quiz %d answer_index must point to correct_option_markdown", index)
+		}
 	}
 	return nil
+}
+
+func matchingOptionIndex(options []string, option string) int {
+	normalizedOption := normalizeOptionForMatch(option)
+	if normalizedOption == "" {
+		return -1
+	}
+	for index, candidate := range options {
+		if normalizeOptionForMatch(candidate) == normalizedOption {
+			return index
+		}
+	}
+	return -1
+}
+
+func normalizeOptionForMatch(option string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(option)), " "))
 }
 
 func hasDuplicateOptions(options []string) bool {
 	seen := map[string]struct{}{}
 	for _, option := range options {
-		key := strings.ToLower(strings.Join(strings.Fields(option), " "))
+		key := normalizeOptionForMatch(option)
 		if _, ok := seen[key]; ok {
 			return true
 		}
