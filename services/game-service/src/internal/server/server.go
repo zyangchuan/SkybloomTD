@@ -32,6 +32,8 @@ const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
 const awardQuizEssenceAction = "award_quiz_essence"
+const pauseGameAction = "pause_game"
+const resumeGameAction = "resume_game"
 
 const (
 	waveClearDelayTicks     = int64(60)
@@ -275,6 +277,7 @@ type runtimeSession struct {
 	levelMap    mapgen.GeneratedMap
 	path        []gameobject.Position
 	loopStarted bool
+	loopPaused  bool
 
 	waveStartedAtTick int64
 	waveSpawned       int
@@ -511,6 +514,20 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
 					log.Printf("websocket error write failed: %v", writeErr)
 					return
+				}
+			}
+		case "game.pause":
+			if gameLoop != nil && !gameLoop.stopped() {
+				select {
+				case gameLoop.actions <- clientAction{Type: pauseGameAction}:
+				default:
+				}
+			}
+		case "game.resume":
+			if gameLoop != nil && !gameLoop.stopped() {
+				select {
+				case gameLoop.actions <- clientAction{Type: resumeGameAction}:
+				default:
 				}
 			}
 		case "game.action.place_tower":
@@ -772,12 +789,19 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 				if action.Result != nil {
 					action.Result <- actionResult{Essence: essence, Err: err}
 				}
+			case pauseGameAction:
+				runtime.loopPaused = true
+			case resumeGameAction:
+				runtime.loopPaused = false
 			default:
 				if action.Result != nil {
 					action.Result <- actionResult{Err: errors.New("unsupported action")}
 				}
 			}
 		case now := <-ticker.C:
+			if runtime.loopPaused {
+				continue
+			}
 			events := advanceRuntimeTick(&runtime, now)
 			if err := s.saveRuntimeState(ctx, runtime); err != nil {
 				log.Printf("game session runtime save failed session_id=%s: %v", runtime.session.SessionID, err)
