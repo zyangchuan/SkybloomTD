@@ -299,7 +299,13 @@ func TestWebsocketSessionStartAllowsEmptyQuizList(t *testing.T) {
 func TestWebsocketPlaceTowerConsumesEssenceAndPersistsBird(t *testing.T) {
 	levels := standardLevels()
 	maps := smallMap()
+	stats, err := gameobject.BirdStatsForType(gameobject.BirdTypeSparrow)
+	if err != nil {
+		t.Fatalf("load sparrow stats: %v", err)
+	}
+	startingEssence := stats.Cost + 10
 	sessions := quietSession()
+	sessions.state.Essence = startingEssence
 	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, maps, nil, nil, nil, nil, sessions).Router()
 	httpServer := startHTTPServer(t, handler)
 	defer httpServer.Close()
@@ -359,7 +365,7 @@ func TestWebsocketPlaceTowerConsumesEssenceAndPersistsBird(t *testing.T) {
 		t.Fatalf("unexpected bird position %+v", acceptedData.Bird.Position)
 	}
 
-	if sessions.economy.Essence != gamesession.InitialEssence-50 {
+	if sessions.economy.Essence != startingEssence-stats.Cost {
 		t.Fatalf("unexpected persisted essence %d", sessions.economy.Essence)
 	}
 	if len(sessions.birds) != 1 {

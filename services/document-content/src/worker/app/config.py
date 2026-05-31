@@ -52,3 +52,9 @@ def database_url_from_parts() -> str | None:
 DATABASE_URL = normalize_database_url(
     os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
 ) or database_url_from_parts()
+
+SECTIONING_LLM_MODEL = os.getenv("SECTIONING_LLM_MODEL", "gpt-4o-mini")
+SECTIONING_LLM_TIMEOUT_SECONDS = float(
+    os.getenv("SECTIONING_LLM_TIMEOUT_SECONDS", "120")
+)
+SECTIONING_LLM_MAX_RETRIES = int(os.getenv("SECTIONING_LLM_MAX_RETRIES", "2"))
