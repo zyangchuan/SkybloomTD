@@ -146,6 +146,7 @@ def normalized_outline_chapters(
     candidates_by_id = {candidate.id: candidate for candidate in candidates}
     normalized_chapters: list[dict[str, Any]] = []
     used_chapter_ids: set[str] = set()
+    raw_sub_chapter_refs: list[dict[str, Any]] = []
 
     for chapter_index, raw_chapter in enumerate(raw_chapters, start=1):
         if not isinstance(raw_chapter, dict):
@@ -167,8 +168,6 @@ def normalized_outline_chapters(
         if not isinstance(raw_sub_chapters, list):
             raise ValueError("Generated chapter.sub_chapters must be a list")
 
-        sub_chapters: list[dict[str, Any]] = []
-        used_sub_chapter_ids: set[str] = set()
         for sub_index, raw_sub_chapter in enumerate(raw_sub_chapters, start=1):
             if not isinstance(raw_sub_chapter, dict):
                 raise ValueError(
@@ -185,17 +184,7 @@ def normalized_outline_chapters(
                 raw_sub_chapter.get("start_heading_id"),
                 "sub_chapter.start_heading_id",
             )
-            if sub_start_heading.id == start_heading.id:
-                raise ValueError(
-                    "Generated sub-chapter cannot reuse its chapter start heading id"
-                )
-            if sub_start_heading.id in used_sub_chapter_ids:
-                raise ValueError(
-                    f"Generated outline reused sub-chapter heading id "
-                    f"{sub_start_heading.id!r}"
-                )
-            used_sub_chapter_ids.add(sub_start_heading.id)
-            sub_chapters.append(
+            raw_sub_chapter_refs.append(
                 {
                     "title": sub_title,
                     "heading": sub_start_heading,
@@ -206,14 +195,48 @@ def normalized_outline_chapters(
             {
                 "title": title,
                 "heading": start_heading,
-                "sub_chapters": sorted(
-                    sub_chapters,
-                    key=lambda item: item["heading"].line_number,
-                ),
+                "sub_chapters": [],
             }
         )
 
     normalized_chapters.sort(key=lambda item: item["heading"].line_number)
+
+    used_sub_chapter_ids: set[str] = set()
+    for sub_chapter in raw_sub_chapter_refs:
+        sub_start_heading = sub_chapter["heading"]
+        if sub_start_heading.id in used_sub_chapter_ids:
+            raise ValueError(
+                f"Generated outline reused sub-chapter heading id "
+                f"{sub_start_heading.id!r}"
+            )
+        used_sub_chapter_ids.add(sub_start_heading.id)
+
+        owner_chapter = None
+        for chapter_offset, chapter in enumerate(normalized_chapters):
+            chapter_start_line = chapter["heading"].line_number
+            next_chapter_start_line = (
+                normalized_chapters[chapter_offset + 1]["heading"].line_number
+                if chapter_offset + 1 < len(normalized_chapters)
+                else float("inf")
+            )
+            if (
+                chapter_start_line
+                <= sub_start_heading.line_number
+                < next_chapter_start_line
+            ):
+                owner_chapter = chapter
+                break
+
+        if owner_chapter is None:
+            raise ValueError(
+                "Generated sub-chapter start line must be inside a generated chapter"
+            )
+
+        owner_chapter["sub_chapters"].append(sub_chapter)
+
+    for chapter in normalized_chapters:
+        chapter["sub_chapters"].sort(key=lambda item: item["heading"].line_number)
+
     return normalized_chapters
 
 
@@ -251,7 +274,7 @@ def build_sections_from_generated_outline(
         sub_chapters_for_chapter = chapter["sub_chapters"]
         for sub_offset, sub_chapter in enumerate(sub_chapters_for_chapter):
             sub_start_line = sub_chapter["heading"].line_number
-            if not chapter_start_line < sub_start_line < next_chapter_start_line:
+            if not chapter_start_line <= sub_start_line < next_chapter_start_line:
                 raise ValueError(
                     "Generated sub-chapter start line must be inside its chapter"
                 )

@@ -22,8 +22,12 @@ services:
       - models:/root/.paddlex
       - /usr/lib/wsl/lib:/usr/lib/wsl/lib
     depends_on:
-      - rabbitmq
-      - redis
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - document-content-network
     deploy:
       resources:
         reservations:
@@ -41,7 +45,15 @@ services:
       - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
+    networks:
+      - document-content-network
 
   redis:
     container_name: redis
@@ -51,7 +63,19 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     restart: unless-stopped
+    networks:
+      - document-content-network
+
+networks:
+  document-content-network:
+    name: document-content-network
 
 volumes:
   models:

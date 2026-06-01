@@ -75,6 +75,12 @@ Use start_heading_id to point to the earliest input heading that belongs to the
 chapter or sub-chapter. Use only ids from the input list. Python will compute
 all end lines from the chosen start ids, so do not output end lines.
 
+Sub-chapter start ids must follow document order. A sub-chapter may use the
+same start_heading_id as its chapter when it represents the chapter intro or
+the whole chapter. Otherwise, choose a heading after the chapter start and
+before the next chapter start. If a sub-chapter heading line falls inside a
+different chapter, put that sub-chapter under the chapter that contains it.
+
 Optimize for a coherent content page, not literal Markdown levels. PPStructureV3
 may assign inconsistent levels, so a real sub-chapter may appear as "#" and a
 chapter may appear as "##" or "###". Use ordering, numbering patterns,
@@ -128,6 +134,10 @@ def generate_document_outline(
             "Repair the generated outline below so it passes validation. "
             "Keep the same intent when possible, but every start_heading_id "
             "must be one of the ids in the ordered OCR Markdown headings. "
+            "Sub-chapters must be nested under the chapter whose line range "
+            "contains their start_heading_id. A sub-chapter may share its "
+            "chapter start_heading_id only when it represents the chapter "
+            "intro or whole chapter. "
             "Return the full corrected outline, not a patch.\n\n"
             f"Validation error: {validation_error or 'unknown validation error'}\n\n"
             f"{json.dumps(repair_payload, ensure_ascii=True)}"

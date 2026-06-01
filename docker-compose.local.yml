@@ -27,9 +27,18 @@ services:
   document-content-api:
     env_file:
       - ./.env.local
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/0
+      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
+      TASK_STATUS_TTL_SECONDS: ${TASK_STATUS_TTL_SECONDS:-604800}
     depends_on:
-      - rabbitmq
-      - redis
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - services-network
 
   document-content-grpc:
     env_file:
@@ -40,6 +49,11 @@ services:
   document-content-worker:
     env_file:
       - ./.env.local
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/0
+      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
+      TASK_STATUS_TTL_SECONDS: ${TASK_STATUS_TTL_SECONDS:-604800}
     volumes:
       - ./services/document-content/src/worker:/app
       - ./services/document-content/output:/output
@@ -47,28 +61,40 @@ services:
       - models:/root/.paddlex
       - /usr/lib/wsl/lib:/usr/lib/wsl/lib
     depends_on:
-      - rabbitmq
-      - redis
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - services-network
 
   game-service:
     env_file:
       - ./.env.local
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/0
+      GAME_STATUS_REDIS_URL: redis://redis:6379/0
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       game-redis:
         condition: service_started
 
   game-generation-worker:
     env_file:
       - ./.env.local
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      REDIS_URL: redis://redis:6379/0
+      GAME_STATUS_REDIS_URL: redis://redis:6379/0
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       document-content-grpc:
         condition: service_healthy
       game-redis:
@@ -86,6 +112,12 @@ services:
       - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
     networks:
       - services-network
@@ -98,6 +130,12 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     restart: unless-stopped
     networks:
       - services-network

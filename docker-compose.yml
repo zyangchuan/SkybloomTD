@@ -87,8 +87,6 @@ services:
       - services-network
 
   document-content-worker:
-    profiles:
-      - local-worker
     container_name: document-content-worker
     hostname: document-content-worker
     build:
