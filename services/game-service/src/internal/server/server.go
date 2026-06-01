@@ -42,7 +42,7 @@ const (
 	groupGapTicks           = int64(160)
 	baseHealthDamage        = 10
 	correctQuizEssenceAward = 30
-	baseSmogHealth          = 30
+	baseSmogHealth          = 60
 	baseSmogSpeed           = 0.8
 )
 
@@ -1151,7 +1151,7 @@ func scaledSmogHealth(wave int) int {
 	if waveOffset < 0 {
 		waveOffset = 0
 	}
-	return baseSmogHealth + (waveOffset * 20) + (waveOffset * waveOffset * 5)
+	return baseSmogHealth + (waveOffset * 40) + (waveOffset * waveOffset * 5)
 }
 
 func scaledSmogSpeed(wave int) float64 {
@@ -1159,7 +1159,7 @@ func scaledSmogSpeed(wave int) float64 {
 	if waveOffset < 0 {
 		waveOffset = 0
 	}
-	return baseSmogSpeed + (waveOffset * 0.17) + (waveOffset * waveOffset * 0.03)
+	return baseSmogSpeed + (waveOffset * 0.3) + (waveOffset * waveOffset * 0.03)
 }
 
 func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
