@@ -89,6 +89,7 @@ function isQuizOverlayMessage(value: unknown): value is QuizOverlayMessage {
 
 function QuizOverlayContent() {
   const searchParams = useSearchParams();
+  const isMobile = searchParams.get('mobile') === 'true';
 
   const [currentQuiz, setCurrentQuiz] = useState(() => quizStateFromSearchParams(searchParams));
   const currentQuizId = currentQuiz.quizId;
@@ -104,18 +105,18 @@ function QuizOverlayContent() {
 
   // Dynamically load KaTeX assets inside the iframe context
   useEffect(() => {
-    // 1. Preload stylesheet
+    // Preload stylesheet
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';
     document.head.appendChild(link);
 
-    // 2. Preload KaTeX core parser
+    // Preload KaTeX core parser
     const scriptJs = document.createElement('script');
     scriptJs.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';
     scriptJs.async = false;
     scriptJs.onload = () => {
-      // 3. Preload auto-render extension
+      // Preload auto-render extension
       const scriptAuto = document.createElement('script');
       scriptAuto.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js';
       scriptAuto.async = false;
@@ -126,7 +127,7 @@ function QuizOverlayContent() {
     };
     document.head.appendChild(scriptJs);
 
-    // 4. Register cross-document listener to receive results and next quiz presented events from Phaser
+    // Register cross-document listener to receive results and next quiz presented events from Phaser
     const handleResultPacket = (event: MessageEvent) => {
       if (!isQuizOverlayMessage(event.data)) return;
       if (event.data.type === 'quiz-result') {
@@ -207,7 +208,10 @@ function QuizOverlayContent() {
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 w-full h-full flex items-center justify-center p-4 bg-transparent select-none overflow-hidden"
+      className={isMobile
+        ? "fixed inset-0 w-full h-full flex items-center justify-center p-1 bg-transparent select-none overflow-hidden"
+        : "fixed inset-0 w-full h-full flex items-center justify-center p-4 bg-transparent select-none overflow-hidden"
+      }
     >
       <style>{`
         /* Force transparent document backdrops inside Next.js layout */
@@ -220,6 +224,22 @@ function QuizOverlayContent() {
         .sky-clouds {
           display: none !important;
         }
+
+        /* Thinner mobile-only 9-slice outlines and borders */
+        ${isMobile ? `
+          .modal-9slice {
+            border-width: 12px !important;
+            border-image-width: 12px !important;
+          }
+          .question-9slice {
+            border-width: 8px !important;
+            border-image-width: 8px !important;
+          }
+          .option-9slice {
+            border-width: 8px !important;
+            border-image-width: 8px !important;
+          }
+        ` : ''}
 
         /* Dynamic premium 9-slice overlays utilizing vector SVGs */
         .modal-9slice {
@@ -371,11 +391,87 @@ function QuizOverlayContent() {
           scrollbar-width: thin;
           scrollbar-color: rgba(56, 189, 248, 0.35) rgba(255, 255, 255, 0.05);
         }
+
+        /* Native responsive height flexbox layout */
+        .modal-container {
+          width: 96%;
+          max-width: 580px; /* Cozy smaller width on mobile landscape */
+          height: 96vh;
+          height: 96dvh; /* Let the height grow fully to occupy screen vertically */
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          background: #0f172a;
+          box-sizing: border-box;
+          padding: 4px 12px 6px 12px !important; /* Even smaller paddings */
+          overflow: hidden;
+          position: relative;
+        }
+
+        .question-box {
+          width: 95%;
+          max-width: 540px; /* Cozy smaller width */
+          height: 115px; /* Compact question card */
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          background: #020617;
+          box-sizing: border-box;
+          padding: 8px 14px; /* Cozy padding */
+          font-size: 1.05rem; /* Smaller font text */
+          margin-top: 4px;
+        }
+
+        .options-container {
+          width: 95%;
+          max-width: 540px; /* Cozy smaller width */
+          margin-top: 4px; /* Reduced margin */
+          padding: 2px; /* Even smaller paddings */
+          box-sizing: border-box;
+          overflow-y: auto;
+          flex: 1; /* Dynamic flexible height! */
+        }
+
+        /* Large screen height style */
+        @media (min-height: 600px) {
+          .question-box {
+            height: 240px;
+            font-size: 1.55rem;
+            padding: 20px;
+          }
+          .options-container {
+            margin-top: 16px;
+          }
+        }
+
+        @media (min-height: 750px) {
+          .modal-container {
+            height: 85vh;
+            height: 85dvh;
+            max-width: 800px; /* Restore desktop wider max-width if high resolution height is active */
+          }
+          .question-box {
+            height: 320px;
+            font-size: 1.75rem;
+            padding: 24px;
+            max-width: 680px;
+          }
+          .options-container {
+            max-width: 680px;
+          }
+        }
       `}</style>
 
       <div 
-        className="modal-9slice relative flex flex-col items-center w-full max-w-[800px] max-h-[90vh] bg-slate-900 rounded-xl scroll-hide overflow-hidden"
-        style={{ boxSizing: 'border-box', padding: '16px', paddingBottom: '32px' }}
+        className={isMobile 
+          ? "modal-9slice modal-container scroll-hide rounded-xl"
+          : "modal-9slice relative flex flex-col items-center w-full max-w-[800px] max-h-[90vh] bg-slate-900 rounded-xl scroll-hide overflow-hidden"
+        }
+        style={isMobile 
+          ? undefined 
+          : { boxSizing: 'border-box', padding: '16px', paddingBottom: '32px' }
+        }
       >
         {/* Close exit button */}
         <button 
@@ -392,14 +488,23 @@ function QuizOverlayContent() {
 
         {/* Math Question Box */}
         <div 
-          className="question-9slice flex flex-col items-center justify-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-hide mt-2"
-          style={{ boxSizing: 'border-box', padding: '24px' }}
+          className={isMobile
+            ? "question-9slice question-box font-concert text-center text-black select-text overflow-y-auto scroll-hide"
+            : "question-9slice flex flex-col items-center justify-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-hide mt-2"
+          }
+          style={isMobile
+            ? undefined
+            : { boxSizing: 'border-box', padding: '24px' }
+          }
         >
           {currentQuestion}
         </div>
 
         {currentType === 'tf' ? (
-          <div className="flex flex-row justify-center gap-6 w-full max-w-[680px] mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom">
+          <div className={isMobile
+            ? "options-container flex flex-row justify-center gap-6 p-2 scroll-custom"
+            : "flex flex-row justify-center gap-6 w-full max-w-[680px] mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom"
+          }>
             {currentOptions.map((option, idx) => {
               const isSelected = selectedIndex === idx;
               const highlightClass = optionHighlightClass(idx);
@@ -408,10 +513,10 @@ function QuizOverlayContent() {
                   key={idx}
                   onClick={() => handleSelectOption(idx)}
                   disabled={quizAnswered}
-                  className={`option-9slice option-hover-tf ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex items-center justify-center w-[42%] max-w-[280px] h-[140px] bg-transparent font-concert text-lg text-white text-center relative`}
+                  className={`option-9slice option-hover-tf ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex items-center justify-center ${isMobile ? 'w-[45%] max-w-[280px] h-[75px]' : 'w-[42%] max-w-[280px] h-[140px]'} bg-transparent font-concert ${isMobile ? 'text-[15.5px]' : 'text-lg'} text-white text-center relative`}
                   style={{ 
                     boxSizing: 'border-box', 
-                    padding: '20px', 
+                    padding: isMobile ? '6px 10px' : '20px', 
                     opacity: optionOpacity(idx)
                   }}
                 >
@@ -428,7 +533,10 @@ function QuizOverlayContent() {
             })}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-4 w-full mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom">
+          <div className={isMobile
+            ? "options-container flex flex-col items-center gap-3 p-2 scroll-custom"
+            : "flex flex-col items-center gap-4 w-full mt-6 p-2 max-h-[280px] overflow-y-auto scroll-custom"
+          }>
             {currentOptions.map((option, idx) => {
               const isSelected = selectedIndex === idx;
               const highlightClass = optionHighlightClass(idx);
@@ -437,10 +545,10 @@ function QuizOverlayContent() {
                   key={idx}
                   onClick={() => handleSelectOption(idx)}
                   disabled={quizAnswered}
-                  className={`option-9slice option-hover ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex flex-col items-start justify-center w-[90%] max-w-[680px] bg-transparent font-concert text-lg text-white text-left relative`}
+                  className={`option-9slice option-hover ${highlightClass} ${quizAnswered ? 'option-locked' : ''} flex flex-col items-start justify-center w-[90%] max-w-[680px] bg-transparent font-concert ${isMobile ? 'text-[15.5px]' : 'text-lg'} text-white text-left relative`}
                   style={{ 
                     boxSizing: 'border-box', 
-                    padding: '16px', 
+                    padding: isMobile ? '8px 12px' : '16px', 
                     opacity: optionOpacity(idx)
                   }}
                 >
@@ -463,7 +571,10 @@ function QuizOverlayContent() {
             onClick={() => {
               window.parent.postMessage({ type: 'quiz-next' }, '*');
             }}
-            className="btn-blue-simple mt-6 py-4 px-4 bg-transparent font-concert text-[20px] text-white text-center flex items-center justify-center cursor-pointer transition-transform duration-150 hover:scale-[1.05] active:scale-[0.95] border-none outline-none select-none z-50"
+            className={isMobile 
+              ? "btn-blue-simple mt-1 py-1.5 px-3 bg-transparent font-concert text-sm text-white text-center flex items-center justify-center cursor-pointer transition-transform duration-150 hover:scale-[1.05] active:scale-[0.95] border-none outline-none select-none z-50"
+              : "btn-blue-simple mt-6 py-4 px-4 bg-transparent font-concert text-[20px] text-white text-center flex items-center justify-center cursor-pointer transition-transform duration-150 hover:scale-[1.05] active:scale-[0.95] border-none outline-none select-none z-50"
+            }
             style={{ boxSizing: 'border-box' }}
           >
             <span style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Next Quiz</span>

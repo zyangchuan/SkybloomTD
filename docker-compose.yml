@@ -86,25 +86,6 @@ services:
     networks:
       - services-network
 
-  document-content-worker:
-    container_name: document-content-worker
-    hostname: document-content-worker
-    build:
-      context: ./services/document-content/src/worker
-      dockerfile: Dockerfile
-    image: document-content-worker:latest
-    command: python -m app.rabbitmq_worker
-    environment:
-      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    volumes:
-      - ./services/document-content/output:/output
-      - ./services/document-content/temp:/temp
-      - models:/root/.paddlex
-    networks:
-      - services-network
-
   game-service:
     container_name: game-service
     build:
@@ -176,4 +157,3 @@ networks:
 
 volumes:
   game-redis-data:
-  models:

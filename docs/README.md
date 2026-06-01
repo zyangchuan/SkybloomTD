@@ -10,6 +10,12 @@ Local compose runs use `.env.local` with `docker-compose.local.yml`:
 docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
+Dev compose runs use `.env.dev` with `docker-compose.dev.yml`:
+
+```text
+docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+```
+
 Production compose runs use `.env.production` with
 `docker-compose.production.yml`:
 

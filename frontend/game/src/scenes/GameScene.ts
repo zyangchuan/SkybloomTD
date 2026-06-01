@@ -40,6 +40,7 @@ export default class GameScene extends Phaser.Scene {
   // Drag and placement elements
   private activeDragSprite: Phaser.GameObjects.Sprite | null = null;
   private activeDragBirdType: string | null = null;
+  private activeDragTooltip: Phaser.GameObjects.Container | null = null;
   private gridHighlightGraphics: Phaser.GameObjects.Graphics | null = null;
   private dragRangeGraphics: Phaser.GameObjects.Graphics | null = null;
   private closestCellHighlight: Phaser.GameObjects.Graphics | null = null;
@@ -88,7 +89,7 @@ export default class GameScene extends Phaser.Scene {
     this.gridHighlightGraphics = this.add.graphics().setDepth(5);
     this.closestCellHighlight = this.add.graphics().setDepth(6);
 
-    // 1. Render grass floor as the base layer for every map cell
+    // Render grass floor as the base layer for every map cell
     for (let y = 0; y < this.gridHeight; y++) {
       for (let x = 0; x < this.gridWidth; x++) {
         const posX = this.offsetX + x * this.tileSize + this.tileSize / 2;
@@ -98,7 +99,7 @@ export default class GameScene extends Phaser.Scene {
       }
     }
 
-    // 2. Render the paths
+    // Render the paths
     this.enemyPath.forEach((tile: any) => {
       const posX = this.offsetX + tile.x * this.tileSize + this.tileSize / 2;
       const posY = this.offsetY + tile.y * this.tileSize + this.tileSize / 2;
@@ -108,7 +109,7 @@ export default class GameScene extends Phaser.Scene {
         .setDisplaySize(this.tileSize, this.tileSize);
     });
 
-    // 3. Render the obstacles (depth sorted naturally based on Y position)
+    // Render the obstacles (depth sorted naturally based on Y position)
     this.obstacles.sort((a: any, b: any) => a.y - b.y);
     this.obstacles.forEach((obj: any) => {
       const posX = this.offsetX + obj.x * this.tileSize + this.tileSize / 2;
@@ -160,7 +161,7 @@ export default class GameScene extends Phaser.Scene {
       obstacleImg.setDepth(1);
     });
 
-    // 4. Render sleek, premium top-left HUD panel using box_orange_square as a NineSlice container
+    // Render sleek, premium top-left HUD panel using box_orange_square as a NineSlice container
     this.add.nineslice(360, 69, 'box_orange_square', undefined, 700, 90, 32, 32, 32, 32).setDepth(30);
 
     // Health Icon & Text
@@ -249,7 +250,7 @@ export default class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut'
     });
 
-    // 5. Selectable Birds Tray Panel at Bottom Center using box_orange_square as NineSlice outer container
+    // Selectable Birds Tray Panel at Bottom Center using box_orange_square as NineSlice outer container
     this.add.nineslice(960, 1152, 'box_orange_square', undefined, 760, 170, 32, 32, 32, 32).setDepth(30);
 
     const birds = ['sparrow', 'woodpecker', 'eagle', 'peacock'];
@@ -261,7 +262,7 @@ export default class GameScene extends Phaser.Scene {
     birds.forEach((bird, index) => {
       const boxX = startX + index * 170 + boxSize / 2;
 
-      // 1. Create Tooltip Container
+      // Create Tooltip Container
       const tooltipContainer = this.add.container(boxX, boxY - 230).setDepth(35);
       tooltipContainer.setVisible(false);
 
@@ -308,10 +309,11 @@ export default class GameScene extends Phaser.Scene {
         tooltipContainer.add(val);
       });
 
-      // 2. Container Box_Square as a NineSlice container
+      // Container Box_Square as a NineSlice container
       const box = this.add.nineslice(boxX, boxY, 'box_square', undefined, boxSize, boxSize, 32, 32, 32, 32)
         .setInteractive({ useHandCursor: true, draggable: true })
         .setData('birdType', bird)
+        .setData('tooltip', tooltipContainer)
         .setDepth(30);
 
       // Bird Head representation
@@ -338,16 +340,26 @@ export default class GameScene extends Phaser.Scene {
         box.setSize(boxSize, boxSize);
         head.setDisplaySize(headSize, headSize).setY(boxY - 14);
         label.setColor('#94a3b8').setY(boxY + 44);
-        tooltipContainer.setVisible(false);
+        if (this.activeDragBirdType !== bird) {
+          tooltipContainer.setVisible(false);
+        }
       });
     });
 
-    // 6. Connect Real-time Drag-and-Drop Placement Listeners
+    // Connect Real-time Drag-and-Drop Placement Listeners
     this.input.on('dragstart', (pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) => {
       const birdType = gameObject.getData('birdType');
       if (!birdType) return;
 
       this.activeDragBirdType = birdType;
+
+      // Show stats tooltip during dragging
+      const tooltip = gameObject.getData('tooltip') as Phaser.GameObjects.Container;
+      if (tooltip) {
+        tooltip.setVisible(true);
+        tooltip.setDepth(45); // Keep it above other objects during drag
+        this.activeDragTooltip = tooltip;
+      }
 
       // Initialize drag range graphics layer
       this.dragRangeGraphics = this.add.graphics().setDepth(39);
@@ -502,6 +514,13 @@ export default class GameScene extends Phaser.Scene {
         }
       }
 
+      // Hide stats tooltip
+      if (this.activeDragTooltip) {
+        this.activeDragTooltip.setVisible(false);
+        this.activeDragTooltip.setDepth(35);
+        this.activeDragTooltip = null;
+      }
+
       // Cleanup drag parameters
       this.activeDragSprite.destroy();
       this.activeDragSprite = null;
@@ -536,7 +555,7 @@ export default class GameScene extends Phaser.Scene {
       this.closestCellHighlight?.clear();
     });
 
-    // 7. Connect Real-time WebSocket Listeners for continuous state updates
+    // Connect Real-time WebSocket Listeners for continuous state updates
     if (this.ws) {
       // Clear previous onmessage listener
       this.ws.onmessage = null;
@@ -607,12 +626,12 @@ export default class GameScene extends Phaser.Scene {
   update() {
     if (this.pauseWindowOpen) return;
 
-    // 1. Update towers
+    // Update towers
     this.towers.forEach((tower) => {
       tower.update();
     });
 
-    // 2. Interpolate moving smogs smoothly (lerp)
+    // Interpolate moving smogs smoothly (lerp)
     this.smogs.forEach((smog) => {
       const { sprite, healthBar, targetX, targetY, health, maxHealth } = smog;
 
@@ -645,7 +664,7 @@ export default class GameScene extends Phaser.Scene {
       }
     });
 
-    // 3. Interpolate moving projectiles smoothly
+    // Interpolate moving projectiles smoothly
     this.projectiles.forEach((proj) => {
       const { sprite, targetX, targetY, targetRotation } = proj;
 
@@ -991,7 +1010,7 @@ export default class GameScene extends Phaser.Scene {
     overlay.style.left = '0';
     overlay.style.width = '100%';
     overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(2, 6, 23, 0.75)'; // Slate-950 at 0.75 alpha backdrop
+    overlay.style.backgroundColor = 'rgba(2, 6, 23, 0.75)'; // slate-950 at 0.75 alpha backdrop
     overlay.style.zIndex = '9999';
 
     // Create the iframe pointing to the Next.js mistakes summary page
@@ -1010,6 +1029,14 @@ export default class GameScene extends Phaser.Scene {
     params.set('level_id', this.levelId);
     params.set('session_id', this.sessionId);
     params.set('victory', isVictory ? 'true' : 'false');
+
+    // Add mobile device checking flag
+    const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
+      || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2 && /Macintosh/.test(ua));
+    if (isMobile) {
+      params.set('mobile', 'true');
+    }
 
     iframe.src = `${window.location.origin}/mistakes-summary?${params.toString()}`;
     overlay.appendChild(iframe);
@@ -1096,7 +1123,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private showQuizWindow(promptData: any) {
-    // If the iframe already exists on screen, just post message directly to update its content!
+    // If the iframe already exists on screen, just post message directly to update its content
     const existingIframe = document.getElementById('quiz-iframe') as HTMLIFrameElement;
     if (existingIframe && existingIframe.contentWindow) {
       this.currentQuizId = promptData.quiz_id;
@@ -1141,6 +1168,14 @@ export default class GameScene extends Phaser.Scene {
     params.set('question', promptData.question_markdown);
     params.set('options', JSON.stringify(promptData.options_markdown || []));
     params.set('type', promptData.quiz_type === 'true_false' ? 'tf' : 'mcq');
+
+    // Add mobile device checking flag
+    const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
+      || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2 && /Macintosh/.test(ua));
+    if (isMobile) {
+      params.set('mobile', 'true');
+    }
 
     iframe.src = `${window.location.origin}/quiz-overlay?${params.toString()}`;
     overlay.appendChild(iframe);
@@ -1204,7 +1239,7 @@ export default class GameScene extends Phaser.Scene {
       this.ws.send(JSON.stringify({ type: 'game.pause' }));
     }
 
-    // 1. Sleek semi-transparent black backdrop overlay covering the entire possible viewport
+    // Sleek semi-transparent black backdrop overlay covering the entire possible viewport
     const pauseBackdrop = this.add.graphics();
     pauseBackdrop.fillStyle(0x000000, 0.65);
     pauseBackdrop.fillRect(-2000, -2000, 6000, 5000);
@@ -1212,18 +1247,18 @@ export default class GameScene extends Phaser.Scene {
     pauseBackdrop.setInteractive(new Phaser.Geom.Rectangle(-2000, -2000, 6000, 5000), Phaser.Geom.Rectangle.Contains);
     pauseBackdrop.setDepth(100);
 
-    // 2. Main Orange Square Container Box (500x420) using NineSlice for more vertical spacing
+    // Main Orange Square Container Box (500x420) using NineSlice for more vertical spacing
     const pauseDialog = this.add.nineslice(960, 540, 'box_orange_square', undefined, 500, 420, 64, 64, 64, 64)
       .setDepth(101);
 
-    // 3. Header text: PAUSED (using a deep brown color matching the theme beautifully)
+    // Header text: PAUSED (using a deep brown color matching the theme beautifully)
     const pauseTitle = this.add.text(960, 390, 'PAUSED', {
       fontFamily: '"Concert One", system-ui, sans-serif',
       fontSize: '56px',
       color: '#451a03'
     }).setOrigin(0.5).setDepth(102);
 
-    // 4. RESUME button using ButtonText_Small_Blue_Round.svg (btn_blue_round)
+    // RESUME button using ButtonText_Small_Blue_Round.svg (btn_blue_round)
     const resumeBtn = this.add.sprite(960, 495, 'btn_blue_round')
       .setScale(1.1)
       .setDepth(102)
@@ -1264,7 +1299,7 @@ export default class GameScene extends Phaser.Scene {
       this.pauseWindowOpen = false;
     });
 
-    // 5. EXIT button using ButtonText_Small_Blank_Round.svg (btn_blank_round) with black text
+    // EXIT button using ButtonText_Small_Blank_Round.svg (btn_blank_round) with black text
     const exitBtn = this.add.sprite(960, 620, 'btn_blank_round')
       .setScale(1.1)
       .setDepth(102)

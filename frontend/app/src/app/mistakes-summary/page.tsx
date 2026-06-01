@@ -21,6 +21,7 @@ interface QuizMistake {
 
 function MistakesSummaryContent() {
   const searchParams = useSearchParams();
+  const isMobile = searchParams.get('mobile') === 'true';
   const levelId = searchParams.get('level_id') || '';
   const sessionId = searchParams.get('session_id') || '';
   const victory = searchParams.get('victory') === 'true';
@@ -30,7 +31,7 @@ function MistakesSummaryContent() {
   const [katexReady, setKatexReady] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 1. Fetch Mistakes list from API
+  // Fetch Mistakes list from API
   useEffect(() => {
     if (!levelId) {
       setLoading(false);
@@ -56,20 +57,20 @@ function MistakesSummaryContent() {
     fetchMistakes();
   }, [levelId]);
 
-  // 2. Preload KaTeX libraries dynamically inside the iframe context
+  // Preload KaTeX libraries dynamically inside the iframe context
   useEffect(() => {
-    // 1. Preload stylesheet
+    // Preload stylesheet
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';
     document.head.appendChild(link);
 
-    // 2. Preload KaTeX core parser
+    // Preload KaTeX core parser
     const scriptJs = document.createElement('script');
     scriptJs.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';
     scriptJs.async = false;
     scriptJs.onload = () => {
-      // 3. Preload auto-render extension
+      // Preload auto-render extension
       const scriptAuto = document.createElement('script');
       scriptAuto.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js';
       scriptAuto.async = false;
@@ -86,7 +87,7 @@ function MistakesSummaryContent() {
     };
   }, []);
 
-  // 3. Run KaTeX auto-typesetter when content or script is ready
+  // Run KaTeX auto-typesetter when content or script is ready
   useEffect(() => {
     if (katexReady && containerRef.current && (window as any).renderMathInElement) {
       try {
@@ -116,7 +117,10 @@ function MistakesSummaryContent() {
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 w-full h-full flex items-center justify-center p-4 bg-transparent select-none overflow-hidden"
+      className={isMobile
+        ? "fixed inset-0 w-full h-full flex items-center justify-center p-1 bg-transparent select-none overflow-hidden"
+        : "fixed inset-0 w-full h-full flex items-center justify-center p-4 bg-transparent select-none overflow-hidden"
+      }
     >
       <style>{`
         /* Force transparent document backdrops inside Next.js layout */
@@ -129,6 +133,26 @@ function MistakesSummaryContent() {
         .sky-clouds {
           display: none !important;
         }
+
+        /* Thinner mobile-only 9-slice outlines and borders */
+        ${isMobile ? `
+          .modal-9slice {
+            border-width: 12px !important;
+            border-image-width: 12px !important;
+          }
+          .mistake-card-9slice {
+            border-width: 8px !important;
+            border-image-width: 8px !important;
+          }
+          .btn-play-again-9slice {
+            border-width: 8px !important;
+            border-image-width: 8px !important;
+          }
+          .btn-exit-9slice {
+            border-width: 8px !important;
+            border-image-width: 8px !important;
+          }
+        ` : ''}
 
         /* Custom 9-slice container overlays matching Phaser boxes */
         .modal-9slice {
@@ -210,17 +234,52 @@ function MistakesSummaryContent() {
         .btn-exit-9slice:active {
           transform: scale(0.95);
         }
+
+        /* Native responsive height flexbox layout */
+        .mistakes-modal-container {
+          width: 95%;
+          max-width: 580px; /* Cozy smaller width on mobile landscape */
+          height: 96vh;
+          height: 96dvh; /* Let the height grow fully to occupy screen vertically */
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          align-items: center;
+          box-sizing: border-box;
+          padding: 4px 12px 6px 12px !important; /* Even smaller paddings */
+          overflow: hidden;
+          position: relative;
+        }
+
+        .mistakes-list-container {
+          width: 100%;
+          flex: 1; /* Dynamic flexible height! */
+          margin: 6px 0; /* Smaller margin */
+          padding: 0 8px;
+          box-sizing: border-box;
+          overflow-y: auto;
+        }
+
+        @media (min-height: 750px) {
+          .mistakes-modal-container {
+            height: 680px; /* Keep clean original height on standard viewports */
+            max-width: 780px; /* Restore desktop wider max-width if high resolution height is active */
+          }
+        }
       `}</style>
 
       {/* Main Container Window Box with Orange Square nineslice outline styling */}
-      <div className="modal-9slice w-[780px] max-w-[95%] h-[680px] flex flex-col justify-between items-center p-6 relative z-10 box-border text-amber-950">
+      <div className={isMobile
+        ? "modal-9slice mistakes-modal-container z-10 text-amber-950"
+        : "modal-9slice w-[780px] max-w-[95%] h-[680px] flex flex-col justify-between items-center p-6 relative z-10 box-border text-amber-950"
+      }>
         
         {/* Upper Header Title & Level Subtext */}
         <div className="text-center w-full mt-2">
-          <h1 className={`font-concert text-6xl tracking-wider select-none ${victory ? 'text-yellow-300 drop-shadow-sm' : 'text-red-950 drop-shadow-[0_1px_2px_rgba(255,255,255,0.2)]'}`}>
+          <h1 className={`font-concert ${isMobile ? 'text-3xl mt-1' : 'text-6xl mt-2'} tracking-wider select-none ${victory ? 'text-yellow-300 drop-shadow-sm' : 'text-red-950 drop-shadow-[0_1px_2px_rgba(255,255,255,0.2)]'}`}>
             {victory ? 'VICTORY' : 'DEFEATED'}
           </h1>
-          <p className="font-concert text-amber-900 font-bold text-lg mt-2 tracking-wide">
+          <p className={`font-concert text-amber-900 font-bold ${isMobile ? 'text-xs mt-1' : 'text-lg mt-2'} tracking-wide`}>
             {victory 
               ? 'You have successfully protected the skies!' 
               : 'The smogs have overwhelmed your defenses.'
@@ -229,7 +288,10 @@ function MistakesSummaryContent() {
         </div>
 
         {/* Dynamic mistakes review body list */}
-        <div className="w-full flex-1 my-4 px-2 overflow-y-auto scroll-custom flex flex-col gap-4 max-h-[360px] box-border">
+        <div className={isMobile
+          ? "mistakes-list-container scroll-custom flex flex-col gap-2"
+          : "w-full flex-1 my-4 px-2 overflow-y-auto scroll-custom flex flex-col gap-4 max-h-[360px] box-border"
+        }>
           {loading ? (
             <div className="flex flex-col items-center justify-center h-48 gap-3">
               <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-amber-900" />
@@ -247,7 +309,7 @@ function MistakesSummaryContent() {
             </div>
           ) : (
             <div className="flex flex-col gap-4">
-              <h2 className="font-concert text-amber-950 text-lg font-bold border-b border-amber-950/30 pb-2 mb-2 select-none tracking-wide text-left">
+              <h2 className={`font-concert text-amber-950 ${isMobile ? 'text-sm mb-1 pb-1' : 'text-lg mb-2 pb-2'} font-bold border-b border-amber-950/30 select-none tracking-wide text-left`}>
                 Mistakes Review ({mistakes.length})
               </h2>
               {mistakes.map((mistake, mIdx) => {
@@ -257,10 +319,13 @@ function MistakesSummaryContent() {
                 return (
                   <div 
                     key={mistake.id} 
-                    className="mistake-card-9slice p-4 flex flex-col gap-3 transition duration-150 text-left"
+                    className={isMobile 
+                      ? "mistake-card-9slice p-2.5 flex flex-col gap-2 transition duration-150 text-left"
+                      : "mistake-card-9slice p-4 flex flex-col gap-3 transition duration-150 text-left"
+                    }
                   >
                     {/* Math Question Text */}
-                    <div className="font-concert text-slate-200 text-base font-medium break-words leading-relaxed">
+                    <div className={`font-concert text-slate-200 ${isMobile ? 'text-xs' : 'text-base'} font-medium break-words leading-relaxed`}>
                       <span className="text-slate-400 font-bold mr-1">Q{mIdx + 1}:</span> {mistake.question_markdown}
                     </div>
 
@@ -284,16 +349,16 @@ function MistakesSummaryContent() {
                         return (
                           <div 
                             key={oIdx} 
-                            className={`border px-3.5 py-2.5 rounded-lg text-sm flex items-center justify-between transition duration-150 ${styleClass}`}
+                            className={`border ${isMobile ? 'px-2 py-1.5 text-xs' : 'px-3.5 py-2 rounded-lg text-sm'} rounded-lg flex items-center justify-between transition duration-150 ${styleClass}`}
                           >
                             <span className="font-concert">{prefix}{opt}</span>
                             {isCorrect && (
-                              <span className="text-emerald-400 font-bold text-xs uppercase tracking-wider bg-emerald-500/20 px-2.5 py-0.5 rounded">
+                              <span className={`${isMobile ? 'text-[9px] px-1.5 py-0.2' : 'text-xs px-2.5 py-0.5'} text-emerald-400 font-bold uppercase tracking-wider bg-emerald-500/20 rounded`}>
                                 Correct Answer
                               </span>
                             )}
                             {isSelected && !isCorrect && (
-                              <span className="text-rose-400 font-bold text-xs uppercase tracking-wider bg-rose-500/20 px-2.5 py-0.5 rounded">
+                              <span className={`${isMobile ? 'text-[9px] px-1.5 py-0.2' : 'text-xs px-2.5 py-0.5'} text-rose-400 font-bold uppercase tracking-wider bg-rose-500/20 rounded`}>
                                 Your Selection
                               </span>
                             )}
@@ -309,11 +374,17 @@ function MistakesSummaryContent() {
         </div>
 
         {/* Bottom Interactive Play Actions */}
-        <div className="flex flex-row justify-center items-center gap-6 w-full mt-2 mb-2">
+        <div className={isMobile
+          ? "flex flex-row justify-center items-center gap-4 w-full mt-1 mb-1"
+          : "flex flex-row justify-center items-center gap-6 w-full mt-2 mb-2"
+        }>
           {/* Replay glowing button using ButtonText_Small_Blue_Round.svg 9-slice */}
           <button
             onClick={handleReplay}
-            className="btn-play-again-9slice font-concert text-xl font-bold text-white w-[220px] h-[64px] flex items-center justify-center border-0 outline-none box-border"
+            className={isMobile 
+              ? "btn-play-again-9slice font-concert text-sm text-white w-[140px] h-[42px] flex items-center justify-center border-0 outline-none box-border"
+              : "btn-play-again-9slice font-concert text-xl font-bold text-white w-[220px] h-[64px] flex items-center justify-center border-0 outline-none box-border"
+            }
           >
             PLAY AGAIN
           </button>
@@ -321,7 +392,10 @@ function MistakesSummaryContent() {
           {/* Exit button using ButtonText_Small_Blank_Round.svg 9-slice */}
           <button
             onClick={handleExit}
-            className="btn-exit-9slice font-concert text-xl font-bold text-black w-[220px] h-[64px] flex items-center justify-center border-0 outline-none box-border"
+            className={isMobile
+              ? "btn-exit-9slice font-concert text-sm text-black w-[140px] h-[42px] flex items-center justify-center border-0 outline-none box-border"
+              : "btn-exit-9slice font-concert text-xl font-bold text-black w-[220px] h-[64px] flex items-center justify-center border-0 outline-none box-border"
+            }
           >
             EXIT GAME
           </button>

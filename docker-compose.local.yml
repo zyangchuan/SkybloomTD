@@ -47,6 +47,13 @@ services:
       - redis
 
   document-content-worker:
+    container_name: document-content-worker
+    hostname: document-content-worker
+    build:
+      context: ./services/document-content/src/worker
+      dockerfile: Dockerfile
+    image: document-content-worker:latest
+    command: python -m app.rabbitmq_worker
     env_file:
       - ./.env.local
     environment:
@@ -54,6 +61,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
       TASK_STATUS_TTL_SECONDS: ${TASK_STATUS_TTL_SECONDS:-604800}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
       - ./services/document-content/src/worker:/app
       - ./services/document-content/output:/output
@@ -143,3 +152,4 @@ services:
 volumes:
   rabbitmq-data:
   redis-data:
+  models:
