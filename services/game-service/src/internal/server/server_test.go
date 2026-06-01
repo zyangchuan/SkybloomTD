@@ -243,11 +243,11 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if len(tickState.Smogs) != 1 {
 		t.Fatalf("expected first tick to spawn one smog, got %d", len(tickState.Smogs))
 	}
-	if tickState.Smogs[0].Health != 30 {
-		t.Fatalf("expected first smog health 30, got %d", tickState.Smogs[0].Health)
+	if tickState.Smogs[0].Health != baseSmogHealth {
+		t.Fatalf("expected first smog health %d, got %d", baseSmogHealth, tickState.Smogs[0].Health)
 	}
-	if tickState.Smogs[0].Speed != 0.8 {
-		t.Fatalf("expected first smog speed 0.8, got %f", tickState.Smogs[0].Speed)
+	if tickState.Smogs[0].Speed != baseSmogSpeed {
+		t.Fatalf("expected first smog speed %.2f, got %f", baseSmogSpeed, tickState.Smogs[0].Speed)
 	}
 }
 
@@ -963,15 +963,30 @@ func TestAdvanceRuntimeTickSpawnsSmogsEverySecond(t *testing.T) {
 
 func TestWaveDefinitionsScaleEnemyStatsByWave(t *testing.T) {
 	waves := waveDefinitions()
-	if len(waves) < 2 {
-		t.Fatalf("expected multiple waves, got %d", len(waves))
+	expected := []waveDefinition{
+		{Wave: 1, Count: 15, Health: 60, Speed: 0.8},
+		{Wave: 2, Count: 24, Health: 105, Speed: 1.13},
+		{Wave: 3, Count: 36, Health: 160, Speed: 1.52},
 	}
-	if waves[0].Health != baseSmogHealth {
-		t.Fatalf("expected first wave health %d, got %d", baseSmogHealth, waves[0].Health)
+
+	if len(waves) != len(expected) {
+		t.Fatalf("expected %d waves, got %d", len(expected), len(waves))
 	}
-	if waves[0].Speed != baseSmogSpeed {
-		t.Fatalf("expected first wave speed %.2f, got %.2f", baseSmogSpeed, waves[0].Speed)
+	for i := range expected {
+		if waves[i].Wave != expected[i].Wave {
+			t.Fatalf("wave %d: expected wave number %d, got %d", i, expected[i].Wave, waves[i].Wave)
+		}
+		if waves[i].Count != expected[i].Count {
+			t.Fatalf("wave %d: expected count %d, got %d", waves[i].Wave, expected[i].Count, waves[i].Count)
+		}
+		if waves[i].Health != expected[i].Health {
+			t.Fatalf("wave %d: expected health %d, got %d", waves[i].Wave, expected[i].Health, waves[i].Health)
+		}
+		if diff := waves[i].Speed - expected[i].Speed; diff < -0.0000001 || diff > 0.0000001 {
+			t.Fatalf("wave %d: expected speed %.2f, got %.2f", waves[i].Wave, expected[i].Speed, waves[i].Speed)
+		}
 	}
+
 	for i := 1; i < len(waves); i++ {
 		if waves[i].Health <= waves[i-1].Health {
 			t.Fatalf("expected wave %d health to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
@@ -979,14 +994,6 @@ func TestWaveDefinitionsScaleEnemyStatsByWave(t *testing.T) {
 		if waves[i].Speed <= waves[i-1].Speed {
 			t.Fatalf("expected wave %d speed to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
 		}
-	}
-
-	finalWave := waves[len(waves)-1]
-	if finalWave.Health < waves[0].Health*3 {
-		t.Fatalf("expected final wave health to be at least triple first wave, got first=%d final=%d", waves[0].Health, finalWave.Health)
-	}
-	if finalWave.Speed < waves[0].Speed*1.5 {
-		t.Fatalf("expected final wave speed to be at least 1.5x first wave, got first=%.2f final=%.2f", waves[0].Speed, finalWave.Speed)
 	}
 }
 
