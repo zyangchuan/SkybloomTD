@@ -571,6 +571,89 @@ func TestWebsocketQuizRequestServesRandomRemainingQuiz(t *testing.T) {
 	}
 }
 
+func TestWebsocketQuizRequestKeepsUnansweredQuizPending(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		peekRandomIndex: 1,
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "66666666-6666-6666-6666-666666666666",
+					QuizIndex:        0,
+					QuizType:         "true_false",
+					QuestionMarkdown: "First quiz?",
+					OptionsMarkdown:  []string{"True", "False"},
+					AnswerIndex:      0,
+				},
+				{
+					ID:               "77777777-7777-7777-7777-777777777777",
+					QuizIndex:        1,
+					QuizType:         "mcq",
+					QuestionMarkdown: "Second quiz?",
+					OptionsMarkdown:  []string{"A", "B", "C"},
+					AnswerIndex:      2,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON first quiz request failed: %v", err)
+	}
+	firstPrompt := readMessageOfType(t, conn, "game.quiz.presented")
+	firstPromptState := decodeQuizPrompt(t, firstPrompt.Data)
+
+	quizzes.peekRandomIndex = 0
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON second quiz request failed: %v", err)
+	}
+	secondPrompt := readMessageOfType(t, conn, "game.quiz.presented")
+	secondPromptState := decodeQuizPrompt(t, secondPrompt.Data)
+
+	if secondPromptState.QuizID != firstPromptState.QuizID {
+		t.Fatalf("expected unanswered quiz to stay pending, first=%q second=%q", firstPromptState.QuizID, secondPromptState.QuizID)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.quiz.answer",
+		Data: map[string]any{"quiz_id": firstPromptState.QuizID, "selected_index": 2},
+	}); err != nil {
+		t.Fatalf("WriteJSON quiz answer failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.quiz.result")
+	if quizzes.quizzes.CurrentQuizID != "" {
+		t.Fatalf("expected current quiz to clear after answer, got %q", quizzes.quizzes.CurrentQuizID)
+	}
+}
+
 func TestWebsocketQuizIncorrectAnswerRecordsMistake(t *testing.T) {
 	levels := &fakeLevelRepository{
 		bootstrap: repository.LevelBootstrap{
@@ -1515,11 +1598,18 @@ func (c *fakeQuizCache) PeekRandom(_ context.Context, generationID string) (quiz
 	if c.quizzes.GenerationID != generationID || len(c.quizzes.Quizzes) == 0 {
 		return quizcache.CachedQuiz{}, 0, quizcache.ErrQuizzesNotFound
 	}
+	for _, quiz := range c.quizzes.Quizzes {
+		if quiz.ID == c.quizzes.CurrentQuizID {
+			return quiz, len(c.quizzes.Quizzes), nil
+		}
+	}
 	index := c.peekRandomIndex
 	if index < 0 || index >= len(c.quizzes.Quizzes) {
 		index = 0
 	}
-	return c.quizzes.Quizzes[index], len(c.quizzes.Quizzes), nil
+	quiz := c.quizzes.Quizzes[index]
+	c.quizzes.CurrentQuizID = quiz.ID
+	return quiz, len(c.quizzes.Quizzes), nil
 }
 
 func (c *fakeQuizCache) Take(_ context.Context, generationID string, quizID string) (quizcache.CachedQuiz, int, error) {
@@ -1531,6 +1621,9 @@ func (c *fakeQuizCache) Take(_ context.Context, generationID string, quizID stri
 			continue
 		}
 		c.quizzes.Quizzes = append(append([]quizcache.CachedQuiz{}, c.quizzes.Quizzes[:index]...), c.quizzes.Quizzes[index+1:]...)
+		if c.quizzes.CurrentQuizID == quizID {
+			c.quizzes.CurrentQuizID = ""
+		}
 		return quiz, len(c.quizzes.Quizzes), nil
 	}
 	return quizcache.CachedQuiz{}, len(c.quizzes.Quizzes), quizcache.ErrQuizNotFound
@@ -1672,6 +1765,19 @@ func decodeGameState(t *testing.T, data any) GameState {
 	var state GameState
 	if err := json.Unmarshal(body, &state); err != nil {
 		t.Fatalf("Unmarshal game state failed: %v", err)
+	}
+	return state
+}
+
+func decodeQuizPrompt(t *testing.T, data any) QuizPromptState {
+	t.Helper()
+	body, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("Marshal quiz prompt failed: %v", err)
+	}
+	var state QuizPromptState
+	if err := json.Unmarshal(body, &state); err != nil {
+		t.Fatalf("Unmarshal quiz prompt failed: %v", err)
 	}
 	return state
 }

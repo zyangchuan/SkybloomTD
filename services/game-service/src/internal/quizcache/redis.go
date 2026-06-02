@@ -27,11 +27,12 @@ type Store struct {
 }
 
 type LevelQuizzes struct {
-	GenerationID string       `json:"generation_id"`
-	LevelID      string       `json:"level_id"`
-	UserID       string       `json:"user_id"`
-	SubChapterID string       `json:"sub_chapter_id"`
-	Quizzes      []CachedQuiz `json:"quizzes"`
+	GenerationID  string       `json:"generation_id"`
+	LevelID       string       `json:"level_id"`
+	UserID        string       `json:"user_id"`
+	SubChapterID  string       `json:"sub_chapter_id"`
+	CurrentQuizID string       `json:"current_quiz_id,omitempty"`
+	Quizzes       []CachedQuiz `json:"quizzes"`
 }
 
 type CachedQuiz struct {
@@ -138,11 +139,19 @@ func (s *Store) PeekRandom(ctx context.Context, generationID string) (CachedQuiz
 	if len(quizzes.Quizzes) == 0 {
 		return CachedQuiz{}, 0, ErrQuizzesNotFound
 	}
+	if quiz, ok := cachedQuizByID(quizzes.Quizzes, quizzes.CurrentQuizID); ok {
+		return quiz, len(quizzes.Quizzes), nil
+	}
 	index, err := randomIndex(len(quizzes.Quizzes))
 	if err != nil {
 		return CachedQuiz{}, 0, err
 	}
-	return quizzes.Quizzes[index], len(quizzes.Quizzes), nil
+	quiz := quizzes.Quizzes[index]
+	quizzes.CurrentQuizID = quiz.ID
+	if err := s.Set(ctx, generationID, quizzes); err != nil {
+		return CachedQuiz{}, 0, err
+	}
+	return quiz, len(quizzes.Quizzes), nil
 }
 
 func (s *Store) Take(ctx context.Context, generationID string, quizID string) (CachedQuiz, int, error) {
@@ -157,6 +166,9 @@ func (s *Store) Take(ctx context.Context, generationID string, quizID string) (C
 		remaining := append([]CachedQuiz{}, quizzes.Quizzes[:index]...)
 		remaining = append(remaining, quizzes.Quizzes[index+1:]...)
 		quizzes.Quizzes = remaining
+		if quizzes.CurrentQuizID == quizID {
+			quizzes.CurrentQuizID = ""
+		}
 		if err := s.Set(ctx, generationID, quizzes); err != nil {
 			return CachedQuiz{}, 0, err
 		}
@@ -194,6 +206,15 @@ func randomIndex(length int) (int, error) {
 		return 0, err
 	}
 	return int(value.Int64()), nil
+}
+
+func cachedQuizByID(quizzes []CachedQuiz, quizID string) (CachedQuiz, bool) {
+	for _, quiz := range quizzes {
+		if quiz.ID == quizID {
+			return quiz, true
+		}
+	}
+	return CachedQuiz{}, false
 }
 
 func sanitizeLevelQuizzes(quizzes *LevelQuizzes) {

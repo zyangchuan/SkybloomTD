@@ -932,6 +932,9 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 		return errors.New("failed to load quiz")
 	}
 	expectedQuizID := loop.currentQuizID
+	if expectedQuizID == "" {
+		expectedQuizID = quizzes.CurrentQuizID
+	}
 	if expectedQuizID == "" && len(quizzes.Quizzes) > 0 {
 		expectedQuizID = quizzes.Quizzes[0].ID
 	}
