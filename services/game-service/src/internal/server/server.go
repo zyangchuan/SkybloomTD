@@ -931,12 +931,16 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	if err != nil {
 		return errors.New("failed to load quiz")
 	}
+	expectedQuizID := loop.currentQuizID
+	if expectedQuizID == "" && len(quizzes.Quizzes) > 0 {
+		expectedQuizID = quizzes.Quizzes[0].ID
+	}
+	if expectedQuizID != "" && expectedQuizID != request.QuizID {
+		return errors.New("quiz_id is not the current quiz")
+	}
 	currentQuiz, ok := cachedQuizByID(quizzes.Quizzes, request.QuizID)
 	if !ok {
 		return errors.New("quiz not found")
-	}
-	if loop.currentQuizID != "" && loop.currentQuizID != request.QuizID {
-		return errors.New("quiz_id is not the current quiz")
 	}
 	if request.SelectedIndex < 0 || request.SelectedIndex >= len(currentQuiz.OptionsMarkdown) {
 		return errors.New("selected_index is out of range")
