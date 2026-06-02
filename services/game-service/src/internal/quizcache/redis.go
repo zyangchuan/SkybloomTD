@@ -2,9 +2,11 @@ package quizcache
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -128,6 +130,21 @@ func (s *Store) PeekNext(ctx context.Context, generationID string) (CachedQuiz, 
 	return quizzes.Quizzes[0], len(quizzes.Quizzes), nil
 }
 
+func (s *Store) PeekRandom(ctx context.Context, generationID string) (CachedQuiz, int, error) {
+	quizzes, err := s.Get(ctx, generationID)
+	if err != nil {
+		return CachedQuiz{}, 0, err
+	}
+	if len(quizzes.Quizzes) == 0 {
+		return CachedQuiz{}, 0, ErrQuizzesNotFound
+	}
+	index, err := randomIndex(len(quizzes.Quizzes))
+	if err != nil {
+		return CachedQuiz{}, 0, err
+	}
+	return quizzes.Quizzes[index], len(quizzes.Quizzes), nil
+}
+
 func (s *Store) Take(ctx context.Context, generationID string, quizID string) (CachedQuiz, int, error) {
 	quizzes, err := s.Get(ctx, generationID)
 	if err != nil {
@@ -166,6 +183,17 @@ func (s *Store) Close() error {
 
 func key(generationID string) string {
 	return fmt.Sprintf("level-quizzes:v1:generation:%s", generationID)
+}
+
+func randomIndex(length int) (int, error) {
+	if length <= 0 {
+		return 0, ErrQuizzesNotFound
+	}
+	value, err := rand.Int(rand.Reader, big.NewInt(int64(length)))
+	if err != nil {
+		return 0, err
+	}
+	return int(value.Int64()), nil
 }
 
 func sanitizeLevelQuizzes(quizzes *LevelQuizzes) {

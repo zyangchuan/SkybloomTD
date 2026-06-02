@@ -478,6 +478,99 @@ func TestWebsocketQuizRequestAndCorrectAnswerAwardsEssence(t *testing.T) {
 	}
 }
 
+func TestWebsocketQuizRequestServesRandomRemainingQuiz(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		peekRandomIndex: 1,
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "66666666-6666-6666-6666-666666666666",
+					QuizIndex:        0,
+					QuizType:         "true_false",
+					QuestionMarkdown: "First quiz?",
+					OptionsMarkdown:  []string{"True", "False"},
+					AnswerIndex:      0,
+				},
+				{
+					ID:               "77777777-7777-7777-7777-777777777777",
+					QuizIndex:        1,
+					QuizType:         "mcq",
+					QuestionMarkdown: "Second quiz?",
+					OptionsMarkdown:  []string{"A", "B", "C"},
+					AnswerIndex:      2,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON quiz request failed: %v", err)
+	}
+	prompt := readMessageOfType(t, conn, "game.quiz.presented")
+	body, err := json.Marshal(prompt.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz prompt failed: %v", err)
+	}
+	var promptState QuizPromptState
+	if err := json.Unmarshal(body, &promptState); err != nil {
+		t.Fatalf("Unmarshal quiz prompt failed: %v", err)
+	}
+	if promptState.QuizID != "77777777-7777-7777-7777-777777777777" {
+		t.Fatalf("expected random quiz to be served, got %q", promptState.QuizID)
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.quiz.answer",
+		Data: map[string]any{"quiz_id": promptState.QuizID, "selected_index": 2},
+	}); err != nil {
+		t.Fatalf("WriteJSON quiz answer failed: %v", err)
+	}
+	result := readMessageOfType(t, conn, "game.quiz.result")
+	body, err = json.Marshal(result.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz result failed: %v", err)
+	}
+	var resultState QuizResultState
+	if err := json.Unmarshal(body, &resultState); err != nil {
+		t.Fatalf("Unmarshal quiz result failed: %v", err)
+	}
+	if !resultState.Correct || resultState.Remaining != 1 {
+		t.Fatalf("unexpected quiz result %+v", resultState)
+	}
+	if len(quizzes.quizzes.Quizzes) != 1 || quizzes.quizzes.Quizzes[0].ID != "66666666-6666-6666-6666-666666666666" {
+		t.Fatalf("expected only the served quiz to be removed, got %+v", quizzes.quizzes.Quizzes)
+	}
+}
+
 func TestWebsocketQuizIncorrectAnswerRecordsMistake(t *testing.T) {
 	levels := &fakeLevelRepository{
 		bootstrap: repository.LevelBootstrap{
@@ -639,7 +732,25 @@ func TestWebsocketGameExitDeletesSession(t *testing.T) {
 		},
 	}
 	sessions := &fakeGameSessionStore{}
-	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, nil, nil, nil, nil, sessions).Router()
+	quizzes := &fakeQuizCache{
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "66666666-6666-6666-6666-666666666666",
+					QuizIndex:        0,
+					QuizType:         "true_false",
+					QuestionMarkdown: "Sky is blue?",
+					OptionsMarkdown:  []string{"True", "False"},
+					AnswerIndex:      0,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
 	httpServer := startHTTPServer(t, handler)
 	defer httpServer.Close()
 
@@ -680,6 +791,12 @@ func TestWebsocketGameExitDeletesSession(t *testing.T) {
 	}
 	if sessions.deletedSessionID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
 		t.Fatalf("expected deleted session id, got %q", sessions.deletedSessionID)
+	}
+	if quizzes.deletedGenerationID != "generation-1" {
+		t.Fatalf("expected deleted quiz generation id, got %q", quizzes.deletedGenerationID)
+	}
+	if len(quizzes.quizzes.Quizzes) != 0 {
+		t.Fatalf("expected quiz cache to be flushed, got %d quizzes", len(quizzes.quizzes.Quizzes))
 	}
 }
 
@@ -1369,7 +1486,9 @@ func (c *fakeMapCache) Set(_ context.Context, _ string, levelMap mapgen.Generate
 }
 
 type fakeQuizCache struct {
-	quizzes quizcache.LevelQuizzes
+	quizzes             quizcache.LevelQuizzes
+	deletedGenerationID string
+	peekRandomIndex     int
 }
 
 func (c *fakeQuizCache) Get(_ context.Context, generationID string) (quizcache.LevelQuizzes, error) {
@@ -1392,6 +1511,17 @@ func (c *fakeQuizCache) PeekNext(_ context.Context, generationID string) (quizca
 	return c.quizzes.Quizzes[0], len(c.quizzes.Quizzes), nil
 }
 
+func (c *fakeQuizCache) PeekRandom(_ context.Context, generationID string) (quizcache.CachedQuiz, int, error) {
+	if c.quizzes.GenerationID != generationID || len(c.quizzes.Quizzes) == 0 {
+		return quizcache.CachedQuiz{}, 0, quizcache.ErrQuizzesNotFound
+	}
+	index := c.peekRandomIndex
+	if index < 0 || index >= len(c.quizzes.Quizzes) {
+		index = 0
+	}
+	return c.quizzes.Quizzes[index], len(c.quizzes.Quizzes), nil
+}
+
 func (c *fakeQuizCache) Take(_ context.Context, generationID string, quizID string) (quizcache.CachedQuiz, int, error) {
 	if c.quizzes.GenerationID != generationID {
 		return quizcache.CachedQuiz{}, 0, quizcache.ErrQuizzesNotFound
@@ -1404,6 +1534,14 @@ func (c *fakeQuizCache) Take(_ context.Context, generationID string, quizID stri
 		return quiz, len(c.quizzes.Quizzes), nil
 	}
 	return quizcache.CachedQuiz{}, len(c.quizzes.Quizzes), quizcache.ErrQuizNotFound
+}
+
+func (c *fakeQuizCache) Delete(_ context.Context, generationID string) error {
+	c.deletedGenerationID = generationID
+	if c.quizzes.GenerationID == generationID {
+		c.quizzes = quizcache.LevelQuizzes{}
+	}
+	return nil
 }
 
 func startHTTPServer(t *testing.T, handler http.Handler) *httptest.Server {
@@ -1482,6 +1620,7 @@ func (s *fakeGameSessionStore) Start(_ context.Context, options gamesession.Star
 
 func (s *fakeGameSessionStore) LoadRuntimeState(_ context.Context, _ string) (gamesession.RuntimeState, error) {
 	return gamesession.RuntimeState{
+		GenerationID:      s.state.GenerationID,
 		Health:            s.state.Health,
 		Essence:           s.state.Essence,
 		Wave:              s.state.Wave,

@@ -73,9 +73,10 @@ type MapCache interface {
 
 type QuizCache interface {
 	Get(ctx context.Context, generationID string) (quizcache.LevelQuizzes, error)
-	PeekNext(ctx context.Context, generationID string) (quizcache.CachedQuiz, int, error)
+	PeekRandom(ctx context.Context, generationID string) (quizcache.CachedQuiz, int, error)
 	Take(ctx context.Context, generationID string, quizID string) (quizcache.CachedQuiz, int, error)
 	Set(ctx context.Context, generationID string, quizzes quizcache.LevelQuizzes) error
+	Delete(ctx context.Context, generationID string) error
 }
 
 type GameSessionStore interface {
@@ -242,13 +243,14 @@ type actionResult struct {
 }
 
 type runningGameLoop struct {
-	sessionID    string
-	levelID      string
-	generationID string
-	userID       string
-	stop         context.CancelFunc
-	actions      chan clientAction
-	done         chan struct{}
+	sessionID     string
+	levelID       string
+	generationID  string
+	userID        string
+	currentQuizID string
+	stop          context.CancelFunc
+	actions       chan clientAction
+	done          chan struct{}
 }
 
 func (l *runningGameLoop) stopped() bool {
@@ -834,12 +836,14 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 
 func (s *Server) handleGameExit(ctx context.Context, loop *runningGameLoop, request gameExitRequest) (GameExitedState, error) {
 	sessionID := strings.TrimSpace(request.SessionID)
+	generationID := ""
 	if loop == nil {
 		if sessionID == "" {
 			return GameExitedState{Deleted: false, Reason: "no_running_session"}, nil
 		}
 	} else {
 		sessionID = loop.sessionID
+		generationID = loop.generationID
 		stopGameLoop(loop)
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -854,12 +858,28 @@ func (s *Server) handleGameExit(ctx context.Context, loop *runningGameLoop, requ
 		if err := s.levels.ClearQuizMistakes(callCtx, loop.userID, loop.levelID); err != nil {
 			log.Printf("failed to clear quiz mistakes on exit level_id=%s user_id=%s: %v", loop.levelID, loop.userID, err)
 		}
+	} else if runtime, err := s.sessions.LoadRuntimeState(callCtx, sessionID); err == nil {
+		generationID = runtime.GenerationID
+	} else if !errors.Is(err, gamesession.ErrSessionNotFound) {
+		log.Printf("failed to load game session runtime for quiz cache cleanup session_id=%s: %v", sessionID, err)
 	}
 
+	if err := s.deleteQuizCache(callCtx, generationID); err != nil {
+		log.Printf("failed to clear level quiz cache generation_id=%s: %v", generationID, err)
+		return GameExitedState{}, errors.New("failed to clear level quizzes")
+	}
 	if err := s.sessions.Delete(callCtx, sessionID); err != nil {
 		return GameExitedState{}, errors.New("failed to exit game session")
 	}
 	return GameExitedState{SessionID: sessionID, Deleted: true, Reason: "client_exit"}, nil
+}
+
+func (s *Server) deleteQuizCache(ctx context.Context, generationID string) error {
+	generationID = strings.TrimSpace(generationID)
+	if s.quizzes == nil || generationID == "" {
+		return nil
+	}
+	return s.quizzes.Delete(ctx, generationID)
 }
 
 func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop) error {
@@ -871,8 +891,9 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	quiz, remaining, err := s.quizzes.PeekNext(callCtx, loop.generationID)
+	quiz, remaining, err := s.quizzes.PeekRandom(callCtx, loop.generationID)
 	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		loop.currentQuizID = ""
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
 			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
@@ -881,6 +902,7 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	if err != nil {
 		return errors.New("failed to load quiz")
 	}
+	loop.currentQuizID = quiz.ID
 	return writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.presented",
 		Data: quizPromptState(quiz, remaining),
@@ -898,8 +920,9 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	currentQuiz, _, err := s.quizzes.PeekNext(callCtx, loop.generationID)
+	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
 	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		loop.currentQuizID = ""
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
 			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
@@ -908,7 +931,11 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	if err != nil {
 		return errors.New("failed to load quiz")
 	}
-	if currentQuiz.ID != request.QuizID {
+	currentQuiz, ok := cachedQuizByID(quizzes.Quizzes, request.QuizID)
+	if !ok {
+		return errors.New("quiz not found")
+	}
+	if loop.currentQuizID != "" && loop.currentQuizID != request.QuizID {
 		return errors.New("quiz_id is not the current quiz")
 	}
 	if request.SelectedIndex < 0 || request.SelectedIndex >= len(currentQuiz.OptionsMarkdown) {
@@ -921,6 +948,9 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	}
 	if err != nil {
 		return errors.New("failed to remove answered quiz")
+	}
+	if loop.currentQuizID == request.QuizID {
+		loop.currentQuizID = ""
 	}
 
 	correct := request.SelectedIndex == answeredQuiz.AnswerIndex
@@ -956,6 +986,15 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	}
 
 	return nil
+}
+
+func cachedQuizByID(quizzes []quizcache.CachedQuiz, quizID string) (quizcache.CachedQuiz, bool) {
+	for _, quiz := range quizzes {
+		if quiz.ID == quizID {
+			return quiz, true
+		}
+	}
+	return quizcache.CachedQuiz{}, false
 }
 
 func (s *Server) awardEssenceThroughLoop(ctx context.Context, loop *runningGameLoop, amount int) (int, error) {

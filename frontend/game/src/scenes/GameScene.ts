@@ -54,6 +54,8 @@ export default class GameScene extends Phaser.Scene {
   private quizPromptContainer: Phaser.GameObjects.Container | null = null;
   private pauseWindowOpen: boolean = false;
   private messageHandler: ((e: MessageEvent) => void) | null = null;
+  private pendingExitContinuation: (() => void) | null = null;
+  private pendingExitTimeoutId: number | null = null;
   private levelId: string = '';
 
   private birdStats: Record<string, { damage: number, range: number, fireRate: string, attack: string, cost: number, color: string }> = {
@@ -581,6 +583,8 @@ export default class GameScene extends Phaser.Scene {
             this.showRejectMessage('NO QUIZZES REMAINING');
           } else if (message.type === 'game.quiz.result') {
             this.handleQuizResult(message.data);
+          } else if (message.type === 'game.exited') {
+            this.completePendingExit();
           }
         } catch (err) {
           console.error('Failed to parse WebSocket message in GameScene:', err);
@@ -617,6 +621,15 @@ export default class GameScene extends Phaser.Scene {
         proj.sprite.destroy();
       });
       this.projectiles.clear();
+
+      if (this.pendingExitTimeoutId !== null) {
+        window.clearTimeout(this.pendingExitTimeoutId);
+        this.pendingExitTimeoutId = null;
+      }
+      if (this.messageHandler) {
+        window.removeEventListener('message', this.messageHandler);
+        this.messageHandler = null;
+      }
     });
   }
 
@@ -1048,32 +1061,13 @@ export default class GameScene extends Phaser.Scene {
 
       const packet = event.data;
       if (packet.type === 'game-replay') {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(JSON.stringify({
-            type: 'game.exit',
-            data: { session_id: this.sessionId }
-          }));
-        }
-        setTimeout(() => {
+        this.exitGameThen(() => {
           window.location.reload();
-        }, 150);
+        });
       } else if (packet.type === 'game-exit') {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-          this.ws.send(JSON.stringify({
-            type: 'game.exit',
-            data: { session_id: this.sessionId }
-          }));
-        }
-        setTimeout(() => {
-          const searchParams = new URLSearchParams(window.location.search);
-          const documentId = searchParams.get('document_id');
-          const chapterId = searchParams.get('chapter_id');
-          if (documentId && chapterId) {
-            window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
-          } else {
-            window.location.href = '/dashboard';
-          }
-        }, 150);
+        this.exitGameThen(() => {
+          this.navigateToDashboard();
+        });
       }
     };
     window.addEventListener('message', this.messageHandler);
@@ -1320,23 +1314,64 @@ export default class GameScene extends Phaser.Scene {
     });
 
     exitBtn.on('pointerdown', () => {
-      // Send same game.exit message as the end-of-game Exit Button
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: 'game.exit',
-          data: { session_id: this.sessionId }
-        }));
-      }
-      setTimeout(() => {
-        const searchParams = new URLSearchParams(window.location.search);
-        const documentId = searchParams.get('document_id');
-        const chapterId = searchParams.get('chapter_id');
-        if (documentId && chapterId) {
-          window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
-        } else {
-          window.location.href = '/dashboard';
-        }
-      }, 150);
+      this.exitGameThen(() => {
+        this.navigateToDashboard();
+      });
     });
+  }
+
+  private exitGameThen(continuation: () => void) {
+    if (this.pendingExitContinuation) {
+      return;
+    }
+
+    this.pendingExitContinuation = continuation;
+
+    if (this.pendingExitTimeoutId !== null) {
+      window.clearTimeout(this.pendingExitTimeoutId);
+    }
+    this.pendingExitTimeoutId = window.setTimeout(() => {
+      this.completePendingExit();
+    }, 2000);
+
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.completePendingExit();
+      return;
+    }
+
+    try {
+      this.ws.send(JSON.stringify({
+        type: 'game.exit',
+        data: { session_id: this.sessionId }
+      }));
+    } catch (err) {
+      console.error('Failed to send game.exit:', err);
+      this.completePendingExit();
+    }
+  }
+
+  private completePendingExit() {
+    const continuation = this.pendingExitContinuation;
+    if (!continuation) {
+      return;
+    }
+
+    this.pendingExitContinuation = null;
+    if (this.pendingExitTimeoutId !== null) {
+      window.clearTimeout(this.pendingExitTimeoutId);
+      this.pendingExitTimeoutId = null;
+    }
+    continuation();
+  }
+
+  private navigateToDashboard() {
+    const searchParams = new URLSearchParams(window.location.search);
+    const documentId = searchParams.get('document_id');
+    const chapterId = searchParams.get('chapter_id');
+    if (documentId && chapterId) {
+      window.location.href = `/dashboard/games/${documentId}/chapters/${chapterId}`;
+    } else {
+      window.location.href = '/dashboard';
+    }
   }
 }
