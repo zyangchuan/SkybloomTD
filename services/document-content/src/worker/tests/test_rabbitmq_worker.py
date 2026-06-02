@@ -1,4 +1,5 @@
 import sys
+import threading
 import types
 import unittest
 
@@ -17,7 +18,7 @@ redis_module = types.ModuleType("redis")
 redis_module.Redis = FakeRedisClient
 sys.modules.setdefault("redis", redis_module)
 
-from app.rabbitmq_worker import process_job
+from app.rabbitmq_worker import process_job, run_with_heartbeat_pump
 
 
 class RabbitMQWorkerTest(unittest.TestCase):
@@ -106,6 +107,28 @@ class RabbitMQWorkerTest(unittest.TestCase):
             ],
             statuses,
         )
+
+    def test_run_with_heartbeat_pump_processes_connection_events_during_work(self):
+        release_work = threading.Event()
+        pump_calls = []
+
+        class FakeConnection:
+            def process_data_events(self, time_limit):
+                pump_calls.append(time_limit)
+                release_work.set()
+
+        def slow_work():
+            release_work.wait(timeout=1)
+            return {"status": "indexed"}
+
+        result = run_with_heartbeat_pump(
+            FakeConnection(),
+            slow_work,
+            poll_seconds=0.1,
+        )
+
+        self.assertEqual({"status": "indexed"}, result)
+        self.assertGreaterEqual(len(pump_calls), 1)
 
     @staticmethod
     def document_job():

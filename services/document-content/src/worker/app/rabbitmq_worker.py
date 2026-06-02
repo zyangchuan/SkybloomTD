@@ -1,11 +1,21 @@
+from __future__ import annotations
+
 import json
 import logging
+import queue
 import signal
+import threading
 from typing import Any, Callable
 
 import pika
 
-from .config import DOCUMENT_CONTENT_QUEUE, RABBITMQ_URL
+from .config import (
+    DOCUMENT_CONTENT_QUEUE,
+    RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS,
+    RABBITMQ_HEARTBEAT_SECONDS,
+    RABBITMQ_URL,
+    RABBITMQ_WORKER_POLL_SECONDS,
+)
 from .task_status import set_task_status
 
 
@@ -61,11 +71,52 @@ def process_job(
     return result
 
 
+def rabbitmq_parameters() -> pika.URLParameters:
+    params = pika.URLParameters(RABBITMQ_URL)
+    if RABBITMQ_HEARTBEAT_SECONDS > 0:
+        params.heartbeat = RABBITMQ_HEARTBEAT_SECONDS
+    if RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS > 0:
+        params.blocked_connection_timeout = RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS
+    return params
+
+
+def run_with_heartbeat_pump(
+    connection: pika.BlockingConnection,
+    work_fn: Callable[[], dict[str, Any]],
+    poll_seconds: float = RABBITMQ_WORKER_POLL_SECONDS,
+) -> dict[str, Any]:
+    results: queue.Queue[tuple[bool, dict[str, Any] | BaseException]] = queue.Queue(
+        maxsize=1
+    )
+
+    def run_work() -> None:
+        try:
+            results.put((True, work_fn()))
+        except BaseException as exc:
+            results.put((False, exc))
+
+    worker = threading.Thread(target=run_work, name="document-job-worker")
+    worker.start()
+    try:
+        while worker.is_alive():
+            connection.process_data_events(time_limit=max(0.1, poll_seconds))
+    except BaseException:
+        LOG.exception("rabbitmq connection failed while document job was running")
+        worker.join()
+        raise
+
+    worker.join()
+    succeeded, value = results.get()
+    if succeeded:
+        return value  # type: ignore[return-value]
+    raise value
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     prewarm_ocr()
 
-    params = pika.URLParameters(RABBITMQ_URL)
+    params = rabbitmq_parameters()
     connection = pika.BlockingConnection(params)
     channel = connection.channel()
     channel.queue_declare(queue=DOCUMENT_CONTENT_QUEUE, durable=True)
@@ -88,7 +139,7 @@ def main() -> None:
                 job.get("document_id"),
                 method.redelivered,
             )
-            result = process_job(job)
+            result = run_with_heartbeat_pump(connection, lambda: process_job(job))
         except Exception:
             LOG.exception(
                 "document job failed task_id=%s document_id=%s",

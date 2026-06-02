@@ -3,6 +3,11 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 RABBITMQ_URL = os.getenv("RABBITMQ_URL") or "amqp://guest:guest@rabbitmq:5672/"
+RABBITMQ_HEARTBEAT_SECONDS = int(os.getenv("RABBITMQ_HEARTBEAT_SECONDS", "600"))
+RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS = int(
+    os.getenv("RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS", "300")
+)
+RABBITMQ_WORKER_POLL_SECONDS = float(os.getenv("RABBITMQ_WORKER_POLL_SECONDS", "1"))
 DOCUMENT_CONTENT_QUEUE = os.getenv("DOCUMENT_CONTENT_QUEUE", "document.process")
 REDIS_URL = os.getenv("REDIS_URL") or "redis://redis:6379/0"
 TASK_STATUS_TTL_SECONDS = int(os.getenv("TASK_STATUS_TTL_SECONDS", "604800"))
