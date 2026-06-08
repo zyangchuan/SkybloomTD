@@ -74,7 +74,6 @@ export class DragController {
 
   private onDrag(pointer: Phaser.Input.Pointer, _gameObject: Phaser.GameObjects.GameObject) {
     if (!this.activeDragSprite) return;
-
     this.activeDragSprite.setPosition(pointer.x, pointer.y);
     this.updateRangeCircle(pointer);
     this.updateCancelZones(pointer);
@@ -114,10 +113,8 @@ export class DragController {
     const stats = BIRD_STATS[this.activeDragBirdType];
     if (!stats) return;
     const radius = stats.range * this.grid.tileSize;
-    this.dragRangeGraphics.fillStyle(0x93c5fd, 0.3);
-    this.dragRangeGraphics.fillCircle(pointer.x, pointer.y, radius);
-    this.dragRangeGraphics.lineStyle(3, 0x2563eb, 0.8);
-    this.dragRangeGraphics.strokeCircle(pointer.x, pointer.y, radius);
+    this.dragRangeGraphics.fillStyle(0x93c5fd, 0.3).fillCircle(pointer.x, pointer.y, radius);
+    this.dragRangeGraphics.lineStyle(3, 0x2563eb, 0.8).strokeCircle(pointer.x, pointer.y, radius);
   }
 
   private updateCancelZones(pointer: Phaser.Input.Pointer) {

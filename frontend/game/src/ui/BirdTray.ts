@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { BIRD_STATS } from '../data/birds';
 
 export class BirdTray {
-  constructor(scene: Phaser.Scene, isDragging: () => boolean) {
+  constructor(scene: Phaser.Scene, isDragging: () => boolean, isEvolved: (birdType: string) => boolean = () => false) {
     scene.add.nineslice(960, 1152, 'box_orange_square', undefined, 760, 170, 32, 32, 32, 32).setDepth(30);
 
     const birds = ['sparrow', 'woodpecker', 'eagle', 'peacock'];
@@ -50,12 +50,14 @@ export class BirdTray {
       box.on('pointerover', () => {
         if (isDragging()) return;
         box.setSize(boxSize + 12, boxSize + 12);
+        head.setTexture(isEvolved(bird) ? `head_evolve_${bird}` : `head_${bird}`);
         head.setDisplaySize(headSize + 8, headSize + 8).setY(boxY - 18);
         label.setColor('#ffffff').setY(boxY + 50);
         tooltip.setVisible(true);
       });
       box.on('pointerout', () => {
         box.setSize(boxSize, boxSize);
+        head.setTexture(`head_${bird}`);
         head.setDisplaySize(headSize, headSize).setY(boxY - 14);
         label.setColor('#94a3b8').setY(boxY + 44);
         tooltip.setVisible(false);

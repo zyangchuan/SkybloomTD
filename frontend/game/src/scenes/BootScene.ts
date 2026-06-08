@@ -87,6 +87,20 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_woodpecker', '/game/assets/birds/woodpecker_projectile.png');
     this.load.image('projectile_eagle', '/game/assets/birds/eagle_projectile.png');
     this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
+
+    // Evolved bird assets
+    this.load.image('tower_evolve_sparrow',    '/game/assets/birds/evolve_sparrow_tower.png');
+    this.load.image('tower_evolve_woodpecker', '/game/assets/birds/evolve_woodpecker_tower.png');
+    this.load.image('tower_evolve_eagle',      '/game/assets/birds/evolve_eagle_tower.png');
+    this.load.image('tower_evolve_peacock',    '/game/assets/birds/evolve_peacock_tower.png');
+    this.load.image('head_evolve_sparrow',    '/game/assets/birds/evolve_sparrow_head.png');
+    this.load.image('head_evolve_woodpecker', '/game/assets/birds/evolve_woodpecker_head.png');
+    this.load.image('head_evolve_eagle',      '/game/assets/birds/evolve_eagle_head.png');
+    this.load.image('head_evolve_peacock',    '/game/assets/birds/evolve_peacock_head.png');
+    this.load.image('projectile_evolve_sparrow',    '/game/assets/birds/evolve_sparrow_projectile.png');
+    this.load.image('projectile_evolve_woodpecker', '/game/assets/birds/evolve_woodpecker_projectile.png');
+    this.load.image('projectile_evolve_eagle',      '/game/assets/birds/evolve_eagle_projectile.png');
+    this.load.image('projectile_evolve_peacock',    '/game/assets/birds/evolve_peacock_projectile.png');
   }
 
   create() {

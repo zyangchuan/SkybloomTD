@@ -11,9 +11,14 @@ const (
 	BirdTypeEagle      = "eagle"
 	BirdTypePeacock    = "peacock"
 
+	BirdTypeEvolveSparrow    = "evolve_sparrow"
+	BirdTypeEvolveWoodpecker = "evolve_woodpecker"
+	BirdTypeEvolveEagle      = "evolve_eagle"
+	BirdTypeEvolvePeacock    = "evolve_peacock"
+
 	AttackTypeSingle = "single"
 	AttackTypeSplash = "splash"
-
+	
 	StandardProjectileSpeed = 8.0
 )
 
@@ -55,6 +60,7 @@ func NewBird(id string, birdType string, position Position) (Bird, error) {
 	}, nil
 }
 
+a
 func BirdStatsForType(birdType string) (BirdStats, error) {
 	switch birdType {
 	case BirdTypeSparrow:
@@ -89,6 +95,38 @@ func BirdStatsForType(birdType string) (BirdStats, error) {
 			Range:           3.5,
 			Cost:            90,
 		}, nil
+	case BirdTypeEvolveSparrow:
+		return BirdStats{
+			Damage:          18,
+			ProjectileSpeed: StandardProjectileSpeed,
+			FireRate:        1.5,
+			Range:           4.5,
+			Cost:            50,
+		}, nil
+	case BirdTypeEvolveWoodpecker:
+		return BirdStats{
+			Damage:          11,
+			ProjectileSpeed: StandardProjectileSpeed,
+			FireRate:        3.0,
+			Range:           4.5,
+			Cost:            65,
+		}, nil
+	case BirdTypeEvolveEagle:
+		return BirdStats{
+			Damage:          50,
+			ProjectileSpeed: StandardProjectileSpeed,
+			FireRate:        0.6,
+			Range:           7.5,
+			Cost:            130,
+		}, nil
+	case BirdTypeEvolvePeacock:
+		return BirdStats{
+			Damage:          13,
+			ProjectileSpeed: StandardProjectileSpeed,
+			FireRate:        1.5,
+			Range:           4.5,
+			Cost:            90,
+		}, nil
 	default:
 		return BirdStats{}, errors.New("unknown bird type")
 	}
@@ -96,9 +134,10 @@ func BirdStatsForType(birdType string) (BirdStats, error) {
 
 func AttackBehaviourForType(birdType string) (AttackBehaviour, error) {
 	switch birdType {
-	case BirdTypeSparrow, BirdTypeWoodpecker, BirdTypeEagle:
+	case BirdTypeSparrow, BirdTypeWoodpecker, BirdTypeEagle,
+		BirdTypeEvolveSparrow, BirdTypeEvolveWoodpecker, BirdTypeEvolveEagle:
 		return SingleAttack{}, nil
-	case BirdTypePeacock:
+	case BirdTypePeacock, BirdTypeEvolvePeacock:
 		return SplashAttack{}, nil
 	default:
 		return nil, errors.New("unknown bird type")
@@ -107,9 +146,10 @@ func AttackBehaviourForType(birdType string) (AttackBehaviour, error) {
 
 func AttackTypeForBirdType(birdType string) (string, error) {
 	switch birdType {
-	case BirdTypeSparrow, BirdTypeWoodpecker, BirdTypeEagle:
+	case BirdTypeSparrow, BirdTypeWoodpecker, BirdTypeEagle,
+		BirdTypeEvolveSparrow, BirdTypeEvolveWoodpecker, BirdTypeEvolveEagle:
 		return AttackTypeSingle, nil
-	case BirdTypePeacock:
+	case BirdTypePeacock, BirdTypeEvolvePeacock:
 		return AttackTypeSplash, nil
 	default:
 		return "", errors.New("unknown bird type")

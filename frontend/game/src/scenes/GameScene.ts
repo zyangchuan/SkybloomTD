@@ -4,6 +4,7 @@ import { GameHUD } from '../ui/GameHUD';
 import { BirdTray } from '../ui/BirdTray';
 import { QuizManager } from '../ui/QuizManager';
 import { GameOverlay } from '../ui/GameOverlay';
+import { TowerUpgradePanel } from '../ui/TowerUpgradePanel';
 import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
 
@@ -11,6 +12,7 @@ export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
+  private currentEssence = 0;
 
   // Grid params
   private tileSize = 0;
@@ -25,6 +27,7 @@ export default class GameScene extends Phaser.Scene {
   private hud!: GameHUD;
   private quiz!: QuizManager;
   private overlay!: GameOverlay;
+  private upgradePanel!: TowerUpgradePanel;
   private drag!: DragController;
   private entities!: EntitySync;
 
@@ -41,10 +44,15 @@ export default class GameScene extends Phaser.Scene {
     this.initGrid(mapData);
     new MapRenderer(this, this.tileSize, this.offsetX, this.offsetY, this.gridWidth, this.gridHeight).render(mapData);
 
-    this.entities = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
-    this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
-    this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
-    this.quiz     = new QuizManager(this, this.ws);
+    this.entities     = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
+    this.overlay      = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
+    this.upgradePanel = new TowerUpgradePanel(
+      this,
+      (towerId, birdType) => this.sendWs('game.action.evolve_tower', { tower_id: towerId, bird_type: birdType }),
+      () => this.currentEssence,
+    );
+    this.hud          = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); });
+    this.quiz         = new QuizManager(this, this.ws);
     this.quiz.createHUD();
 
     this.drag = new DragController(
@@ -55,7 +63,17 @@ export default class GameScene extends Phaser.Scene {
     );
     this.drag.setup();
 
-    new BirdTray(this, () => this.drag.isDragging());
+    this.entities.onTowerClick = (tower) => {
+      if (!this.overlay.isPaused() && !this.drag.isDragging()) {
+        this.upgradePanel.show(tower);
+      }
+    };
+
+    new BirdTray(
+      this,
+      () => this.drag.isDragging(),
+      (birdType) => [...this.entities.towers.values()].some(t => t.birdType === `evolve_${birdType}`),
+    );
     this.setupWebSocket(data.levelId);
     this.setupShutdown();
   }
@@ -96,8 +114,8 @@ export default class GameScene extends Phaser.Scene {
         if (!this.overlay.isPaused()) this.updateFromState(msg.data);
         break;
       case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
-      case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;
-      case 'game.victory':          this.overlay.showMistakesSummaryWindow(true);  break;
+      case 'game.over':             this.upgradePanel.hide(); this.overlay.showMistakesSummaryWindow(false); break;
+      case 'game.victory':          this.upgradePanel.hide(); this.overlay.showMistakesSummaryWindow(true);  break;
       case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
       case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
       case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
@@ -111,6 +129,7 @@ export default class GameScene extends Phaser.Scene {
       this.quiz.destroy();
       this.entities.destroy();
       this.overlay.destroy();
+      this.upgradePanel.destroy();
     });
   }
 
@@ -119,6 +138,7 @@ export default class GameScene extends Phaser.Scene {
   private updateFromState(state: any) {
     if (!state) return;
     if (state.session_id !== undefined) this.sessionId = state.session_id;
+    if (state.essence    !== undefined) this.currentEssence = state.essence;
     this.hud.update({ health: state.health, essence: state.essence, wave: state.wave });
     if (state.birds       !== undefined) this.entities.syncTowers(state.birds);
     if (state.smogs       !== undefined) this.entities.syncSmogs(state.smogs);

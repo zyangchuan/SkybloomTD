@@ -32,6 +32,7 @@ const gameTickInterval = 50 * time.Millisecond
 const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
+const evolveTowerAction = "evolve_tower"
 const awardQuizEssenceAction = "award_quiz_essence"
 const pauseGameAction = "pause_game"
 const resumeGameAction = "resume_game"
@@ -221,6 +222,11 @@ type placeTowerRequest struct {
 	Y        int    `json:"y"`
 }
 
+type evolveTowerRequest struct {
+	TowerID  string `json:"tower_id"`
+	BirdType string `json:"bird_type"`
+}
+
 type gameExitRequest struct {
 	SessionID string `json:"session_id"`
 }
@@ -233,6 +239,7 @@ type quizAnswerRequest struct {
 type clientAction struct {
 	Type          string
 	PlaceTower    placeTowerRequest
+	EvolveTower   evolveTowerRequest
 	EssenceReward int
 	Result        chan actionResult
 }
@@ -559,6 +566,31 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 			case gameLoop.actions <- clientAction{Type: placeTowerAction, PlaceTower: action}:
 			default:
 				if writeErr := writeActionRejected(conn, writeMu, placeTowerAction, "action queue is full"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+			}
+		case "game.action.evolve_tower":
+			action, err := decodeEvolveTowerAction(message.Data)
+			if err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, evolveTowerAction, err.Error()); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if gameLoop == nil || gameLoop.stopped() {
+				gameLoop = nil
+				if writeErr := writeActionRejected(conn, writeMu, evolveTowerAction, "game session is not running"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			select {
+			case gameLoop.actions <- clientAction{Type: evolveTowerAction, EvolveTower: action}:
+			default:
+				if writeErr := writeActionRejected(conn, writeMu, evolveTowerAction, "action queue is full"); writeErr != nil {
 					log.Printf("websocket action rejection write failed: %v", writeErr)
 					return
 				}
@@ -1066,6 +1098,8 @@ func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSessio
 	switch action.Type {
 	case placeTowerAction:
 		return s.placeTower(ctx, runtime, action.PlaceTower)
+	case evolveTowerAction:
+		return s.evolveTower(ctx, runtime, action.EvolveTower)
 	default:
 		return errors.New("unsupported action")
 	}
@@ -1112,6 +1146,77 @@ func (s *Server) placeTower(ctx context.Context, runtime *runtimeSession, reques
 		return errors.New("failed to save tower placement")
 	}
 
+	return nil
+}
+
+func (s *Server) evolveTower(ctx context.Context, runtime *runtimeSession, request evolveTowerRequest) error {
+	if runtime == nil {
+		return errors.New("game session is not running")
+	}
+	towerID := strings.TrimSpace(request.TowerID)
+	baseType := strings.TrimSpace(request.BirdType)
+
+	idx := -1
+	for i, placed := range runtime.birds {
+		if placed.bird.ID == towerID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return errors.New("tower not found")
+	}
+	placed := runtime.birds[idx]
+	if placed.birdType != baseType {
+		return errors.New("bird_type does not match the tower's current type")
+	}
+	if strings.HasPrefix(placed.birdType, "evolve_") {
+		return errors.New("tower is already at max level")
+	}
+
+	evolvedType := "evolve_" + baseType
+	evolvedStats, err := gameobject.BirdStatsForType(evolvedType)
+	if err != nil {
+		return errors.New("unknown evolved bird type")
+	}
+	behaviour, err := gameobject.AttackBehaviourForType(evolvedType)
+	if err != nil {
+		return errors.New("failed to get evolved attack behaviour")
+	}
+
+	baseStats, err := gameobject.BirdStatsForType(baseType)
+	if err != nil {
+		return errors.New("unknown base bird type")
+	}
+	nextEconomy := runtime.economy
+	if !nextEconomy.Consume(baseStats.Cost) {
+		return errors.New("insufficient essence")
+	}
+
+	updatedBirds := append([]placedBird{}, runtime.birds...)
+	updatedBirds[idx] = placedBird{
+		birdType: evolvedType,
+		bird: gameobject.Bird{
+			ID:              placed.bird.ID,
+			Position:        placed.bird.Position,
+			Stats:           evolvedStats,
+			AttackBehaviour: behaviour,
+			LastFiredAtTick: placed.bird.LastFiredAtTick,
+		},
+	}
+
+	previousEconomy := runtime.economy
+	previousBirds := runtime.birds
+	runtime.economy = nextEconomy
+	runtime.session.Essence = nextEconomy.Essence
+	runtime.birds = updatedBirds
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.economy = previousEconomy
+		runtime.session.Essence = previousEconomy.Essence
+		runtime.birds = previousBirds
+		log.Printf("game session evolve save failed session_id=%s: %v", runtime.session.SessionID, err)
+		return errors.New("failed to save tower evolution")
+	}
 	return nil
 }
 
@@ -1540,6 +1645,20 @@ func decodePlaceTowerAction(data any) (placeTowerRequest, error) {
 	}
 	if strings.TrimSpace(request.BirdType) == "" {
 		return placeTowerRequest{}, errors.New("bird_type is required")
+	}
+	return request, nil
+}
+
+func decodeEvolveTowerAction(data any) (evolveTowerRequest, error) {
+	var request evolveTowerRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return evolveTowerRequest{}, errors.New("evolve tower action data must include tower_id and bird_type")
+	}
+	if strings.TrimSpace(request.TowerID) == "" {
+		return evolveTowerRequest{}, errors.New("tower_id is required")
+	}
+	if strings.TrimSpace(request.BirdType) == "" {
+		return evolveTowerRequest{}, errors.New("bird_type is required")
 	}
 	return request, nil
 }
