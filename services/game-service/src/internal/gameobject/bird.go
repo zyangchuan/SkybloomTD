@@ -60,7 +60,6 @@ func NewBird(id string, birdType string, position Position) (Bird, error) {
 	}, nil
 }
 
-a
 func BirdStatsForType(birdType string) (BirdStats, error) {
 	switch birdType {
 	case BirdTypeSparrow:
