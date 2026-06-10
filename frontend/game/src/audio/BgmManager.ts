@@ -15,7 +15,7 @@ export class BgmManager {
         if (this.currentBgmKey) {
             this.scene.sound.stopByKey(this.currentBgmKey);
         }
-        
+
         this.scene.sound.play(song, { loop: true, volume: 0.5 });
         this.currentBgmKey = song;
     }

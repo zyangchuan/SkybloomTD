@@ -18,6 +18,7 @@ import ButtonOrange from '@/components/ButtonOrange';
 import ButtonWhite from '@/components/ButtonWhite';
 import ButtonSmallGreenRound from '@/components/ButtonSmallGreenRound';
 import GameCardBackground from '@/components/GameCardBackground';
+import PageBgm from '@/components/PageBgm';
 
 interface Chapter {
   chapter_id: string;
@@ -119,6 +120,7 @@ export default function ChapterSelectionPage({ params }: PageProps) {
 
   return (
     <main className="flex-1 w-full max-w-6xl mx-auto px-4 py-8 flex flex-col justify-center items-center">
+      <PageBgm src="/bgm/paradise_found.mp3"/>
       <OrangeSquare className="w-full flex flex-col p-6 sm:p-8 bg-[#fdfaf2] border-4 border-yellow-800 rounded-3xl shadow-2xl relative min-h-[500px]">
         {/* Navigation Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-yellow-800/20 pb-4 mb-6">
@@ -131,7 +133,7 @@ export default function ChapterSelectionPage({ params }: PageProps) {
           </ButtonWhite>
           
           <h2 className="text-xl sm:text-2xl text-[#4a1900] font-extrabold tracking-tight text-left drop-shadow-[0_1px_0_rgba(255,255,255,0.4)]">
-            {docInfo ? `Game: ${docInfo.game_name}` : "Level Selection"}
+            {docInfo ? `Game: ${docInfo.game_name}` : "Level Selection"}         
           </h2>
         </div>
 
@@ -179,6 +181,7 @@ export default function ChapterSelectionPage({ params }: PageProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-30 gap-x-30 pt-10">
               {chapters.map((chapter, idx) => {
                 return (
+    
                   <div
                     key={chapter.chapter_id}
                     onClick={() => {

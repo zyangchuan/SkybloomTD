@@ -2,6 +2,7 @@ import Image from 'next/image'
 import OrangeSquare from '@/components/OrangeSquare';
 import AuthPanel from '@/components/AuthPanel';
 
+
 export default function Home() {
   return (
     <div className="flex flex-col flex-1 items-center font-sans">

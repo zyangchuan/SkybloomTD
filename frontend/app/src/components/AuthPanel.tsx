@@ -9,6 +9,7 @@ import ButtonGreen from '@/components/ButtonGreen';
 import RetroInput from '@/components/RetroInput';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
+import  SignInBgm  from './SignInBgm';
 
 function getDisplayName(session: Session) {
   const fullName = session.user.user_metadata?.full_name;
@@ -44,6 +45,8 @@ function getAuthCallbackURL() {
 }
 
 export default function AuthPanel() {
+  SignInBgm();
+
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
