@@ -18,7 +18,7 @@ export class BirdTray {
       const tooltip = scene.add.container(boxX, boxY - 230).setDepth(35).setVisible(false);
       tooltip.add(scene.add.nineslice(0, 0, 'box_square', undefined, 300, 220, 32, 32, 32, 32));
       tooltip.add(scene.add.text(0, -82, bird.toUpperCase(), {
-        fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '32px', color: stats.color,
+        fontFamily: 'Concert One', fontSize: '32px', color: '#070505',
       }).setOrigin(0.5));
 
       const rows = [
@@ -31,10 +31,10 @@ export class BirdTray {
       rows.forEach((row, i) => {
         const rowY = -42 + i * 28;
         tooltip.add(scene.add.text(-120, rowY, row.label, {
-          fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '20px', color: '#94a3b8',
+          fontFamily: 'Concert One', fontSize: '20px', color: '#94a3b8',
         }).setOrigin(0, 0.5));
         tooltip.add(scene.add.text(120, rowY, row.value, {
-          fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '20px', color: row.color,
+          fontFamily: 'Concert One', fontSize: '20px', color: row.color,
         }).setOrigin(1, 0.5));
       });
 
@@ -44,7 +44,7 @@ export class BirdTray {
 
       const head  = scene.add.image(boxX, boxY - 14, `head_${bird}`).setDisplaySize(headSize, headSize).setDepth(31);
       const label = scene.add.text(boxX, boxY + 44, bird.toUpperCase(), {
-        fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '19px', color: '#94a3b8',
+        fontFamily: 'Concert One', fontSize: '19px', color: '#94a3b8',
       }).setOrigin(0.5).setDepth(31);
 
       box.on('pointerover', () => {

@@ -21,7 +21,7 @@ export default function PageBgm({ src }: { src: string }) {
                 // remove the click listener after starting the music to prevent multiple triggers
                 window.removeEventListener('click', startMusic);
             }
-
+ 
             window.addEventListener('click', startMusic);
             
             // Cleanup function to pause the music when the component unmounts
