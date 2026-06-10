@@ -103,9 +103,9 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_evolve_peacock',    '/game/assets/birds/evolve_peacock_projectile.png');
 
     // Background music and sound effects
-    this.load.audio('front_game_music', '/game/assets/bgm/boogie_party.mp3');
-    this.load.audio('middle_game_music', '/game/assets/bgm/i_got_a_stick_arr_bryan_teoh.mp3');
-    this.load.audio('end_game_music', '/game/assets/bgm/ancient_mystery_waltz_vivace.mp3');
+    this.load.audio('front_game_bgm', '/game/assets/bgm/boogie_party.mp3');
+    this.load.audio('middle_game_bgm', '/game/assets/bgm/i_got_a_stick_arr_bryan_teoh.mp3');
+    this.load.audio('end_game_bgm', '/game/assets/bgm/ancient_mystery_waltz_vivace.mp3');
   }
 
   create() {

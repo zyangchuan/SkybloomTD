@@ -7,12 +7,14 @@ import { GameOverlay } from '../ui/GameOverlay';
 import { TowerUpgradePanel } from '../ui/TowerUpgradePanel';
 import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
+import { BgmManager } from '../audio/BgmManager';
 
 export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
   private currentEssence = 0;
+  private currentWave : number = 0;
 
   // Grid params
   private tileSize = 0;
@@ -30,6 +32,7 @@ export default class GameScene extends Phaser.Scene {
   private upgradePanel!: TowerUpgradePanel;
   private drag!: DragController;
   private entities!: EntitySync;
+  private bgm!: BgmManager;
 
   constructor() { super('GameScene'); }
 
@@ -38,6 +41,14 @@ export default class GameScene extends Phaser.Scene {
   create(data: { initialState: any, ws: WebSocket, levelId: string }) {
     this.ws = data.ws;
     this.levelId = data.levelId;
+    this.bgm = new BgmManager(this);
+
+    // Update bgm based on wave changes, which are part of the state sent by the server
+      this.sound.pauseOnBlur = false; // Keep music playing even if the game loses focus
+      this.bgm.reset();
+      this.bgm.updateForWave(1); // Start with first wave bgm on first interaction
+
+
     const mapData = data.initialState?.map;
     if (!mapData) { console.error('No map data in initial state.'); return; }
 
@@ -54,6 +65,7 @@ export default class GameScene extends Phaser.Scene {
     this.hud          = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); });
     this.quiz         = new QuizManager(this, this.ws);
     this.quiz.createHUD();
+    
 
     this.drag = new DragController(
       this,
@@ -120,6 +132,14 @@ export default class GameScene extends Phaser.Scene {
       case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
       case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
       case 'game.exited':           this.overlay.completePendingExit(); break;
+    }
+
+    if (msg.type == 'game.state') {
+      const waveIndex = msg.data?.wave || 0;
+      if (this.currentWave !== waveIndex) {
+        this.currentWave = waveIndex;
+        this.bgm.updateForWave(waveIndex);
+      }
     }
   }
 
