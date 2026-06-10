@@ -22,7 +22,7 @@ export default function SignInBgm() {
                 window.removeEventListener('click', startMusic);
             }
 
-            startMusic(); // Attempt to start music immediately in case autoplay is allowed
+            window.addEventListener('click', startMusic);
             
             // Cleanup function to pause the music when the component unmounts
             return () => {
