@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BIRD_STATS } from '../data/birds';
 
+
 export class BirdTray {
   constructor(scene: Phaser.Scene, isDragging: () => boolean, isEvolved: (birdType: string) => boolean = () => false) {
     scene.add.nineslice(960, 1152, 'box_orange_square', undefined, 760, 170, 32, 32, 32, 32).setDepth(30);

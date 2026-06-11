@@ -41,7 +41,6 @@ export default function SignInBgm() {
             // if true, it is currently muted, so unmute it. If false, it is currently unmuted, so mute it.
             if (!muted) {
                 audioRef.current.volume = 0;
-                setVolume(0);
                 setMuted(true);
             } else {
                 audioRef.current.volume = volume;
@@ -51,7 +50,7 @@ export default function SignInBgm() {
         }
     };
 
-    // Optional: You can add a volume control slider and bind it to the audio element
+    // You can add a volume control slider and bind it to the audio element
     const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newVolume = parseFloat(e.target.value);
         setVolume(newVolume);
@@ -78,7 +77,7 @@ export default function SignInBgm() {
                 min="0"
                 max="1"
                 step="0.01"
-                value={volume}
+                value={muted? 0 : volume}
                 onChange={handleVolumeChange}
                 className="w-24 accent-yellow-400"
             />

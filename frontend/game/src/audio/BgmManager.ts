@@ -1,32 +1,62 @@
+import Phaser from 'phaser';
+
 export class BgmManager {
     private scene: Phaser.Scene;
     private currentBgmKey: string | null = null;
+    private currentSong: Phaser.Sound.BaseSound | null = null;
 
     constructor(scene: Phaser.Scene) {
         this.scene = scene;
     }
 
     // If the same bgm is already playing, do nothing. Otherwise, stop current bgm and play the new one.
-    play(song : string) {
+    play(song: string) {
         if (this.currentBgmKey === song) {
             return;
         }
 
-        if (this.currentBgmKey) {
-            this.scene.sound.stopByKey(this.currentBgmKey);
+        if (this.currentSong) {
+           this.currentSong.stop();
+           this.currentSong.destroy();
         }
 
-        this.scene.sound.play(song, { loop: true, volume: 0.5 });
         this.currentBgmKey = song;
+        this.currentSong = this.scene.sound.add(song, {
+            loop: true,
+            volume: 0.5,
+        });
+        this.currentSong.play();
     }
-    
-    stop() {
+
+    setVolume(volume: number) {
+        if (this.currentSong) {
+            (this.currentSong as Phaser.Sound.WebAudioSound).setVolume(volume);
+        }
+    }
+
+
+    stop () {
         if (!this.currentBgmKey) {
             return;
         }
-        const key: string = this.currentBgmKey;
-        this.scene.sound.stopByKey(key);
+        this.currentSong?.stop();
+        this.currentSong?.destroy();
         this.currentBgmKey = null;
+        this.currentSong = null;
+    }
+
+    pause() {
+        if (!this.currentBgmKey) {
+            return;
+        }
+        this.currentSong?.pause();
+    }
+
+    resume() {
+        if (!this.currentBgmKey) {
+            return;
+        }
+        this.currentSong?.resume();     
     }
 
 
@@ -39,10 +69,5 @@ export class BgmManager {
         } else {
             this.play('end_game_bgm');
         }
-    }
-
-    reset() {
-        this.stop();
-        this.currentBgmKey = null;
     }
 }

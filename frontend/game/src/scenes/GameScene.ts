@@ -37,7 +37,6 @@ export default class GameScene extends Phaser.Scene {
   constructor() { super('GameScene'); }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
-
   create(data: { initialState: any, ws: WebSocket, levelId: string }) {
     this.ws = data.ws;
     this.levelId = data.levelId;
@@ -45,7 +44,6 @@ export default class GameScene extends Phaser.Scene {
 
     // Update bgm based on wave changes, which are part of the state sent by the server
       this.sound.pauseOnBlur = false; // Keep music playing even if the game loses focus
-      this.bgm.reset();
       this.bgm.updateForWave(1); // Start with first wave bgm on first interaction
 
 
@@ -56,13 +54,14 @@ export default class GameScene extends Phaser.Scene {
     new MapRenderer(this, this.tileSize, this.offsetX, this.offsetY, this.gridWidth, this.gridHeight).render(mapData);
 
     this.entities     = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
-    this.overlay      = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
+    this.overlay      = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear(), (v) => this.bgm.setVolume(v));
+    this.events.on('game.resumed', () => this.bgm.resume());
     this.upgradePanel = new TowerUpgradePanel(
       this,
       (towerId, birdType) => this.sendWs('game.action.evolve_tower', { tower_id: towerId, bird_type: birdType }),
       () => this.currentEssence,
     );
-    this.hud          = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); });
+    this.hud          = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); this.bgm.pause(); });
     this.quiz         = new QuizManager(this, this.ws);
     this.quiz.createHUD();
     
