@@ -15,6 +15,8 @@ export class QuizManager {
   constructor(
     private scene: Phaser.Scene,
     private ws: WebSocket | null,
+    private onQuizOpen: () => void,
+    private onQuizClose: () => void
   ) {}
 
   /** Creates the floating "answer a quiz to start" prompt and the QUIZ button. */
@@ -22,7 +24,7 @@ export class QuizManager {
     const quizBtn = this.scene.add.sprite(1800, 640, 'btn_orange_round')
       .setDepth(30).setScale(1.0).setInteractive({ useHandCursor: true });
     const quizLabel = this.scene.add.text(1800, 640, 'QUIZ', {
-      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontFamily: '"Concert One", system-ui',
       fontSize: '24px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(31);
 
@@ -34,7 +36,7 @@ export class QuizManager {
     container.add([
       this.scene.add.image(0, 0, 'textbox_blank_side').setFlipX(true).setOrigin(0.5),
       this.scene.add.text(0, -10, 'Answer one quiz correctly\nto start the game!', {
-        fontFamily: '"Concert One", system-ui, sans-serif',
+        fontFamily: '"Concert One", system-ui',
         fontSize: '22px', color: '#000000ff', align: 'center',
       }).setOrigin(0.5),
     ]);
@@ -115,11 +117,13 @@ export class QuizManager {
     overlay.appendChild(iframe);
     parent.appendChild(overlay);
 
+    this.onQuizOpen();
+
     this.messageHandler = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
       const packet = event.data;
       if (packet.type === 'quiz-submit') this.submitAnswer(packet.index);
-      else if (packet.type === 'quiz-close') this.clear();
+      else if (packet.type === 'quiz-close') { this.clear(); this.onQuizClose(); }
       else if (packet.type === 'quiz-next') this.request(true);
     };
     window.addEventListener('message', this.messageHandler);

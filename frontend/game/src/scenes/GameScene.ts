@@ -14,7 +14,8 @@ export default class GameScene extends Phaser.Scene {
   private levelId = '';
   private sessionId = '';
   private currentEssence = 0;
-  private currentWave : number = 0;
+  private currentWave: number = 0;
+  private quizOpen = false;
 
   // Grid params
   private tileSize = 0;
@@ -43,8 +44,8 @@ export default class GameScene extends Phaser.Scene {
     this.bgm = new BgmManager(this);
 
     // Update bgm based on wave changes, which are part of the state sent by the server
-      this.sound.pauseOnBlur = false; // Keep music playing even if the game loses focus
-      this.bgm.updateForWave(1); // Start with first wave bgm on first interaction
+    this.sound.pauseOnBlur = false; // Keep music playing even if the game loses focus
+    this.bgm.updateForWave(1); // Start with first wave bgm on first interaction
 
 
     const mapData = data.initialState?.map;
@@ -52,18 +53,31 @@ export default class GameScene extends Phaser.Scene {
 
     this.initGrid(mapData);
     new MapRenderer(this, this.tileSize, this.offsetX, this.offsetY, this.gridWidth, this.gridHeight).render(mapData);
-    this.entities     = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
-    this.overlay      = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear(), (v) => this.bgm.setVolume(v), this.ws);
+    this.entities = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
+    this.overlay = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear(), (v) => this.bgm.setVolume(v), this.ws);
     this.events.on('game.resumed', () => this.bgm.resume());
     this.upgradePanel = new TowerUpgradePanel(
       this,
       (towerId, birdType) => this.sendWs('game.action.evolve_tower', { tower_id: towerId, bird_type: birdType }),
       () => this.currentEssence,
     );
-    this.hud          = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); this.bgm.pause(); });
-    this.quiz         = new QuizManager(this, this.ws);
+    this.hud = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); this.bgm.pause(); });
+    this.quiz = new QuizManager(this, this.ws, 
+      () => { this.quizOpen = true;
+              this.tweens.pauseAll();
+              this.anims.pauseAll();
+              this.sendWs('game.pause');
+              this.bgm.pause(); },
+      () => { this.quizOpen = false;
+              this.tweens.resumeAll();
+              this.anims.resumeAll();
+              this.sendWs('game.resume');
+              this.bgm.resume(); }
+      );
+ 
+
     this.quiz.createHUD();
-    
+
 
     this.drag = new DragController(
       this,
@@ -89,20 +103,20 @@ export default class GameScene extends Phaser.Scene {
   }
 
   update() {
-    if (this.overlay.isPaused()) return;
+    if (this.overlay.isPaused() ||  this.quizOpen) return;
     this.entities.interpolate();
   }
 
   // ─── Grid ────────────────────────────────────────────────────────────────────
 
   private initGrid(mapData: any) {
-    this.gridWidth  = mapData.width  || 18;
+    this.gridWidth = mapData.width || 18;
     this.gridHeight = mapData.height || 12;
-    this.tileSize   = Math.floor(Math.min(this.scale.width / this.gridWidth, this.scale.height / this.gridHeight));
-    this.offsetX    = (this.scale.width  - this.gridWidth  * this.tileSize) / 2;
-    this.offsetY    = (this.scale.height - this.gridHeight * this.tileSize) / 2;
-    this.enemyPath  = mapData.enemy_path || [];
-    this.obstacles  = mapData.objects    || [];
+    this.tileSize = Math.floor(Math.min(this.scale.width / this.gridWidth, this.scale.height / this.gridHeight));
+    this.offsetX = (this.scale.width - this.gridWidth * this.tileSize) / 2;
+    this.offsetY = (this.scale.height - this.gridHeight * this.tileSize) / 2;
+    this.enemyPath = mapData.enemy_path || [];
+    this.obstacles = mapData.objects || [];
   }
 
   // ─── WebSocket ───────────────────────────────────────────────────────────────
@@ -121,15 +135,15 @@ export default class GameScene extends Phaser.Scene {
     switch (msg.type) {
       case 'game.state':
       case 'game.session.started':
-        if (!this.overlay.isPaused()) this.updateFromState(msg.data);
+        if (!this.overlay.isPaused() && !this.quizOpen) this.updateFromState(msg.data);
         break;
-      case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
-      case 'game.over':             this.upgradePanel.hide(); this.overlay.showMistakesSummaryWindow(false); break;
-      case 'game.victory':          this.upgradePanel.hide(); this.overlay.showMistakesSummaryWindow(true);  break;
-      case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
+      case 'game.action.rejected': this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
+      case 'game.over': this.upgradePanel.hide(); this.overlay.showMistakesSummaryWindow(false); break;
+      case 'game.victory': this.upgradePanel.hide(); this.overlay.showMistakesSummaryWindow(true); break;
+      case 'game.quiz.presented': this.quiz.showWindow(msg.data); break;
       case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
-      case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
-      case 'game.exited':           this.overlay.completePendingExit(); break;
+      case 'game.quiz.result': this.quiz.handleResult(msg.data); break;
+      case 'game.exited': this.overlay.completePendingExit(); break;
     }
 
     if (msg.type == 'game.state') {
@@ -156,10 +170,10 @@ export default class GameScene extends Phaser.Scene {
   private updateFromState(state: any) {
     if (!state) return;
     if (state.session_id !== undefined) this.sessionId = state.session_id;
-    if (state.essence    !== undefined) this.currentEssence = state.essence;
+    if (state.essence !== undefined) this.currentEssence = state.essence;
     this.hud.update({ health: state.health, essence: state.essence, wave: state.wave });
-    if (state.birds       !== undefined) this.entities.syncTowers(state.birds);
-    if (state.smogs       !== undefined) this.entities.syncSmogs(state.smogs);
+    if (state.birds !== undefined) this.entities.syncTowers(state.birds);
+    if (state.smogs !== undefined) this.entities.syncSmogs(state.smogs);
     if (state.projectiles !== undefined) this.entities.syncProjectiles(state.projectiles);
   }
 
