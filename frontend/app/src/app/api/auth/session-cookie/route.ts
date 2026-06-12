@@ -29,6 +29,7 @@ export async function POST(request: Request) {
   return NextResponse.json({ status: 'ok' });
 }
 
+// delete means
 export async function DELETE() {
   const cookieStore = await cookies();
   cookieStore.set(cookieName, '', {

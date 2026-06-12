@@ -11,6 +11,7 @@ import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
 import  SignInBgm  from './SignInBgm';
 
+// s
 function getDisplayName(session: Session) {
   const fullName = session.user.user_metadata?.full_name;
   const name = session.user.user_metadata?.name;

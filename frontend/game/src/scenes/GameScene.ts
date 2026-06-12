@@ -52,9 +52,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.initGrid(mapData);
     new MapRenderer(this, this.tileSize, this.offsetX, this.offsetY, this.gridWidth, this.gridHeight).render(mapData);
-
     this.entities     = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
-    this.overlay      = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear(), (v) => this.bgm.setVolume(v));
+    this.overlay      = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear(), (v) => this.bgm.setVolume(v), this.ws);
     this.events.on('game.resumed', () => this.bgm.resume());
     this.upgradePanel = new TowerUpgradePanel(
       this,

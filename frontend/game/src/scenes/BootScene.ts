@@ -61,7 +61,8 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('icon_essence', '/game/assets/gui/icons/Icon_Small_CoinDollar.svg');
     this.load.svg('icon_pause', '/game/assets/gui/icons/Icon_Small_WhiteOutline_Pause.svg');
     this.load.svg('icon_volume_thumb', '/game/assets/gui/sliders/ScrollBar_Blank_Button.svg');
-    this.load.svg('icon_volume_track', '/game/assets/gui/sliders/ScrollBar_Blank_Base.svg');
+    this.load.svg('icon_blank_volume_track', '/game/assets/gui/sliders/ScrollBar_Blank_Base.svg');
+    this.load.svg('icon_blue_volume_track', '/game/assets/gui/sliders/ScrollBar_Blue_Base.svg');
     this.load.svg('icon_pointer', '/game/assets/gui/icons/ScrollBar_Blank_Pointer.svg');
 
     // Preload bird item assets
@@ -70,6 +71,7 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_green_round', '/game/assets/gui/buttons_text/ButtonText_Small_Green_Round.svg', { width: 200, height: 80 });
     this.load.svg('textbox_blank_side', '/game/assets/gui/boxes_banners/TextBox_Blank_Side.svg', { width: 450, height: 160 });
     this.load.image('head_sparrow', '/game/assets/birds/sparrow_head.png');
     this.load.image('head_woodpecker', '/game/assets/birds/woodpecker_head.png');
