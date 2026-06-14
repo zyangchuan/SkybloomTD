@@ -40,7 +40,7 @@ export class GameOverlay {
     backdrop.setInteractive(new Phaser.Geom.Rectangle(-2000, -2000, 6000, 5000), Phaser.Geom.Rectangle.Contains).setDepth(100);
 
     const dialog = this.scene.add.nineslice(940, 555, 'box_orange_square', undefined, 610, 700, 64, 64, 64, 64).setDepth(101);
-    const title  = this.scene.add.text(940, 320, 'PAUSED', {
+    const title  = this.scene.add.text(940, 300, 'PAUSED', {
       fontFamily: "Concert One", fontSize: '56px', color: '#451a03',
     }).setOrigin(0.5).setDepth(102);
 
@@ -48,16 +48,21 @@ export class GameOverlay {
     const resumeLabel = this.scene.add.text(940, 400, 'RESUME', {
       fontFamily: "Concert One", fontSize: '24px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(103);
+
+     // need to remove the lister for ESC keystroke 
+
+    const closeWindow = () => {
+          this.sendWs('game.resume');
+          this.scene.tweens.resumeAll();
+          this.scene.anims.resumeAll();
+          [backdrop, dialog, title, resumeBtn, resumeLabel, restartBtn, restartLabel, exitBtn, exitLabel, volumeSlider, Music].forEach(o => o.destroy());
+          this.pauseWindowOpen = false;
+          this.scene.events.emit('game.resumed');
+          this.scene.input.keyboard?.off('keydown-ESC', closeWindow); };
+
     resumeBtn.on('pointerover', () => { resumeBtn.setScale(1.18); resumeLabel.setScale(1.08).setColor('#fef3c7'); });
     resumeBtn.on('pointerout',  () => { resumeBtn.setScale(1.1);  resumeLabel.setScale(1.0).setColor('#ffffff'); });
-    resumeBtn.on('pointerdown', () => {
-      this.sendWs('game.resume');
-      this.scene.tweens.resumeAll();
-      this.scene.anims.resumeAll();
-      [backdrop, dialog, title, resumeBtn, resumeLabel, restartBtn, restartLabel, exitBtn, exitLabel, volumeSlider, Music].forEach(o => o.destroy());
-      this.pauseWindowOpen = false;
-      this.scene.events.emit('game.resumed');
-    });
+    resumeBtn.on('pointerdown', closeWindow);
 
     const restartBtn   = this.scene.add.sprite(940, 500, 'btn_green_round').setScale(1.1).setDepth(102).setInteractive({ useHandCursor: true });
     const restartLabel = this.scene.add.text(940, 500, 'RESTART', {
@@ -70,6 +75,7 @@ export class GameOverlay {
     const volumeSlider = new VolumeSlider(this.scene, 944, 810, (volume) => {
       this.setVolume(volume);
     });
+
     volumeSlider.setDepth(103);
     const Music  = this.scene.add.text(940, 700, 'MUSIC', {
       fontFamily: "Concert One", fontSize: '56px', color: '#451a03',
@@ -82,6 +88,12 @@ export class GameOverlay {
     exitBtn.on('pointerover', () => { exitBtn.setScale(1.18); exitLabel.setScale(1.08); });
     exitBtn.on('pointerout',  () => { exitBtn.setScale(1.1);  exitLabel.setScale(1.0); });
     exitBtn.on('pointerdown', () => this.exitGameThen(() => this.navigateToDashboard()));
+
+   
+    this.scene.input.keyboard?.on('keydown-ESC', 
+        this.pauseWindowOpen
+        ? closeWindow : () => {}
+     );
   }
 
   // ─── Mistakes summary ────────────────────────────────────────────────────────
@@ -168,3 +180,4 @@ export class GameOverlay {
     window.location.href = (doc && ch) ? `/dashboard/games/${doc}/chapters/${ch}` : '/dashboard';
   }
 }
+

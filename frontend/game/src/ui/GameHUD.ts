@@ -26,6 +26,8 @@ export class GameHUD {
       fontFamily: "Concert One",
       fontSize: '54px', color: '#451a03',
     }).setOrigin(0, 0.5).setDepth(30);
+ 
+    
 
     const pauseBtnBg = scene.add
       .nineslice(1840, 69, 'box_orange_square', undefined, 100, 90, 32, 32, 32, 32)
@@ -37,6 +39,8 @@ export class GameHUD {
     pauseBtnBg.on('pointerover', () => { pauseBtnBg.setScale(1.1); icon_pause.setDisplaySize(60, 60); });
     pauseBtnBg.on('pointerout', () => { pauseBtnBg.setScale(1.0); icon_pause.setDisplaySize(50, 50); })
     pauseBtnBg.on('pointerdown', onPause);
+    scene.input.keyboard?.on('keydown-ESC', onPause);
+   
 
     const speedBtnBg = scene.add
       .nineslice(1700, 69, 'box_orange_square', undefined, 100, 90, 32, 32, 32, 32)
@@ -49,7 +53,7 @@ export class GameHUD {
     speedBtnBg.on('pointerover', () => { speedBtnBg.setScale(1.1); this.speedText.setScale(1.1).setColor('#f3f1f3'); });
     speedBtnBg.on('pointerout', () => { speedBtnBg.setScale(1.0); this.speedText.setScale(1.0).setColor('#000000'); })
     speedBtnBg.on('pointerdown', () => {
-      norSpeed = !norSpeed;
+    norSpeed = !norSpeed;
 
      if (norSpeed) {
       this.speedText.setText('X1');
