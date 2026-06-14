@@ -39,7 +39,7 @@ export class GameOverlay {
     backdrop.fillStyle(0x000000, 0.65).fillRect(-2000, -2000, 6000, 5000);
     backdrop.setInteractive(new Phaser.Geom.Rectangle(-2000, -2000, 6000, 5000), Phaser.Geom.Rectangle.Contains).setDepth(100);
 
-    const dialog = this.scene.add.nineslice(940, 555, 'box_orange_square', undefined, 610, 600, 64, 64, 64, 64).setDepth(101);
+    const dialog = this.scene.add.nineslice(940, 555, 'box_orange_square', undefined, 610, 700, 64, 64, 64, 64).setDepth(101);
     const title  = this.scene.add.text(940, 320, 'PAUSED', {
       fontFamily: "Concert One", fontSize: '56px', color: '#451a03',
     }).setOrigin(0.5).setDepth(102);
@@ -67,7 +67,7 @@ export class GameOverlay {
     restartBtn.on('pointerout',  () => { restartBtn.setScale(1.1);  restartLabel.setScale(1.0); });
     restartBtn.on('pointerdown', () => restartGame(this.scene, this.ws, this.getSessionId()));
 
-    const volumeSlider = new VolumeSlider(this.scene, 944, 777, (volume) => {
+    const volumeSlider = new VolumeSlider(this.scene, 944, 810, (volume) => {
       this.setVolume(volume);
     });
     volumeSlider.setDepth(103);
