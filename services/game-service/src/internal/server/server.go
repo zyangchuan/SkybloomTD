@@ -34,6 +34,9 @@ const awardQuizEssenceAction = "award_quiz_essence"
 const pauseGameAction = "pause_game"
 const resumeGameAction = "resume_game"
 
+// add action to speed up game
+const setSpeedAction = "set_speed"
+
 const (
 	waveClearDelayTicks     = int64(60)
 	smogSpawnIntervalTicks  = int64(40)
@@ -315,6 +318,26 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				default:
 				}
 			}
+		case "game.speed":
+    		var req struct {
+       			 Multiplier int `json:"multiplier"`
+  		    }
+   		    if err := decodeMessageData(message.Data, &req); err != nil || req.Multiplier < 1 {
+      			req.Multiplier = 1
+    		}
+			if req.Multiplier == 2 {
+				req.Multiplier = 2
+			}
+  		    if req.Multiplier > 4 {
+   			    req.Multiplier = 4
+   		    }
+   		   if gameLoop != nil && !gameLoop.stopped() {
+   			    select {
+				case gameLoop.actions <- clientAction{Type: setSpeedAction, SpeedMultiplier: req.Multiplier}:
+       		    default:
+       			}
+		   }
+		   
 		case "game.resume":
 			if gameLoop != nil && !gameLoop.stopped() {
 				select {

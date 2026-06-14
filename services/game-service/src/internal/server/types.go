@@ -143,6 +143,9 @@ type clientAction struct {
 	EvolveTower   evolveTowerRequest
 	EssenceReward int
 	Result        chan actionResult
+
+	// add multiplier to speed the pace of game
+	SpeedMultiplier int
 }
 
 type actionResult struct {
@@ -189,6 +192,8 @@ type runtimeSession struct {
 	waveStartedAtTick int64
 	waveSpawned       int
 	nextWaveTick      int64
+	//addd multiplier to speed up the pace of game
+	speedMultiplier int
 }
 
 type placedBird struct {
