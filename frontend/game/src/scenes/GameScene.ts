@@ -16,6 +16,7 @@ export default class GameScene extends Phaser.Scene {
   private currentEssence = 0;
   private currentWave: number = 0;
   private quizOpen = false;
+  private norSpeed = true;
 
   // Grid params
   private tileSize = 0;
@@ -61,7 +62,7 @@ export default class GameScene extends Phaser.Scene {
       (towerId, birdType) => this.sendWs('game.action.evolve_tower', { tower_id: towerId, bird_type: birdType }),
       () => this.currentEssence,
     );
-    this.hud = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); this.bgm.pause(); });
+    this.hud = new GameHUD(this, () => { this.upgradePanel.hide(); this.overlay.showPauseWindow(); this.bgm.pause(); }, this.norSpeed, (isDouble) => this.sendWs('game.speed', { multiplier: isDouble ? 2 : 1 }));
     this.quiz = new QuizManager(this, this.ws, 
       () => { this.quizOpen = true;
               this.tweens.pauseAll();
@@ -96,7 +97,7 @@ export default class GameScene extends Phaser.Scene {
     new BirdTray(
       this,
       () => this.drag.isDragging(),
-      (birdType) => [...this.entities.towers.values()].some(t => t.birdType === `evolve_${birdType}`),
+      /*birdType) => [...this.entities.towers.values()].some(t => t.birdType === `evolve_${birdType}`), */
     );
     this.setupWebSocket(data.levelId);
     this.setupShutdown();

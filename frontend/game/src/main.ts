@@ -15,7 +15,6 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [BootScene, GameScene],
 };
 
-
 const game = new Phaser.Game(config);
 
 // Bind simple dynamic resize listener to refresh scale perfectly when screen metrics change on mobile
