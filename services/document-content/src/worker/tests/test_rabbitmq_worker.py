@@ -28,12 +28,12 @@ class RabbitMQWorkerTest(unittest.TestCase):
 
         result = process_job(
             job,
-            process_ocr_fn=lambda source, user_id, document_id, filename: {
+            process_ocr_fn=lambda source, user_id, document_id: {
                 "status": "ocr_completed",
                 "source": source,
                 "user_id": user_id,
                 "document_id": document_id,
-                "filename": filename,
+                "filename": source.get("filename"),
             },
             upload_ocr_output_fn=lambda ocr_result: {
                 "status": "uploaded",
@@ -134,10 +134,13 @@ class RabbitMQWorkerTest(unittest.TestCase):
     def document_job():
         return {
             "task_id": "task-1",
-            "source": "/tmp/input.pdf",
+            "source": {
+                "bucket": "documents",
+                "key": "source/input.pdf",
+                "filename": "input.pdf",
+            },
             "user_id": "user-1",
             "document_id": "document-1",
-            "filename": "input.pdf",
         }
 
     @staticmethod

@@ -3,7 +3,6 @@ package taskstatus
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -16,13 +15,7 @@ type Store struct {
 	ttl    time.Duration
 }
 
-type NoopStore struct{}
-
 func New(redisURL string, ttl time.Duration) (*Store, error) {
-	if strings.TrimSpace(redisURL) == "" {
-		return nil, nil
-	}
-
 	options, err := redis.ParseURL(redisURL)
 	if err != nil {
 		return nil, err
@@ -64,14 +57,6 @@ func (s *Store) Close() error {
 		return nil
 	}
 	return s.client.Close()
-}
-
-func (NoopStore) Set(context.Context, models.TaskStatus) error {
-	return nil
-}
-
-func (NoopStore) Get(context.Context, string) (models.TaskStatus, error) {
-	return models.TaskStatus{}, models.ErrTaskStatusNotFound
 }
 
 func key(taskID string) string {

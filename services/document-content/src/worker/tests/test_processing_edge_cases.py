@@ -34,10 +34,13 @@ from app.rabbitmq_worker import process_job  # noqa: E402
 def _job(**overrides):
     base = {
         "task_id": "task-1",
-        "source": "/tmp/input.pdf",
+        "source": {
+            "bucket": "documents",
+            "key": "source/input.pdf",
+            "filename": "input.pdf",
+        },
         "user_id": "user-1",
         "document_id": "document-1",
-        "filename": "input.pdf",
     }
     base.update(overrides)
     return base
@@ -114,7 +117,7 @@ class TestStatusRecordingOrder(unittest.TestCase):
         work_started = []
         statuses = []
 
-        def ocr_that_tracks_call_order(source, user_id, document_id, filename):
+        def ocr_that_tracks_call_order(source, user_id, document_id):
             work_started.append(len(statuses))  # how many statuses when OCR began
             return {"status": "ocr_completed"}
 
@@ -199,24 +202,26 @@ class TestErrorMessagePropagation(unittest.TestCase):
 
 class TestJobFieldForwarding(unittest.TestCase):
     def test_ocr_fn_receives_all_job_fields(self):
-        """process_job must forward source, user_id, document_id, filename to OCR."""
+        """process_job must forward source fields to OCR."""
         received = {}
 
-        def capture_ocr(source, user_id, document_id, filename):
+        def capture_ocr(source, user_id, document_id):
             received.update(
                 source=source,
                 user_id=user_id,
                 document_id=document_id,
-                filename=filename,
             )
             return {"status": "ocr_completed"}
 
         process_job(
             _job(
-                source="/data/upload.pdf",
+                source={
+                    "bucket": "documents",
+                    "key": "source/lecture.pdf",
+                    "filename": "lecture.pdf",
+                },
                 user_id="user-42",
                 document_id="doc-99",
-                filename="lecture.pdf",
             ),
             process_ocr_fn=capture_ocr,
             upload_ocr_output_fn=lambda r: {"status": "uploaded"},
@@ -224,10 +229,9 @@ class TestJobFieldForwarding(unittest.TestCase):
             set_task_status_fn=_record([]),
         )
 
-        self.assertEqual("/data/upload.pdf", received["source"])
+        self.assertEqual("source/lecture.pdf", received["source"]["key"])
         self.assertEqual("user-42", received["user_id"])
         self.assertEqual("doc-99", received["document_id"])
-        self.assertEqual("lecture.pdf", received["filename"])
 
     def test_set_task_status_receives_correct_task_and_document_ids(self):
         statuses = []

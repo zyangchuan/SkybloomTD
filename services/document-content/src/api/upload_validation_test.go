@@ -47,7 +47,7 @@ func TestUploadFileAcceptsGameNameAtMaxLength(t *testing.T) {
 
 	uploader.
 		On("UploadSource", mock.Anything, mock.Anything, "user-1", mock.MatchedBy(isUUID), "notes.pdf", "application/pdf").
-		Return(models.SourceRef{Type: "s3", Bucket: "documents", Key: "source.pdf", Filename: "notes.pdf"}, nil).
+		Return(models.SourceRef{Bucket: "documents", Key: "source.pdf", Filename: "notes.pdf"}, nil).
 		Once()
 	documents.
 		On("CreateQueuedDocument", mock.Anything, mock.MatchedBy(func(doc models.Document) bool {
@@ -64,7 +64,7 @@ func TestUploadFileAcceptsGameNameAtMaxLength(t *testing.T) {
 		Return(nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBodyWithFields(t, "notes.pdf", "application/pdf", []byte("pdf bytes"), map[string]string{
 		"game_name": exactName,
 	})
@@ -120,7 +120,7 @@ func TestUploadFileSanitizesPathTraversalInFilename(t *testing.T) {
 			}),
 			mock.Anything,
 		).
-		Return(models.SourceRef{Type: "s3", Bucket: "documents", Key: "source.pdf", Filename: "passwd.pdf"}, nil).
+		Return(models.SourceRef{Bucket: "documents", Key: "source.pdf", Filename: "passwd.pdf"}, nil).
 		Once()
 	documents.
 		On("CreateQueuedDocument", mock.Anything, mock.Anything).
@@ -135,7 +135,7 @@ func TestUploadFileSanitizesPathTraversalInFilename(t *testing.T) {
 		Return(nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBodyWithFields(
 		t,
 		"../../../etc/passwd.pdf",
@@ -173,7 +173,7 @@ func TestUploadFileSanitizesWindowsPathSeparator(t *testing.T) {
 			}),
 			mock.Anything,
 		).
-		Return(models.SourceRef{Type: "s3", Bucket: "documents", Key: "source.pdf", Filename: "notes.pdf"}, nil).
+		Return(models.SourceRef{Bucket: "documents", Key: "source.pdf", Filename: "notes.pdf"}, nil).
 		Once()
 	documents.
 		On("CreateQueuedDocument", mock.Anything, mock.Anything).
@@ -188,7 +188,7 @@ func TestUploadFileSanitizesWindowsPathSeparator(t *testing.T) {
 		Return(nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBodyWithFields(
 		t,
 		`C:\Users\attacker\notes.pdf`,
@@ -242,7 +242,7 @@ func TestGetTaskStatusReturnsNotFoundForUnknownTask(t *testing.T) {
 		Return(models.TaskStatus{}, models.ErrTaskStatusNotFound).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, nil, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, nil, taskStatus)
 	request := httptest.NewRequest(http.MethodGet, "/tasks/unknown-task/status", nil)
 	response := httptest.NewRecorder()
 

@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"os"
-	"path/filepath"
 	"regexp"
 	"testing"
 	"time"
@@ -58,7 +56,7 @@ func TestGetTaskStatusReturnsRedisStatus(t *testing.T) {
 		Return(expected, nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, nil, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, nil, taskStatus)
 	request := httptest.NewRequest(http.MethodGet, "/tasks/task-1/status", nil)
 	response := httptest.NewRecorder()
 
@@ -77,7 +75,7 @@ func TestGetTaskStatusReturnsNotFoundWhenRedisStatusIsMissing(t *testing.T) {
 		Return(models.TaskStatus{}, models.ErrTaskStatusNotFound).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, nil, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, nil, taskStatus)
 	request := httptest.NewRequest(http.MethodGet, "/tasks/expired-task/status", nil)
 	response := httptest.NewRecorder()
 
@@ -94,7 +92,7 @@ func TestGetTaskStatusReturnsServiceUnavailableWhenRedisFails(t *testing.T) {
 		Return(models.TaskStatus{}, errors.New("redis unavailable")).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, nil, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, nil, taskStatus)
 	request := httptest.NewRequest(http.MethodGet, "/tasks/task-1/status", nil)
 	response := httptest.NewRecorder()
 
@@ -134,7 +132,7 @@ func TestListDocumentsReturnsCurrentUserDocuments(t *testing.T) {
 		Return(expected, nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodGet, "/documents", nil)
 	request.Header.Set("X-Authenticated-User-Id", " user/123 ")
 	response := httptest.NewRecorder()
@@ -165,7 +163,7 @@ func TestListDocumentsReturnsServiceUnavailableWhenRepositoryFails(t *testing.T)
 		Return(nil, errors.New("database unavailable")).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodGet, "/documents", nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -201,7 +199,7 @@ func TestListDocumentChaptersReturnsCurrentUserChapters(t *testing.T) {
 		Return(expected, nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodGet, "/documents/"+documentID.String()+"/chapters", nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -235,7 +233,7 @@ func TestListDocumentChaptersReturnsNotFoundWhenDocumentDoesNotBelongToUser(t *t
 		Return(nil, models.ErrDocumentNotFound).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodGet, "/documents/"+documentID.String()+"/chapters", nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -273,7 +271,7 @@ func TestListChapterSubChaptersReturnsCurrentUserSubChapters(t *testing.T) {
 		Return(expected, nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodGet, "/chapters/"+chapterID.String()+"/sub-chapters", nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -307,7 +305,7 @@ func TestListChapterSubChaptersReturnsNotFoundWhenChapterDoesNotBelongToUser(t *
 		Return(nil, models.ErrChapterNotFound).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodGet, "/chapters/"+chapterID.String()+"/sub-chapters", nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -323,19 +321,15 @@ func TestDeleteDocumentDeletesAssetsAndDatabaseRows(t *testing.T) {
 	uploader := mocks.NewMockSourceUploader(t)
 	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	userID := models.DatabaseUUID("user-1", "user")
-	sourceBucket := "documents"
-	sourceKey := "dev/users/user-1/documents/33333333-3333-3333-3333-333333333333/source/lesson.pdf"
 	outputBucket := "documents"
 	outputKey := "dev/users/user-1/documents/33333333-3333-3333-3333-333333333333/output.md"
 	document := models.Document{
-		ID:           documentID,
-		UserID:       userID,
-		Filename:     "lesson.pdf",
-		TaskID:       "cccccccccccccccccccccccccccccccc",
-		SourceBucket: &sourceBucket,
-		SourceKey:    &sourceKey,
-		S3Bucket:     &outputBucket,
-		S3Key:        &outputKey,
+		ID:       documentID,
+		UserID:   userID,
+		Filename: "lesson.pdf",
+		TaskID:   "cccccccccccccccccccccccccccccccc",
+		S3Bucket: &outputBucket,
+		S3Key:    &outputKey,
 	}
 
 	documents.
@@ -343,7 +337,7 @@ func TestDeleteDocumentDeletesAssetsAndDatabaseRows(t *testing.T) {
 		Return(document, nil).
 		Once()
 	uploader.
-		On("DeleteDocumentAssets", mock.Anything, document).
+		On("DeleteDocumentFiles", mock.Anything, document).
 		Return(nil).
 		Once()
 	documents.
@@ -351,7 +345,7 @@ func TestDeleteDocumentDeletesAssetsAndDatabaseRows(t *testing.T) {
 		Return(nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, uploader, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, uploader, documents, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -394,7 +388,7 @@ func TestDeleteDocumentReturnsNotFoundWhenDocumentDoesNotBelongToUser(t *testing
 		Return(models.Document{}, models.ErrDocumentNotFound).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, nil, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, nil, documents, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -410,15 +404,11 @@ func TestDeleteDocumentDoesNotDeleteRowsWhenAssetDeletionFails(t *testing.T) {
 	uploader := mocks.NewMockSourceUploader(t)
 	documentID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	userID := models.DatabaseUUID("user-1", "user")
-	sourceBucket := "documents"
-	sourceKey := "dev/users/user-1/documents/33333333-3333-3333-3333-333333333333/source/lesson.pdf"
 	document := models.Document{
-		ID:           documentID,
-		UserID:       userID,
-		Filename:     "lesson.pdf",
-		TaskID:       "cccccccccccccccccccccccccccccccc",
-		SourceBucket: &sourceBucket,
-		SourceKey:    &sourceKey,
+		ID:       documentID,
+		UserID:   userID,
+		Filename: "lesson.pdf",
+		TaskID:   "cccccccccccccccccccccccccccccccc",
 	}
 
 	documents.
@@ -426,11 +416,11 @@ func TestDeleteDocumentDoesNotDeleteRowsWhenAssetDeletionFails(t *testing.T) {
 		Return(document, nil).
 		Once()
 	uploader.
-		On("DeleteDocumentAssets", mock.Anything, document).
+		On("DeleteDocumentFiles", mock.Anything, document).
 		Return(errors.New("s3 unavailable")).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, uploader, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, uploader, documents, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -458,7 +448,7 @@ func TestDeleteDocumentReturnsServiceUnavailableWhenDatabaseDeleteFails(t *testi
 		Return(document, nil).
 		Once()
 	uploader.
-		On("DeleteDocumentAssets", mock.Anything, document).
+		On("DeleteDocumentFiles", mock.Anything, document).
 		Return(nil).
 		Once()
 	documents.
@@ -466,7 +456,7 @@ func TestDeleteDocumentReturnsServiceUnavailableWhenDatabaseDeleteFails(t *testi
 		Return(errors.New("database unavailable")).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, nil, uploader, documents, nil)
+	router := newTestRouterWithDeps(t, config.Config{}, nil, uploader, documents, nil)
 	request := httptest.NewRequest(http.MethodDelete, "/documents/"+documentID.String(), nil)
 	request.Header.Set("X-Authenticated-User-Id", "user-1")
 	response := httptest.NewRecorder()
@@ -483,9 +473,9 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 	documents := mocks.NewMockDocumentStore(t)
 	taskStatus := mocks.NewMockTaskStatusStore(t)
 	source := models.SourceRef{
-		Type:        "s3",
 		Bucket:      "documents",
 		Key:         "users/user_123/documents/document/source/lesson_1.pdf",
+		Prefix:      "users/user_123/documents/document",
 		Filename:    "lesson_1.pdf",
 		ContentType: "application/pdf",
 	}
@@ -515,10 +505,8 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 					document.GameName == defaultTestGameName &&
 					isHexID(document.TaskID) &&
 					!document.IsReady &&
-					document.SourceType == "s3" &&
-					stringValue(document.SourceBucket) == source.Bucket &&
-					stringValue(document.SourceKey) == source.Key &&
-					stringValue(document.SourceContentType) == source.ContentType
+					stringValue(document.S3Bucket) == source.Bucket &&
+					stringValue(document.S3Prefix) == source.Prefix
 			}),
 		).
 		Run(func(args mock.Arguments) {
@@ -559,13 +547,8 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 				}
 				return job.JobType == "document.process" &&
 					isHexID(job.TaskID) &&
-					isHexID(job.OCRTaskID) &&
-					isHexID(job.UploadTaskID) &&
-					isHexID(job.IndexTaskID) &&
-					job.TaskID != job.IndexTaskID &&
 					job.UserID == "user_123" &&
 					isUUID(job.DocumentID) &&
-					job.Filename == "lesson_1.pdf" &&
 					assert.ObjectsAreEqual(source, job.Source)
 			}),
 		).
@@ -576,7 +559,7 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 		Return(nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBody(t, "lesson 1.pdf", "application/pdf", []byte("pdf bytes"))
 	request := httptest.NewRequest(http.MethodPost, "/upload-file", body)
 	request.Header.Set("Content-Type", contentType)
@@ -592,9 +575,6 @@ func TestUploadFilePublishesDocumentJob(t *testing.T) {
 	assert.Equal(t, "user_123", payload["user_id"])
 	assert.Equal(t, publishedJob.DocumentID, payload["document_id"])
 	assert.Equal(t, publishedJob.TaskID, payload["task_id"])
-	assert.Equal(t, publishedJob.OCRTaskID, payload["ocr_task_id"])
-	assert.Equal(t, publishedJob.UploadTaskID, payload["upload_task_id"])
-	assert.Equal(t, publishedJob.IndexTaskID, payload["index_task_id"])
 	assert.Equal(t, defaultTestGameName, payload["game_name"])
 	assert.Equal(t, false, payload["is_ready"])
 	assert.Equal(t, storedDocument.ID.String(), publishedJob.DocumentID)
@@ -651,7 +631,7 @@ func TestUploadFileReturnsServiceUnavailableWhenPublishFails(t *testing.T) {
 	uploader := mocks.NewMockSourceUploader(t)
 	documents := mocks.NewMockDocumentStore(t)
 	taskStatus := mocks.NewMockTaskStatusStore(t)
-	source := models.SourceRef{Type: "s3", Bucket: "documents", Key: "source.pdf", Filename: "source.pdf"}
+	source := models.SourceRef{Bucket: "documents", Key: "source.pdf", Filename: "lesson.pdf"}
 
 	uploader.
 		On("UploadSource", mock.Anything, []byte("pdf bytes"), "user-1", mock.MatchedBy(isUUID), "lesson.pdf", "application/pdf").
@@ -687,7 +667,7 @@ func TestUploadFileReturnsServiceUnavailableWhenPublishFails(t *testing.T) {
 		Return(nil).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBody(t, "lesson.pdf", "application/pdf", []byte("pdf bytes"))
 	request := httptest.NewRequest(http.MethodPost, "/upload-file", body)
 	request.Header.Set("Content-Type", contentType)
@@ -726,7 +706,7 @@ func TestUploadFileDoesNotPublishWhenDocumentCreateFails(t *testing.T) {
 	uploader := mocks.NewMockSourceUploader(t)
 	documents := mocks.NewMockDocumentStore(t)
 	taskStatus := mocks.NewMockTaskStatusStore(t)
-	source := models.SourceRef{Type: "s3", Bucket: "documents", Key: "source.pdf", Filename: "source.pdf"}
+	source := models.SourceRef{Bucket: "documents", Key: "source.pdf", Filename: "source.pdf"}
 
 	uploader.
 		On("UploadSource", mock.Anything, []byte("pdf bytes"), "user-1", mock.MatchedBy(isUUID), "lesson.pdf", "application/pdf").
@@ -737,7 +717,7 @@ func TestUploadFileDoesNotPublishWhenDocumentCreateFails(t *testing.T) {
 		Return(errors.New("database unavailable")).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBody(t, "lesson.pdf", "application/pdf", []byte("pdf bytes"))
 	request := httptest.NewRequest(http.MethodPost, "/upload-file", body)
 	request.Header.Set("Content-Type", contentType)
@@ -755,7 +735,7 @@ func TestUploadFileDoesNotPublishWhenQueuedStatusWriteFails(t *testing.T) {
 	uploader := mocks.NewMockSourceUploader(t)
 	documents := mocks.NewMockDocumentStore(t)
 	taskStatus := mocks.NewMockTaskStatusStore(t)
-	source := models.SourceRef{Type: "s3", Bucket: "documents", Key: "source.pdf", Filename: "source.pdf"}
+	source := models.SourceRef{Bucket: "documents", Key: "source.pdf", Filename: "source.pdf"}
 
 	uploader.
 		On("UploadSource", mock.Anything, []byte("pdf bytes"), "user-1", mock.MatchedBy(isUUID), "lesson.pdf", "application/pdf").
@@ -772,7 +752,7 @@ func TestUploadFileDoesNotPublishWhenQueuedStatusWriteFails(t *testing.T) {
 		Return(errors.New("redis unavailable")).
 		Once()
 
-	router := newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, documents, taskStatus)
+	router := newTestRouterWithDeps(t, config.Config{}, publisher, uploader, documents, taskStatus)
 	body, contentType := multipartBody(t, "lesson.pdf", "application/pdf", []byte("pdf bytes"))
 	request := httptest.NewRequest(http.MethodPost, "/upload-file", body)
 	request.Header.Set("Content-Type", contentType)
@@ -785,68 +765,15 @@ func TestUploadFileDoesNotPublishWhenQueuedStatusWriteFails(t *testing.T) {
 	assert.JSONEq(t, `{"error":"failed to record task status"}`, response.Body.String())
 }
 
-func TestUploadFileFallsBackToTempStorageWhenUploaderIsNil(t *testing.T) {
-	tempDir := t.TempDir()
-	publisher := mocks.NewMockPublisher(t)
-	documents := mocks.NewMockDocumentStore(t)
-	taskStatus := mocks.NewMockTaskStatusStore(t)
-	var publishedJob models.DocumentJob
-	var storedDocument models.Document
-	documents.
-		On("CreateQueuedDocument", mock.Anything, mock.MatchedBy(func(document models.Document) bool {
-			return isUUID(document.ID.String()) &&
-				document.SourceType == "local" &&
-				document.GameName == defaultTestGameName &&
-				stringValue(document.SourcePath) == filepath.Join(tempDir, "user-1", document.ID.String(), "input.txt") &&
-				!document.IsReady
-		})).
-		Run(func(args mock.Arguments) {
-			storedDocument = args.Get(1).(models.Document)
-		}).
-		Return(nil).
-		Once()
-	taskStatus.
-		On("Set", mock.Anything, mock.MatchedBy(func(status models.TaskStatus) bool {
-			return status.Status == models.TaskStatusQueued && status.Error == nil
-		})).
-		Return(nil).
-		Once()
-	publisher.
-		On("Publish", mock.Anything, mock.MatchedBy(isHexID), mock.AnythingOfType("models.DocumentJob")).
-		Run(func(args mock.Arguments) {
-			publishedJob = args.Get(2).(models.DocumentJob)
-		}).
-		Return(nil).
-		Once()
-
-	router := newTestRouterWithDeps(t, config.Config{TempDir: tempDir}, publisher, nil, documents, taskStatus)
-	body, contentType := multipartBody(t, "notes.txt", "text/plain", []byte("plain text"))
-	request := httptest.NewRequest(http.MethodPost, "/upload-file", body)
-	request.Header.Set("Content-Type", contentType)
-	request.Header.Set("X-Authenticated-User-Id", "user-1")
-	response := httptest.NewRecorder()
-
-	router.ServeHTTP(response, request)
-
-	require.Equal(t, http.StatusOK, response.Code)
-	sourcePath, ok := publishedJob.Source.(string)
-	require.True(t, ok)
-	assert.Equal(t, filepath.Join(tempDir, "user-1", publishedJob.DocumentID, "input.txt"), sourcePath)
-	assert.Equal(t, storedDocument.ID.String(), publishedJob.DocumentID)
-	content, err := os.ReadFile(sourcePath)
-	require.NoError(t, err)
-	assert.Equal(t, []byte("plain text"), content)
-}
-
-func newTestRouter(t *testing.T, publisher api.Publisher, uploader api.SourceUploader) *gin.Engine {
-	return newTestRouterWithDeps(t, config.Config{TempDir: t.TempDir()}, publisher, uploader, nil, nil)
+func newTestRouter(t *testing.T, publisher api.Publisher, storage api.StorageClient) *gin.Engine {
+	return newTestRouterWithDeps(t, config.Config{}, publisher, storage, nil, nil)
 }
 
 func newTestRouterWithDeps(
 	t *testing.T,
 	cfg config.Config,
 	publisher api.Publisher,
-	uploader api.SourceUploader,
+	storage api.StorageClient,
 	documents api.DocumentStore,
 	taskStatus api.TaskStatusStore,
 ) *gin.Engine {
@@ -858,10 +785,7 @@ func newTestRouterWithDeps(
 	t.Cleanup(func() {
 		log.SetOutput(previousLogWriter)
 	})
-	if cfg.TempDir == "" {
-		cfg.TempDir = t.TempDir()
-	}
-	return api.NewRouter(cfg, publisher, uploader, documents, taskStatus)
+	return api.NewRouter(cfg, publisher, storage, documents, taskStatus)
 }
 
 func multipartBody(t *testing.T, filename string, contentType string, content []byte) (*bytes.Buffer, string) {

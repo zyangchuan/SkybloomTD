@@ -13,8 +13,8 @@ from .output import (
 from .processing import run_ocr
 
 
-def source_filename(source: dict, fallback: str | None) -> str:
-    name = source.get("filename") or fallback or Path(source["key"]).name
+def source_filename(source: dict) -> str:
+    name = source.get("filename") or Path(source["key"]).name
     suffix = Path(name).suffix or ".pdf"
     return f"input{suffix}"
 
@@ -23,12 +23,8 @@ def resolve_input_file(
     source: str | dict,
     user_id: str,
     document_id: str,
-    filename: str | None,
 ) -> tuple[Path, bool]:
     if isinstance(source, dict):
-        if source.get("type") != "s3":
-            raise ValueError(f"Unsupported OCR source type: {source.get('type')}")
-
         bucket = source["bucket"]
         key = source["key"]
         local_path = (
@@ -36,7 +32,7 @@ def resolve_input_file(
             / "sources"
             / user_id
             / document_id
-            / source_filename(source, filename)
+            / source_filename(source)
         )
         return download_file_from_s3(bucket, key, local_path), True
 
@@ -47,12 +43,12 @@ def process_ocr(
     file_path: str | dict,
     user_id: str = "00000000-0000-0000-0000-000000000123",
     document_id: str | None = None,
-    filename: str | None = None,
 ):
     user_id = safe_path_part(user_id)
     document_id = safe_path_part(document_id or uuid.uuid4().hex)
-    file_path, cleanup_input = resolve_input_file(file_path, user_id, document_id, filename)
-    filename = filename or file_path.name
+    source_filename_value = file_path.get("filename") if isinstance(file_path, dict) else None
+    file_path, cleanup_input = resolve_input_file(file_path, user_id, document_id)
+    filename = source_filename_value or file_path.name
     output_paths = prepare_document_output(user_id, document_id)
 
     if not file_path.exists():
