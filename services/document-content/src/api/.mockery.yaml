@@ -1,0 +1,10 @@
+with-expecter: false
+dir: internal/api/mocks
+outpkg: mocks
+packages:
+  skybloom/document-content-api/internal/api/controllers:
+    interfaces:
+      Publisher:
+      StorageClient:
+      DocumentStore:
+      TaskStatusStore:
