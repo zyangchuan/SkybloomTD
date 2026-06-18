@@ -40,9 +40,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 	}
 
 	statements := []string{
-		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_prefix TEXT`,
+		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_filename TEXT`,
 		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS game_name TEXT`,
-		`UPDATE documents SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(filename, ''), 'Untitled Game') WHERE game_name IS NULL OR game_name = ''`,
+		`UPDATE documents SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(source_filename, ''), 'Untitled Game') WHERE game_name IS NULL OR game_name = ''`,
 		`ALTER TABLE documents ALTER COLUMN game_name SET DEFAULT 'Untitled Game'`,
 		`ALTER TABLE documents ALTER COLUMN game_name SET NOT NULL`,
 		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS task_id TEXT`,

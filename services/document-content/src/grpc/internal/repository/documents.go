@@ -19,8 +19,8 @@ type DocumentRow struct {
 	Title           *string
 	StartLine       *int32
 	EndLine         *int32
+	UserID          uuid.UUID
 	S3Bucket        *string
-	S3Key           *string
 }
 
 type DocumentRepository struct {
@@ -43,8 +43,8 @@ func (r *DocumentRepository) LoadDocumentRow(ctx context.Context, subChapterID u
 			sc.title,
 			sc.start_line,
 			sc.end_line,
-			d.s3_bucket,
-			d.s3_key
+			d.user_id,
+			d.s3_bucket
 		`).
 		Joins("JOIN documents AS d ON sc.document_id = d.id").
 		Where("sc.id = ? AND d.user_id = ?", subChapterID, userID).

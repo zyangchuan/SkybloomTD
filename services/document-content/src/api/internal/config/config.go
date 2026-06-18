@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -31,30 +32,36 @@ func Load() (Config, error) {
 
 	mq := os.Getenv("RABBITMQ_URL")
 	redis := os.Getenv("REDIS_URL")
+	taskStatusTTLSeconds := os.Getenv("TASK_STATUS_TTL_SECONDS")
 	bucket := os.Getenv("AWS_S3_BUCKET")
-	endpoint := os.Getenv("AWS_S3_ENDPOINT_URL") 
+	endpoint := os.Getenv("AWS_S3_ENDPOINT_URL")
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
 
-	if mq == "" || redis == "" || bucket == "" || endpoint == "" ||
+	if mq == "" || redis == "" || taskStatusTTLSeconds == "" ||
+		bucket == "" || endpoint == "" ||
 		accessKey == "" || secretKey == "" || region == "" {
-		
 		return Config{}, errors.New("missing environment variables")
 	}
 
+	taskStatusTTL, err := strconv.Atoi(taskStatusTTLSeconds)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		Port: "8000",
-		DatabaseURL: databaseURL,
-		RabbitMQURL: mq,
+		Port:                 "8000",
+		DatabaseURL:          databaseURL,
+		RabbitMQURL:          mq,
 		DocumentContentQueue: "document-content-queue",
-		RedisURL: redis,
-		TaskStatusTTL: 24 * time.Hour, // 24 hours
-		S3Bucket: bucket,
-		S3Endpoint: endpoint,
-		S3AccessKey: accessKey,
-		S3SecretKey: secretKey,
-		S3Region: region,
+		RedisURL:             redis,
+		TaskStatusTTL:        time.Duration(taskStatusTTL) * time.Second,
+		S3Bucket:             bucket,
+		S3Endpoint:           endpoint,
+		S3AccessKey:          accessKey,
+		S3SecretKey:          secretKey,
+		S3Region:             region,
 	}, nil
 }
 
@@ -80,11 +87,7 @@ func databaseURLFromEnv() (string, error) {
 	}
 
 	query := u.Query()
-
-	if sslMode != "" {
-		query.Set("sslmode", sslMode)
-	}
-
+	query.Set("sslmode", sslMode)
 	u.RawQuery = query.Encode()
 
 	return u.String(), nil

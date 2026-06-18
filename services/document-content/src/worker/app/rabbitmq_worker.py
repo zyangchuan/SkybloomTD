@@ -77,10 +77,10 @@ def prewarm_ocr() -> None:
     LOG.info("PaddleOCR pipeline ready: %s", type(pipeline).__name__)
 
 def run_with_heartbeat_pump(
-    connection: pika.BlockingConnection,
-    work_fn: Callable[[], dict[str, Any]],
-    poll_seconds: float = RABBITMQ_WORKER_POLL_SECONDS,
-) -> dict[str, Any]:
+        connection: pika.BlockingConnection,
+        work_fn: Callable[[], dict[str, Any]],
+        poll_seconds: float = RABBITMQ_WORKER_POLL_SECONDS,
+    ) -> dict[str, Any]:
     
     # A queue that stores the result of ocr work
     # successful result is (True, {result dict}), exception result is (False, exception)

@@ -55,8 +55,6 @@ services:
     image: document-content-api:latest
     expose:
       - "8000"
-    environment:
-      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
     volumes:
       - ./services/document-content/temp:/temp
     networks:
@@ -70,9 +68,6 @@ services:
     image: document-content-grpc:latest
     expose:
       - "50051"
-    environment:
-      CONTENT_GRPC_HOST: 0.0.0.0
-      CONTENT_GRPC_PORT: 50051
     healthcheck:
       test:
         [

@@ -21,6 +21,8 @@ func (s *Controller) UploadFile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	dbUserID := models.DatabaseUUID(userID, "user")
+	storageUserID := dbUserID.String()
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
 	if err := c.Request.ParseMultipartForm(maxUploadBytes); err != nil {
@@ -58,7 +60,7 @@ func (s *Controller) UploadFile(c *gin.Context) {
 	contentType := header.Header.Get("Content-Type")
 
 	// Upload file to the S3 bucket
-	source, err := s.storage.UploadSource(c.Request.Context(), content, userID, documentID, filename, contentType)
+	source, err := s.storage.UploadSource(c.Request.Context(), content, storageUserID, documentID, filename, contentType)
 	if err != nil {
 		log.Printf("source upload failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store upload"})
@@ -66,7 +68,7 @@ func (s *Controller) UploadFile(c *gin.Context) {
 	}
 
 	// Create database row
-	document, err := models.NewQueuedDocument(documentID, userID, taskID, gameName, source)
+	document, err := models.NewQueuedDocument(documentID, storageUserID, taskID, gameName, source)
 	if err != nil {
 		log.Printf("document row build failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create document"})
@@ -89,7 +91,7 @@ func (s *Controller) UploadFile(c *gin.Context) {
 	job := models.DocumentJob{
 		JobType:    "document.process",
 		TaskID:     taskID,
-		UserID:     userID,
+		UserID:     storageUserID,
 		DocumentID: documentID,
 		Source:     source,
 	}
@@ -107,7 +109,7 @@ func (s *Controller) UploadFile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Upload file success",
 		"task_id":     job.TaskID,
-		"user_id":     userID,
+		"user_id":     storageUserID,
 		"document_id": documentID,
 		"game_name":   gameName,
 		"is_ready":    false,

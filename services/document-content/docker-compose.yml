@@ -9,9 +9,6 @@ services:
       - "8001:8000"
     env_file:
       - .env
-    environment:
-      - RABBITMQ_URL=${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
-      - DOCUMENT_CONTENT_QUEUE=${DOCUMENT_CONTENT_QUEUE:-document.process}
     volumes:
       - ./temp:/temp
 
@@ -25,10 +22,6 @@ services:
       - "50051:50051"
     env_file:
       - .env
-    environment:
-      - CONTENT_GRPC_HOST=0.0.0.0
-      - CONTENT_GRPC_PORT=50051
-
   document-content-worker:
     container_name: document-content-worker
     hostname: document-content-worker
@@ -40,8 +33,6 @@ services:
     env_file:
       - .env
     environment:
-      - RABBITMQ_URL=${RABBITMQ_URL:?Set RABBITMQ_URL to the external RabbitMQ broker URL}
-      - DOCUMENT_CONTENT_QUEUE=${DOCUMENT_CONTENT_QUEUE:-document.process}
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:

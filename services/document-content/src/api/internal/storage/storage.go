@@ -49,7 +49,6 @@ func (s *Storage) UploadSource(
 ) (models.SourceRef, error) {
 
 	key := joinKey(userID, documentID, "source", filename)
-	prefix := joinKey(userID, documentID) + "/"
 	input := &s3.PutObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
@@ -62,11 +61,8 @@ func (s *Storage) UploadSource(
 		return models.SourceRef{}, err
 	}
 	return models.SourceRef{
-		Bucket:      s.bucket,
-		Key:         key,
-		Prefix:      prefix,
-		Filename:    filename,
-		ContentType: contentType,
+		S3Bucket:       s.bucket,
+		SourceFilename: filename,
 	}, nil
 }
 
@@ -75,12 +71,8 @@ func (s *Storage) DeleteDocumentFiles(ctx context.Context, document models.Docum
 		return errors.New("document bucket is nil")
 	}
 
-	if document.S3Prefix == nil {
-		return errors.New("document prefix is nil")
-	}
-
 	bucket := *document.S3Bucket
-	prefix := *document.S3Prefix
+	prefix := models.S3DirectoryPath(document.UserID, document.ID) + "/"
 
 	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),

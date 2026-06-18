@@ -73,14 +73,14 @@ func (s *Server) fetchSubChapterContent(ctx context.Context, requestedUserID str
 	if err != nil {
 		return models.SubChapterContent{}, err
 	}
-	if row.S3Bucket == nil || strings.TrimSpace(*row.S3Bucket) == "" ||
-		row.S3Key == nil || strings.TrimSpace(*row.S3Key) == "" {
+	if row.S3Bucket == nil || strings.TrimSpace(*row.S3Bucket) == "" {
 		return models.SubChapterContent{}, fmt.Errorf("%w: Document markdown S3 location is missing", errContentUnavailable)
 	}
 
 	startLine := int32Value(row.StartLine)
 	endLine := int32Value(row.EndLine)
-	markdown, err := s.loader.Download(ctx, *row.S3Bucket, *row.S3Key)
+	markdownKey := fmt.Sprintf("%s/%s/output.md", row.UserID.String(), row.DocumentID.String())
+	markdown, err := s.loader.Download(ctx, *row.S3Bucket, markdownKey)
 	if err != nil {
 		return models.SubChapterContent{}, err
 	}

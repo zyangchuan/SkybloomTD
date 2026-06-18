@@ -9,7 +9,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
 
 from ..config import DATABASE_URL
-from .sections import ChapterSection, SubChapterSection
+from .types import ChapterSection, SubChapterSection
 
 
 class Base(DeclarativeBase):
@@ -22,8 +22,7 @@ class Document(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     s3_bucket: Mapped[str | None] = mapped_column(Text)
-    s3_key: Mapped[str | None] = mapped_column(Text)
-    filename: Mapped[str | None] = mapped_column(Text)
+    source_filename: Mapped[str | None] = mapped_column(Text)
     game_name: Mapped[str] = mapped_column(
         Text,
         server_default=sql_text("'Untitled Game'"),
@@ -34,11 +33,6 @@ class Document(Base):
         server_default=sql_text("false"),
         default=False,
     )
-    source_type: Mapped[str | None] = mapped_column(Text)
-    source_bucket: Mapped[str | None] = mapped_column(Text)
-    source_key: Mapped[str | None] = mapped_column(Text)
-    source_path: Mapped[str | None] = mapped_column(Text)
-    source_content_type: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.current_timestamp(),
@@ -92,8 +86,7 @@ class DocumentIndexRecord:
     document_id: str
     user_id: str
     s3_bucket: str
-    s3_key: str
-    filename: str
+    source_filename: str
     chapters: list[ChapterSection]
     sub_chapters: list[SubChapterSection]
 
@@ -107,7 +100,7 @@ def db_uuid(value: str, namespace: str) -> uuid.UUID:
 
 def engine():
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL or POSTGRES_DSN must be configured")
+        raise RuntimeError("POSTGRES_* environment variables must be configured")
     return create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
@@ -117,10 +110,11 @@ def ensure_schema() -> None:
     Base.metadata.create_all(db_engine)
 
     statements = [
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_filename TEXT",
         "ALTER TABLE documents ADD COLUMN IF NOT EXISTS game_name TEXT",
         """
         UPDATE documents
-        SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(filename, ''), 'Untitled Game')
+        SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(source_filename, ''), 'Untitled Game')
         WHERE game_name IS NULL OR game_name = ''
         """,
         "ALTER TABLE documents ALTER COLUMN game_name SET DEFAULT 'Untitled Game'",
@@ -130,11 +124,6 @@ def ensure_schema() -> None:
         "UPDATE documents SET is_ready = false WHERE is_ready IS NULL",
         "ALTER TABLE documents ALTER COLUMN is_ready SET DEFAULT false",
         "ALTER TABLE documents ALTER COLUMN is_ready SET NOT NULL",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_type TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_bucket TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_key TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_path TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_content_type TEXT",
         "CREATE INDEX IF NOT EXISTS documents_task_id_idx ON documents(task_id)",
         "CREATE INDEX IF NOT EXISTS documents_user_id_idx ON documents(user_id)",
     ]
@@ -161,13 +150,12 @@ def insert_document_index(record: DocumentIndexRecord) -> dict[str, int | str]:
             if document is None:
                 document = Document(
                     id=document_id,
-                    game_name=record.filename or "Untitled Game",
+                    game_name=record.source_filename or "Untitled Game",
                 )
                 session.add(document)
             document.user_id = user_id
             document.s3_bucket = record.s3_bucket
-            document.s3_key = record.s3_key
-            document.filename = record.filename
+            document.source_filename = record.source_filename
             document.is_ready = True
             session.flush()
 
