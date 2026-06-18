@@ -1,4 +1,4 @@
-package api_test
+package main_test
 
 import (
 	"bytes"
@@ -40,15 +40,16 @@ func TestUploadFileHappyPath(t *testing.T) {
 	deps := newAPIMocks(t)
 	router := newTestRouter(deps)
 	source := models.SourceRef{S3Bucket: "documents", SourceFilename: "rulebook.pdf"}
+	storageUserID := models.DatabaseUUID(testUserID, "user").String()
 
 	deps.storage.On(
 		"UploadSource",
 		mock.Anything,
 		[]byte("pdf bytes"),
-		testUserID,
+		storageUserID,
 		mock.MatchedBy(isUUIDString),
 		"rulebook.pdf",
-		"",
+		"application/octet-stream",
 	).Return(source, nil).Once()
 
 	deps.documents.On("CreateQueuedDocument", mock.Anything, mock.MatchedBy(func(document models.Document) bool {
@@ -76,7 +77,7 @@ func TestUploadFileHappyPath(t *testing.T) {
 		}
 		return job.JobType == "document.process" &&
 			job.TaskID != "" &&
-			job.UserID == testUserID &&
+			job.UserID == storageUserID &&
 			isUUIDString(job.DocumentID) &&
 			assert.ObjectsAreEqual(source, job.Source)
 	})).Return(nil).Once()
@@ -87,7 +88,7 @@ func TestUploadFileHappyPath(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	assert.Equal(t, "Upload file success", body["message"])
-	assert.Equal(t, testUserID, body["user_id"])
+	assert.Equal(t, storageUserID, body["user_id"])
 	assert.Equal(t, "Sky Bloom", body["game_name"])
 	assert.Equal(t, false, body["is_ready"])
 	assert.NotEmpty(t, body["task_id"])
@@ -99,8 +100,9 @@ func TestUploadFilePublisherFailureMarksTaskFailed(t *testing.T) {
 	router := newTestRouter(deps)
 	source := models.SourceRef{S3Bucket: "documents", SourceFilename: "rulebook.pdf"}
 	publishErr := errors.New("rabbitmq unavailable")
+	storageUserID := models.DatabaseUUID(testUserID, "user").String()
 
-	deps.storage.On("UploadSource", mock.Anything, []byte("pdf bytes"), testUserID, mock.MatchedBy(isUUIDString), "rulebook.pdf", "").Return(source, nil).Once()
+	deps.storage.On("UploadSource", mock.Anything, []byte("pdf bytes"), storageUserID, mock.MatchedBy(isUUIDString), "rulebook.pdf", "application/octet-stream").Return(source, nil).Once()
 	deps.documents.On("CreateQueuedDocument", mock.Anything, mock.AnythingOfType("models.Document")).Return(nil).Once()
 	deps.taskStatus.On("Set", mock.Anything, mock.MatchedBy(func(status models.TaskStatus) bool {
 		return status.Status == models.TaskStatusQueued && status.Error == nil
