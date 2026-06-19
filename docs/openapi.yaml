@@ -5,8 +5,10 @@ info:
   description: |
     Public API exposed through the Nginx reverse proxy.
 
-    Only the reverse proxy publishes a host port. Backend services are private
-    Docker-network services and should be accessed through these paths.
+    The root Docker Compose stack publishes only the reverse proxy on port 80.
+    Backend services are private Docker-network services and should be accessed
+    through these paths. Local, dev, staging, and production profiles are
+    selected with a single root env file plus the matching compose override.
 
     Protected backend routes require a Supabase JWT stored in the
     `skybloom_access_token` cookie. Nginx verifies the cookie through
@@ -17,7 +19,7 @@ servers:
     description: Public reverse proxy base URL
     variables:
       publicBaseUrl:
-        default: http://your-server-domain
+        default: http://localhost
 tags:
   - name: System
     description: Public health and documentation endpoints.
@@ -57,6 +59,20 @@ paths:
           description: OpenAPI YAML document.
           content:
             application/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags: [System]
+      summary: Open Swagger UI
+      operationId: getSwaggerUi
+      security: []
+      responses:
+        "200":
+          description: Swagger UI HTML page.
+          content:
+            text/html:
               schema:
                 type: string
 
@@ -261,6 +277,27 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Task status recording or RabbitMQ enqueue failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/health:
+    get:
+      tags: [Document Content]
+      summary: Check document-content API process health through the protected proxy route
+      operationId: getDocumentContentHealth
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Document-content API process is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
           content:
             application/json:
               schema:

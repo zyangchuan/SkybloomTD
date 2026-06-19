@@ -16,6 +16,13 @@ Dev compose runs use `.env.dev` with `docker-compose.dev.yml`:
 docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
+Staging compose runs use `.env.staging` with
+`docker-compose.staging.yml`:
+
+```text
+docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+```
+
 Production compose runs use `.env.production` with
 `docker-compose.production.yml`:
 
@@ -23,8 +30,11 @@ Production compose runs use `.env.production` with
 docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
 ```
 
-The tracked `*.example` files show the expected keys. The real `.env.local`
-and `.env.production` files stay ignored so secrets do not get committed.
+The tracked `*.example` files show the expected keys. Real root env files
+like `.env.local`, `.env.dev`, `.env.staging`, and `.env.production` stay
+ignored so secrets do not get committed.
+
+Frontend app/game variables are merged into those root env files. Compose no longer reads `frontend/app/.env.*` or `frontend/game/.env.*`.
 
 When the Docker stack is running, Nginx also serves it from the public base URL
 configured in `SKYBLOOM_PUBLIC_BASE_URL`:
@@ -41,6 +51,8 @@ $SKYBLOOM_PUBLIC_BASE_URL/docs
 
 All browser-facing API calls should go through the reverse proxy on port 80.
 Backend containers are private Docker-network services.
+
+The full application uses the root compose files. For a worker-only host, use `services/document-content/docker-compose.worker.yml` with the matching worker override, for example `docker-compose.worker.staging.yml` or `docker-compose.worker.production.yml`.
 
 Protected API routes use the `skybloom_access_token` cookie. The browser sends
 it automatically to the reverse proxy, Nginx verifies it through user-service,

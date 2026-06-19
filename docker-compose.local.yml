@@ -7,7 +7,6 @@ services:
     command: npm run dev
     env_file:
       - ./.env.local
-      - ./frontend/app/.env.local
     volumes:
       - ./frontend/app:/app
       - /app/node_modules
@@ -17,7 +16,6 @@ services:
     command: npm run dev
     env_file:
       - ./.env.local
-      - ./frontend/game/.env.local
     ports:
       - "${GAME_CLIENT_PORT:-5173}:5173"
     volumes:
