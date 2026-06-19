@@ -1,0 +1,39 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to staging EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy staging stack
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.STAGING_EC2_HOST }}
+          username: ${{ secrets.STAGING_EC2_USER }}
+          key: ${{ secrets.STAGING_EC2_SSH_KEY }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            cd "${{ secrets.STAGING_APP_DIR }}"
+
+            git fetch origin staging
+            git reset --hard origin/staging
+
+            docker compose \
+              -f docker-compose.yml \
+              -f docker-compose.staging.yml \
+              up -d --build --remove-orphans
+
+            docker image prune -f
