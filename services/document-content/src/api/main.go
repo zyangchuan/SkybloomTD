@@ -31,13 +31,17 @@ func main() {
 
 	// Postgres document repository
 	db, closeDB, err := database.Open(ctx, cfg.DatabaseURL)
+
 	if err != nil {
 		log.Fatalf("database connection error: %v", err)
 	}
-	defer closeDB()
+	
 	if err := database.Migrate(ctx, db); err != nil {
 		log.Fatalf("database migration error: %v", err)
 	}
+
+	defer closeDB()
+
 	documents := repository.NewDocumentRepository(db)
 
 	// RabbitMQ publisher
@@ -48,13 +52,9 @@ func main() {
 	defer publisher.Close()
 
 	// Supabase S3 bucket client
-	storageClient, err := storage.NewFromEnv()
+	storageClient, err := storage.NewFromConfig(cfg)
 	if err != nil {
 		log.Fatalf("storage configuration error: %v", err)
-	}
-	var sourceUploader api.SourceUploader
-	if storageClient != nil {
-		sourceUploader = storageClient
 	}
 
 	// Redis task status store
@@ -62,14 +62,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("redis configuration error: %v", err)
 	}
-	var statusStore api.TaskStatusStore = taskstatus.NoopStore{}
-	if taskStatusStore != nil {
-		statusStore = taskStatusStore
-		defer taskStatusStore.Close()
-	}
+	defer taskStatusStore.Close()
 
 	// HTTP server router
-	router := api.NewRouter(cfg, publisher, sourceUploader, documents, statusStore)
+	router := api.NewRouter(cfg, publisher, storageClient, documents, taskStatusStore)
 
 	addr := ":" + cfg.Port
 	log.Printf("document-content-api listening on %s", addr)

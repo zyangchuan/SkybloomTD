@@ -1,20 +1,10 @@
 with-expecter: false
-issue-845-fix: true
+dir: internal/api/mocks
+outpkg: mocks
 packages:
-  skybloom/document-content-api/internal/api:
-    config:
-      dir: internal/api/mocks
-      outpkg: mocks
+  skybloom/document-content-api/internal/api/controllers:
     interfaces:
       Publisher:
-        config:
-          filename: publisher.go
-      SourceUploader:
-        config:
-          filename: source_uploader.go
+      StorageClient:
       DocumentStore:
-        config:
-          filename: document_store.go
       TaskStatusStore:
-        config:
-          filename: task_status_store.go

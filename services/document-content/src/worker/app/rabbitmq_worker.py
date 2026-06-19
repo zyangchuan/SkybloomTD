@@ -18,16 +18,16 @@ from .config import (
 )
 from .task_status import set_task_status
 
-
 LOG = logging.getLogger(__name__)
 
-
-def prewarm_ocr() -> None:
-    LOG.info("prewarming PaddleOCR pipeline")
-    from .ocr.processing import pipeline
-
-    LOG.info("PaddleOCR pipeline ready: %s", type(pipeline).__name__)
-
+# To facilitate testing, the main work of processing a document job is in process_job, 
+# which can be called directly with mock functions for OCR, upload, and indexing. 
+# e.g process_job(
+#       job, 
+#       process_ocr_fn=mock_process_ocr, 
+#       upload_ocr_output_fn=mock_upload, 
+#       index_ocr_output_fn=mock_index
+#     )
 
 def process_job(
     job: dict[str, Any],
@@ -43,10 +43,10 @@ def process_job(
     source = job["source"]
     user_id = job["user_id"]
     document_id = job["document_id"]
-    filename = job.get("filename")
 
     set_task_status_fn(task_id, document_id, "processing", None)
 
+    # Lazily load the heavy functions
     try:
         if process_ocr_fn is None:
             from .ocr.tasks import process_ocr as process_ocr_fn
@@ -55,7 +55,7 @@ def process_job(
         if index_ocr_output_fn is None:
             from .indexing.tasks import index_ocr_output as index_ocr_output_fn
 
-        ocr_result = process_ocr_fn(source, user_id, document_id, filename)
+        ocr_result = process_ocr_fn(source, user_id, document_id)
         upload_result = upload_ocr_output_fn(ocr_result)
         result = index_ocr_output_fn(upload_result)
     except Exception as exc:
@@ -70,21 +70,20 @@ def process_job(
 
     return result
 
+def prewarm_ocr() -> None:
+    LOG.info("prewarming PaddleOCR pipeline")
+    from .ocr.processing import pipeline
 
-def rabbitmq_parameters() -> pika.URLParameters:
-    params = pika.URLParameters(RABBITMQ_URL)
-    if RABBITMQ_HEARTBEAT_SECONDS > 0:
-        params.heartbeat = RABBITMQ_HEARTBEAT_SECONDS
-    if RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS > 0:
-        params.blocked_connection_timeout = RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS
-    return params
-
+    LOG.info("PaddleOCR pipeline ready: %s", type(pipeline).__name__)
 
 def run_with_heartbeat_pump(
-    connection: pika.BlockingConnection,
-    work_fn: Callable[[], dict[str, Any]],
-    poll_seconds: float = RABBITMQ_WORKER_POLL_SECONDS,
-) -> dict[str, Any]:
+        connection: pika.BlockingConnection,
+        work_fn: Callable[[], dict[str, Any]],
+        poll_seconds: float = RABBITMQ_WORKER_POLL_SECONDS,
+    ) -> dict[str, Any]:
+    
+    # A queue that stores the result of ocr work
+    # successful result is (True, {result dict}), exception result is (False, exception)
     results: queue.Queue[tuple[bool, dict[str, Any] | BaseException]] = queue.Queue(
         maxsize=1
     )
@@ -95,6 +94,7 @@ def run_with_heartbeat_pump(
         except BaseException as exc:
             results.put((False, exc))
 
+    # Send ocr worker to background thread and pump rabbitmq heartbeats on main thread
     worker = threading.Thread(target=run_work, name="document-job-worker")
     worker.start()
     try:
@@ -111,6 +111,11 @@ def run_with_heartbeat_pump(
         return value  # type: ignore[return-value]
     raise value
 
+def rabbitmq_parameters() -> pika.URLParameters:
+    params = pika.URLParameters(RABBITMQ_URL)
+    params.heartbeat = RABBITMQ_HEARTBEAT_SECONDS
+    params.blocked_connection_timeout = RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS
+    return params
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)

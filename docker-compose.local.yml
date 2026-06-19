@@ -7,7 +7,6 @@ services:
     command: npm run dev
     env_file:
       - ./.env.local
-      - ./frontend/app/.env.local
     volumes:
       - ./frontend/app:/app
       - /app/node_modules
@@ -17,7 +16,6 @@ services:
     command: npm run dev
     env_file:
       - ./.env.local
-      - ./frontend/game/.env.local
     ports:
       - "${GAME_CLIENT_PORT:-5173}:5173"
     volumes:
@@ -27,14 +25,6 @@ services:
   document-content-api:
     env_file:
       - ./.env.local
-    environment:
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      RABBITMQ_HEARTBEAT_SECONDS: ${RABBITMQ_HEARTBEAT_SECONDS:-600}
-      RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS: ${RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS:-300}
-      RABBITMQ_WORKER_POLL_SECONDS: ${RABBITMQ_WORKER_POLL_SECONDS:-1}
-      REDIS_URL: redis://redis:6379/0
-      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
-      TASK_STATUS_TTL_SECONDS: ${TASK_STATUS_TTL_SECONDS:-604800}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -60,13 +50,6 @@ services:
     env_file:
       - ./.env.local
     environment:
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      RABBITMQ_HEARTBEAT_SECONDS: ${RABBITMQ_HEARTBEAT_SECONDS:-600}
-      RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS: ${RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS:-300}
-      RABBITMQ_WORKER_POLL_SECONDS: ${RABBITMQ_WORKER_POLL_SECONDS:-1}
-      REDIS_URL: redis://redis:6379/0
-      DOCUMENT_CONTENT_QUEUE: ${DOCUMENT_CONTENT_QUEUE:-document.process}
-      TASK_STATUS_TTL_SECONDS: ${TASK_STATUS_TTL_SECONDS:-604800}
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
@@ -123,8 +106,8 @@ services:
     container_name: rabbitmq
     image: rabbitmq:3-management-alpine
     ports:
-      - "${RABBITMQ_PORT:-5672}:5672"
-      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+      - "5672:5672"
+      - "15672:15672"
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -142,7 +125,7 @@ services:
     image: redis:7-alpine
     command: redis-server --appendonly yes
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:

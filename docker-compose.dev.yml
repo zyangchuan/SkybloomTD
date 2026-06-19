@@ -8,7 +8,6 @@ services:
     command: npm run dev
     env_file:
       - ./.env.dev
-      - ./frontend/app/.env.dev
     environment:
       NODE_ENV: development
     volumes:
@@ -21,7 +20,6 @@ services:
     command: npm run dev
     env_file:
       - ./.env.dev
-      - ./frontend/game/.env.dev
     environment:
       NODE_ENV: development
     volumes:

@@ -1,7 +1,6 @@
-# SkybloomTD Local Setup on Windows WSL
+# SkybloomTD Docker Setup
 
-This guide is for running the full local app from a Windows machine using WSL 2,
-Docker Compose, and the GPU OCR worker.
+This guide covers the current Docker Compose setup for local development and shared dev, staging, and production deployments. Local GPU OCR notes assume Windows WSL 2, but the compose profiles are the same on Linux servers.
 
 ## What Runs Locally
 
@@ -110,20 +109,30 @@ git clone https://github.com/zyangchuan/SkybloomTD.git skybloomtd
 cd skybloomtd
 ```
 
-Create local env files:
+Create one root env file for the profile you are running. Frontend, game, backend, worker, and proxy settings all live in this single root env file now. Do not create separate `frontend/app/.env.*` or `frontend/game/.env.*` files.
+
+For local development:
 
 ```bash
 cp .env.local.example .env.local
-cp frontend/app/.env.local.example frontend/app/.env.local
-cp frontend/game/.env.local.example frontend/game/.env.local
 ```
 
-Edit the copied env files and fill in the required values:
+For shared environments, copy the matching example on the target host:
 
-- Supabase URL and keys
+```bash
+cp .env.dev.example .env.dev
+cp .env.staging.example .env.staging
+cp .env.production.example .env.production
+```
+
+Edit the copied env file and fill in the required values:
+
+- Public app and websocket base URLs
+- Browser-facing Supabase URL, publishable key, and redirect URL
 - Supabase JWT settings
 - Supabase S3-compatible storage credentials
 - Postgres settings
+- RabbitMQ and Redis URLs for the selected environment
 - OpenAI API key
 
 For local broker/status services, keep these values pointing at the compose
@@ -143,18 +152,37 @@ GAME_GENERATION_QUEUE=game.generation.generate
 TASK_STATUS_TTL_SECONDS=604800
 ```
 
-## Start the App
+## Compose Profiles
+
+The root `docker-compose.yml` defines the shared service graph. Profile-specific override files select commands, env files, mounts, and local support services.
+
+| Profile | Env file | Override file | Typical use |
+| --- | --- | --- | --- |
+| Local | `.env.local` | `docker-compose.local.yml` | Full local stack with bind mounts, RabbitMQ, Redis, and GPU OCR worker |
+| Dev | `.env.dev` | `docker-compose.dev.yml` | Shared development server using external broker/cache/database services |
+| Staging | `.env.staging` | `docker-compose.staging.yml` | Production-like staging deployment |
+| Production | `.env.production` | `docker-compose.production.yml` | Production deployment |
 
 Build and start the local stack:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
-Open:
+Run a shared environment in the background:
+
+```bash
+docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
+```
+
+Open locally:
 
 - App: `http://localhost`
 - Game dev server: `http://localhost:5173`
+- API docs: `http://localhost/docs`
+- OpenAPI YAML: `http://localhost/openapi.yaml`
 - RabbitMQ management UI: `http://localhost:15672`
 
 Default local RabbitMQ credentials:
@@ -163,23 +191,28 @@ Default local RabbitMQ credentials:
 guest / guest
 ```
 
-Run in the background:
+Stop the local stack:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build -d
-```
-
-Stop the stack:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml down
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml down
 ```
 
 Stop and remove local volumes:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
+
+## Document Worker Only
+
+The old standalone `services/document-content/docker-compose.yml` was removed. The full app uses the root compose files. If you need to run only the GPU document worker, use the worker-specific compose files from `services/document-content`:
+
+```bash
+cd services/document-content
+docker compose --env-file .env.production -f docker-compose.worker.yml -f docker-compose.worker.production.yml up --build -d
+```
+
+Use `.env.local`, `.env.staging`, or `.env.production` with the matching worker override for the target machine.
 
 ## Common WSL Fixes
 
@@ -213,7 +246,7 @@ If the app keeps using remote Redis/RabbitMQ unexpectedly:
 - Recreate containers after env changes:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local.yml up --build --force-recreate
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build --force-recreate
 ```
 
 ## References

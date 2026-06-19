@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -17,37 +18,32 @@ type MarkdownLoader struct {
 }
 
 func NewMarkdownLoader() (*MarkdownLoader, error) {
-	region := envOrDefault("AWS_REGION", envOrDefault("AWS_DEFAULT_REGION", "us-east-1"))
-	endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("AWS_S3_ENDPOINT_URL")), "/")
-	accessKey := strings.TrimSpace(os.Getenv("AWS_ACCESS_KEY_ID"))
-	secretKey := strings.TrimSpace(os.Getenv("AWS_SECRET_ACCESS_KEY"))
+	region := os.Getenv("AWS_REGION")
+	endpoint := strings.TrimRight(os.Getenv("AWS_S3_ENDPOINT_URL"), "/")
+	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 
-	options := []func(*awsconfig.LoadOptions) error{
+	if region == "" || endpoint == "" || accessKey == "" || secretKey == "" {
+		return nil, errors.New("missing S3 environment variables")
+	}
+
+	awsConfig, err := awsconfig.LoadDefaultConfig(
+		context.Background(),
 		awsconfig.WithRegion(region),
-	}
-	if accessKey != "" || secretKey != "" {
-		options = append(options, awsconfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
-		))
-	}
-	if endpoint != "" {
-		options = append(options, awsconfig.WithEndpointResolverWithOptions(
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
+		awsconfig.WithEndpointResolverWithOptions(
 			aws.EndpointResolverWithOptionsFunc(
 				func(service, region string, options ...any) (aws.Endpoint, error) {
 					return aws.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
 				},
 			),
-		))
-	}
-
-	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background(), options...)
+		),
+	)
 	if err != nil {
 		return nil, err
 	}
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
-		if endpoint != "" {
-			options.UsePathStyle = true
-		}
+		options.UsePathStyle = true
 	})
 	return &MarkdownLoader{client: client}, nil
 }
@@ -66,11 +62,4 @@ func (m *MarkdownLoader) Download(ctx context.Context, bucket string, key string
 		return "", err
 	}
 	return string(data), nil
-}
-
-func envOrDefault(key string, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
 }

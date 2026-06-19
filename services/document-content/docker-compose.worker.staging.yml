@@ -8,16 +8,14 @@ services:
     image: document-content-worker:latest
     command: python -m app.rabbitmq_worker
     env_file:
-      - .env
+      - .env.staging
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
     volumes:
-      - ./src/worker:/app
       - ./output:/output
       - ./temp:/temp
       - models:/root/.paddlex
-      - /usr/lib/wsl/lib:/usr/lib/wsl/lib
     deploy:
       resources:
         reservations:

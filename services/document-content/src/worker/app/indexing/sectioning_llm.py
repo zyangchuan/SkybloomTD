@@ -12,14 +12,14 @@ from ..config import (
 RESPONSE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["chapters"],
+    "required": ["chapters", "sub_chapters"],
     "properties": {
         "chapters": {
             "type": "array",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["title", "start_heading_id", "sub_chapters"],
+                "required": ["title", "start_heading_id"],
                 "properties": {
                     "title": {
                         "type": "string",
@@ -32,29 +32,27 @@ RESPONSE_SCHEMA = {
                             "earliest heading that belongs to this chapter."
                         ),
                     },
-                    "sub_chapters": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["title", "start_heading_id"],
-                            "properties": {
-                                "title": {
-                                    "type": "string",
-                                    "description": "Clean normalized sub-chapter title.",
-                                },
-                                "start_heading_id": {
-                                    "type": "string",
-                                    "description": (
-                                        "Input heading id where this sub-chapter begins."
-                                    ),
-                                },
-                            },
-                        },
+                },
+            },
+        },
+        "sub_chapters": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "start_heading_id"],
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Clean normalized sub-chapter title.",
+                    },
+                    "start_heading_id": {
+                        "type": "string",
+                        "description": "Input heading id where this sub-chapter begins.",
                     },
                 },
             },
-        }
+        },
     },
 }
 
@@ -64,22 +62,22 @@ You create a clean table of contents from noisy OCR Markdown headings.
 
 You receive only the ordered heading list extracted from levels # to ###, not
 the full document body. Produce a normalized outline with chapters and their
-sub-chapters. Do not classify every input heading. Omit headings that are title
-page text, contents labels, running/page headers, companion subtitles,
-examples, definitions, theorem headings, malformed OCR garbage, decorative
-titles, or anything that should not control slicing.
+sub-chapters as separate top-level arrays. Do not classify every input heading.
+Omit headings that are title page text, contents labels, running/page headers,
+companion subtitles, examples, definitions, theorem headings, malformed OCR
+garbage, decorative titles, or anything that should not control slicing.
 
 You may combine nearby headings into one clean title. For example, headings
 like "Chapter 4" followed by "Integrals" can become "Chapter 4: Integrals".
 Use start_heading_id to point to the earliest input heading that belongs to the
 chapter or sub-chapter. Use only ids from the input list. Python will compute
-all end lines from the chosen start ids, so do not output end lines.
+all nesting and end lines from the chosen start ids, so do not output parent
+chapter references or end lines.
 
-Sub-chapter start ids must follow document order. A sub-chapter may use the
-same start_heading_id as its chapter when it represents the chapter intro or
-the whole chapter. Otherwise, choose a heading after the chapter start and
-before the next chapter start. If a sub-chapter heading line falls inside a
-different chapter, put that sub-chapter under the chapter that contains it.
+Return chapters as a flat list and sub_chapters as a flat list. Sub-chapter
+start ids should follow document order. A sub-chapter may use the same
+start_heading_id as a chapter when it represents the chapter intro or the whole
+chapter.
 
 Optimize for a coherent content page, not literal Markdown levels. PPStructureV3
 may assign inconsistent levels, so a real sub-chapter may appear as "#" and a
@@ -121,8 +119,8 @@ def generate_document_outline(
     if previous_outline is None:
         user_content = (
             "Create a clean table of contents from the ordered OCR "
-            "Markdown headings below. Return normalized chapters and "
-            "sub-chapters with start_heading_id values only.\n\n"
+            "Markdown headings below. Return flat normalized chapters and "
+            "sub_chapters with start_heading_id values only.\n\n"
             f"{json.dumps({'headings': headings}, ensure_ascii=True)}"
         )
     else:
@@ -134,12 +132,11 @@ def generate_document_outline(
             "Repair the generated outline below so it passes validation. "
             "Keep the same intent when possible, but every start_heading_id "
             "must be one of the ids in the ordered OCR Markdown headings. "
-            "Sub-chapters must be nested under the chapter whose line range "
-            "contains their start_heading_id. A sub-chapter may share its "
-            "chapter start_heading_id only when it represents the chapter "
-            "intro or whole chapter. "
+            "Return chapters and sub_chapters as separate flat lists. Python "
+            "will attach each sub_chapter to the chapter whose line range "
+            "contains its start_heading_id. "
             "Return the full corrected outline, not a patch.\n\n"
-            f"Validation error: {validation_error or 'unknown validation error'}\n\n"
+            f"Validation error: {validation_error}\n\n"
             f"{json.dumps(repair_payload, ensure_ascii=True)}"
         )
 
