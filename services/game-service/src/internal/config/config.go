@@ -42,21 +42,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	generationStatusTTL := envDurationSeconds("GAME_GENERATION_STATUS_TTL_SECONDS", envDurationSeconds("LEVEL_GENERATION_STATUS_TTL_SECONDS", 24*time.Hour))
-	levelMapCacheTTL := envDurationSeconds("LEVEL_MAP_CACHE_TTL_SECONDS", 24*time.Hour)
-	mapRedisURL := envOrDefault("GAME_MAP_REDIS_URL", "redis://game-redis:6379/0")
-
 	return Config{
 		Port:                       envOrDefault("GAME_SERVICE_PORT", envOrDefault("PORT", "8081")),
-		RabbitMQURL:                envOrDefault("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/"),
-		Queue:                      envOrDefault("GAME_GENERATION_QUEUE", "game.generation.generate"),
+		RabbitMQURL:                "amqp://guest:guest@rabbitmq:5672/",
+		Queue:                      "game.generation.generate",
 		DatabaseURL:                databaseURL,
-		StatusRedisURL:             envOrDefault("GAME_STATUS_REDIS_URL", envOrDefault("REDIS_URL", "redis://redis:6379/0")),
-		MapRedisURL:                mapRedisURL,
-		GameSessionRedisURL:        envOrDefault("GAME_SESSION_REDIS_URL", mapRedisURL),
-		GenerationStatusTTL:        generationStatusTTL,
-		LevelMapCacheTTL:           levelMapCacheTTL,
-		LevelQuizCacheTTL:          envDurationSeconds("LEVEL_QUIZ_CACHE_TTL_SECONDS", levelMapCacheTTL),
+		StatusRedisURL:             "redis://redis:6379/0",
+		MapRedisURL:                "redis://game-redis:6379/0",
+		GameSessionRedisURL:        "redis://game-redis:6379/0",
+		GenerationStatusTTL:        24 * time.Hour,
+		LevelMapCacheTTL:           24 * time.Hour,
+		LevelQuizCacheTTL:          24 * time.Hour,
 		GameSessionTTL:             envDurationSeconds("GAME_SESSION_TTL_SECONDS", 2*time.Hour),
 		OpenAIAPIKey:               strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
 		OpenAIBaseURL:              strings.TrimRight(envOrDefault("OPENAI_BASE_URL", "https://api.openai.com/v1"), "/"),
@@ -65,7 +61,7 @@ func Load() (Config, error) {
 		Timeout:                    time.Duration(envFloat("LEVEL_LLM_TIMEOUT_SECONDS", 60)) * time.Second,
 		MaxRetries:                 envInt("LEVEL_LLM_MAX_RETRIES", 3),
 		LevelSourceMaxChars:        int32(envInt("LEVEL_SOURCE_MAX_CHARS", 24000)),
-		DocumentContentGRPCAddr:    envOrDefault("DOCUMENT_CONTENT_GRPC_ADDR", envOrDefault("OCR_CONTENT_GRPC_ADDR", "document-content-grpc:50051")),
+		DocumentContentGRPCAddr:    "document-content-grpc:50051",
 		DocumentContentGRPCTimeout: time.Duration(envFloat("DOCUMENT_CONTENT_GRPC_TIMEOUT_SECONDS", envFloat("OCR_CONTENT_GRPC_TIMEOUT_SECONDS", 30))) * time.Second,
 		PublicAPIBasePath:          envOrDefault("GAME_SERVICE_PUBLIC_API_BASE_PATH", "/api/game-service"),
 		AllowedOrigins:             envCSV("GAME_SERVICE_ALLOWED_ORIGINS"),

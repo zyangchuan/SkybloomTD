@@ -5,22 +5,20 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 )
 
 type Config struct {
-	Port string
-	DatabaseURL string
-	RabbitMQURL string
+	Port                 string
+	DatabaseURL          string
+	RabbitMQURL          string
 	DocumentContentQueue string
-	RedisURL string
-	TaskStatusTTL time.Duration
-	S3Bucket string
-	S3Endpoint string
-	S3AccessKey string
-	S3SecretKey string
-	S3Region string
+	RedisURL             string
+	TaskStatusTTL        time.Duration
+	S3Endpoint           string
+	S3AccessKey          string
+	S3SecretKey          string
+	S3Region             string
 }
 
 func Load() (Config, error) {
@@ -30,34 +28,22 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	mq := os.Getenv("RABBITMQ_URL")
-	redis := os.Getenv("REDIS_URL")
-	taskStatusTTLSeconds := os.Getenv("TASK_STATUS_TTL_SECONDS")
-	bucket := os.Getenv("AWS_S3_BUCKET")
 	endpoint := os.Getenv("AWS_S3_ENDPOINT_URL")
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
 
-	if mq == "" || redis == "" || taskStatusTTLSeconds == "" ||
-		bucket == "" || endpoint == "" ||
-		accessKey == "" || secretKey == "" || region == "" {
+	if endpoint == "" || accessKey == "" || secretKey == "" || region == "" {
 		return Config{}, errors.New("missing environment variables")
-	}
-
-	taskStatusTTL, err := strconv.Atoi(taskStatusTTLSeconds)
-	if err != nil {
-		return Config{}, err
 	}
 
 	return Config{
 		Port:                 "8000",
 		DatabaseURL:          databaseURL,
-		RabbitMQURL:          mq,
+		RabbitMQURL:          "amqp://guest:guest@rabbitmq:5672/",
 		DocumentContentQueue: "document-content-queue",
-		RedisURL:             redis,
-		TaskStatusTTL:        time.Duration(taskStatusTTL) * time.Second,
-		S3Bucket:             bucket,
+		RedisURL:             "redis://redis:6379/0",
+		TaskStatusTTL:        7 * 24 * time.Hour,
 		S3Endpoint:           endpoint,
 		S3AccessKey:          accessKey,
 		S3SecretKey:          secretKey,

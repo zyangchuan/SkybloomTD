@@ -4,9 +4,10 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 
-from ..config import AWS_REGION, AWS_S3_BUCKET, AWS_S3_ENDPOINT_URL
+from ..config import AWS_REGION, AWS_S3_ENDPOINT_URL
 
 LOG = logging.getLogger(__name__)
+DOCUMENT_BUCKET = "documents"
 
 S3_CLIENT = boto3.client(
     "s3",
@@ -25,14 +26,14 @@ def upload_output_to_s3(document_output_dir: Path, user_id: str, document_id: st
 
     S3_CLIENT.upload_file(
         str(output_file),
-        AWS_S3_BUCKET,
+        DOCUMENT_BUCKET,
         s3_key,
         ExtraArgs={"ContentType": "text/markdown; charset=utf-8"},
     )
 
     return {
         "status": "uploaded",
-        "s3_bucket": AWS_S3_BUCKET,
+        "s3_bucket": DOCUMENT_BUCKET,
         "s3_directory_path": upload_directory_path,
         "s3_markdown_key": s3_key,
     }

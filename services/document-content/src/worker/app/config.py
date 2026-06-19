@@ -10,25 +10,20 @@ def required_env(key: str) -> str:
     return value
 
 
-def required_int_env(key: str) -> int:
-    return int(required_env(key))
-
-
 # RabbitMQ configuration
-RABBITMQ_URL = required_env("RABBITMQ_URL")
-RABBITMQ_HEARTBEAT_SECONDS = required_int_env("RABBITMQ_HEARTBEAT_SECONDS")
+RABBITMQ_URL = "amqp://guest:guest@rabbitmq:5672/"
+RABBITMQ_HEARTBEAT_SECONDS = 600
 RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS = 300
 RABBITMQ_WORKER_POLL_SECONDS = 10
 DOCUMENT_CONTENT_QUEUE = "document-content-queue"
 
 # Redis configuration
-REDIS_URL = required_env("REDIS_URL")
-TASK_STATUS_TTL_SECONDS = required_int_env("TASK_STATUS_TTL_SECONDS")
+REDIS_URL = "redis://redis:6379/0"
+TASK_STATUS_TTL_SECONDS = 604800
 
 # File storage configuration
 INPUT_ROOT = Path(required_env("INPUT_ROOT"))
 OUTPUT_ROOT = Path(required_env("OUTPUT_ROOT"))
-AWS_S3_BUCKET = required_env("AWS_S3_BUCKET")
 AWS_REGION = required_env("AWS_REGION")
 AWS_S3_ENDPOINT_URL = required_env("AWS_S3_ENDPOINT_URL")
 

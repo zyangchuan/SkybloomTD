@@ -16,6 +16,8 @@ services:
       - document-content-api
       - game-service
       - game-generation-worker
+      - rabbitmq
+      - redis
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - \"$${NGINX_HEALTHCHECK_URL}\" | grep -q ok"]
       interval: 10s
@@ -63,6 +65,11 @@ services:
       - "8000"
     volumes:
       - ./services/document-content/temp:/temp
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - services-network
 
@@ -75,11 +82,7 @@ services:
     expose:
       - "50051"
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "nc -z \"$${DOCUMENT_CONTENT_GRPC_HEALTHCHECK_HOST}\" \"$${DOCUMENT_CONTENT_GRPC_HEALTHCHECK_PORT}\"",
-        ]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 50051"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -100,23 +103,13 @@ services:
       - "8081"
     environment:
       GAME_SERVICE_PORT: 8081
-      POSTGRES_HOST: ${POSTGRES_HOST}
-      POSTGRES_PORT: ${POSTGRES_PORT}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE}
-      RABBITMQ_URL: ${RABBITMQ_URL}
-      GAME_STATUS_REDIS_URL: ${GAME_STATUS_REDIS_URL}
-      GAME_MAP_REDIS_URL: ${GAME_MAP_REDIS_URL}
-      GAME_SESSION_REDIS_URL: ${GAME_SESSION_REDIS_URL}
-      GAME_GENERATION_QUEUE: ${GAME_GENERATION_QUEUE}
-      GAME_GENERATION_STATUS_TTL_SECONDS: ${GAME_GENERATION_STATUS_TTL_SECONDS}
-      LEVEL_MAP_CACHE_TTL_SECONDS: ${LEVEL_MAP_CACHE_TTL_SECONDS}
-      LEVEL_QUIZ_CACHE_TTL_SECONDS: ${LEVEL_QUIZ_CACHE_TTL_SECONDS}
-      DOCUMENT_CONTENT_GRPC_ADDR: ${DOCUMENT_CONTENT_GRPC_ADDR}
     depends_on:
-      - game-redis
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      game-redis:
+        condition: service_started
     networks:
       - services-network
 
@@ -127,33 +120,52 @@ services:
       context: ./services/game-service/src
       dockerfile: Dockerfile.worker
     image: game-generation-worker:latest
-    environment:
-      POSTGRES_HOST: ${POSTGRES_HOST}
-      POSTGRES_PORT: ${POSTGRES_PORT}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE}
-      RABBITMQ_URL: ${RABBITMQ_URL}
-      GAME_STATUS_REDIS_URL: ${GAME_STATUS_REDIS_URL}
-      GAME_MAP_REDIS_URL: ${GAME_MAP_REDIS_URL}
-      GAME_GENERATION_QUEUE: ${GAME_GENERATION_QUEUE}
-      GAME_GENERATION_STATUS_TTL_SECONDS: ${GAME_GENERATION_STATUS_TTL_SECONDS}
-      LEVEL_MAP_CACHE_TTL_SECONDS: ${LEVEL_MAP_CACHE_TTL_SECONDS}
-      LEVEL_QUIZ_CACHE_TTL_SECONDS: ${LEVEL_QUIZ_CACHE_TTL_SECONDS}
-      DOCUMENT_CONTENT_GRPC_ADDR: ${DOCUMENT_CONTENT_GRPC_ADDR}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      LEVEL_LLM_MODEL: ${LEVEL_LLM_MODEL}
-      LEVEL_LLM_TEMPERATURE: ${LEVEL_LLM_TEMPERATURE}
-      LEVEL_LLM_TIMEOUT_SECONDS: ${LEVEL_LLM_TIMEOUT_SECONDS}
-      LEVEL_LLM_MAX_RETRIES: ${LEVEL_LLM_MAX_RETRIES}
-      LEVEL_SOURCE_MAX_CHARS: ${LEVEL_SOURCE_MAX_CHARS}
     depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       document-content-grpc:
         condition: service_healthy
       game-redis:
         condition: service_started
+    networks:
+      - services-network
+
+  rabbitmq:
+    container_name: rabbitmq
+    hostname: rabbitmq
+    image: rabbitmq:3-management-alpine
+    expose:
+      - "5672"
+      - "15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - services-network
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    expose:
+      - "6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
     networks:
       - services-network
 
@@ -202,4 +214,6 @@ networks:
     name: skybloom-services-network
 
 volumes:
+  rabbitmq-data:
+  redis-data:
   game-redis-data:
