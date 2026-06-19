@@ -6,105 +6,89 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
 type Config struct {
-	Port                 string
-	DatabaseURL          string
-	RabbitMQURL          string
+	Port string
+	DatabaseURL string
+	RabbitMQURL string
 	DocumentContentQueue string
-	TempDir              string
-	RedisURL             string
-	TaskStatusTTL        time.Duration
+	RedisURL string
+	TaskStatusTTL time.Duration
+	S3Bucket string
+	S3Endpoint string
+	S3AccessKey string
+	S3SecretKey string
+	S3Region string
 }
 
 func Load() (Config, error) {
+
 	databaseURL, err := databaseURLFromEnv()
 	if err != nil {
 		return Config{}, err
 	}
 
+	mq := os.Getenv("RABBITMQ_URL")
+	redis := os.Getenv("REDIS_URL")
+	taskStatusTTLSeconds := os.Getenv("TASK_STATUS_TTL_SECONDS")
+	bucket := os.Getenv("AWS_S3_BUCKET")
+	endpoint := os.Getenv("AWS_S3_ENDPOINT_URL")
+	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	region := os.Getenv("AWS_REGION")
+
+	if mq == "" || redis == "" || taskStatusTTLSeconds == "" ||
+		bucket == "" || endpoint == "" ||
+		accessKey == "" || secretKey == "" || region == "" {
+		return Config{}, errors.New("missing environment variables")
+	}
+
+	taskStatusTTL, err := strconv.Atoi(taskStatusTTLSeconds)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
-		Port:                 envOrDefault("DOCUMENT_CONTENT_API_PORT", envOrDefault("PORT", "8000")),
+		Port:                 "8000",
 		DatabaseURL:          databaseURL,
-		RabbitMQURL:          envOrDefault("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/"),
-		DocumentContentQueue: envOrDefault("DOCUMENT_CONTENT_QUEUE", "document.process"),
-		TempDir:              envOrDefault("TEMP_DIR", "/temp"),
-		RedisURL:             envOrDefault("REDIS_URL", "redis://redis:6379/0"),
-		TaskStatusTTL:        envDurationSeconds("TASK_STATUS_TTL_SECONDS", 7*24*time.Hour),
+		RabbitMQURL:          mq,
+		DocumentContentQueue: "document-content-queue",
+		RedisURL:             redis,
+		TaskStatusTTL:        time.Duration(taskStatusTTL) * time.Second,
+		S3Bucket:             bucket,
+		S3Endpoint:           endpoint,
+		S3AccessKey:          accessKey,
+		S3SecretKey:          secretKey,
+		S3Region:             region,
 	}, nil
 }
 
 func databaseURLFromEnv() (string, error) {
-	if raw := strings.TrimSpace(firstNonEmpty(
-		os.Getenv("DOCUMENT_CONTENT_DATABASE_URL"),
-		os.Getenv("DATABASE_URL"),
-		os.Getenv("POSTGRES_DSN"),
-	)); raw != "" {
-		return normalizePostgresURL(raw), nil
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
+	dbName := os.Getenv("POSTGRES_DB")
+	user := os.Getenv("POSTGRES_USER")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	sslMode := os.Getenv("POSTGRES_SSLMODE")
+
+	if host == "" || port == "" || dbName == "" ||
+		user == "" || password == "" || sslMode == "" {
+		return "", errors.New("missing PostgreSQL database env variables.")
 	}
 
-	host := firstNonEmpty(os.Getenv("DOCUMENT_CONTENT_POSTGRES_HOST"), os.Getenv("POSTGRES_HOST"), os.Getenv("AWS_RDS_POSTGRES_HOST"))
-	port := firstNonEmpty(os.Getenv("DOCUMENT_CONTENT_POSTGRES_PORT"), os.Getenv("POSTGRES_PORT"), "5432")
-	dbName := firstNonEmpty(os.Getenv("DOCUMENT_CONTENT_POSTGRES_DB"), os.Getenv("POSTGRES_DB"))
-	user := firstNonEmpty(os.Getenv("DOCUMENT_CONTENT_POSTGRES_USER"), os.Getenv("POSTGRES_USER"))
-	password := firstNonEmpty(os.Getenv("DOCUMENT_CONTENT_POSTGRES_PASSWORD"), os.Getenv("POSTGRES_PASSWORD"))
-	sslMode := firstNonEmpty(os.Getenv("DOCUMENT_CONTENT_POSTGRES_SSLMODE"), os.Getenv("POSTGRES_SSLMODE"), "require")
-	if strings.TrimSpace(host) == "" || strings.TrimSpace(dbName) == "" ||
-		strings.TrimSpace(user) == "" || password == "" {
-		return "", errors.New("set DATABASE_URL or POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER, and POSTGRES_PASSWORD")
-	}
-
+	// Constructing postgres database URL
 	u := &url.URL{
 		Scheme: "postgres",
 		User:   url.UserPassword(user, password),
 		Host:   net.JoinHostPort(host, port),
 		Path:   "/" + dbName,
 	}
+
 	query := u.Query()
-	if sslMode != "" {
-		query.Set("sslmode", sslMode)
-	}
+	query.Set("sslmode", sslMode)
 	u.RawQuery = query.Encode()
+
 	return u.String(), nil
-}
-
-func normalizePostgresURL(raw string) string {
-	if strings.HasPrefix(raw, "postgresql+psycopg://") {
-		return "postgres://" + strings.TrimPrefix(raw, "postgresql+psycopg://")
-	}
-	if strings.HasPrefix(raw, "postgresql://") {
-		return "postgres://" + strings.TrimPrefix(raw, "postgresql://")
-	}
-	return raw
-}
-
-func envOrDefault(key string, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func envDurationSeconds(key string, fallback time.Duration) time.Duration {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return fallback
-	}
-	seconds, err := strconv.Atoi(value)
-	if err != nil || seconds <= 0 {
-		return fallback
-	}
-	return time.Duration(seconds) * time.Second
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

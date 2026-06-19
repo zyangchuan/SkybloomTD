@@ -876,9 +876,6 @@ components:
       required:
         - message
         - task_id
-        - ocr_task_id
-        - upload_task_id
-        - index_task_id
         - user_id
         - document_id
         - game_name
@@ -891,15 +888,6 @@ components:
           type: string
           pattern: "^[a-f0-9]{32}$"
           description: Main document processing task id. Poll this id through the task status endpoint.
-        ocr_task_id:
-          type: string
-          pattern: "^[a-f0-9]{32}$"
-        upload_task_id:
-          type: string
-          pattern: "^[a-f0-9]{32}$"
-        index_task_id:
-          type: string
-          pattern: "^[a-f0-9]{32}$"
         user_id:
           type: string
           format: uuid

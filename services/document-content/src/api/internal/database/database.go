@@ -2,7 +2,7 @@ package database
 
 import (
 	"context"
-	"errors"
+	"time"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -11,9 +11,6 @@ import (
 )
 
 func Open(ctx context.Context, databaseURL string) (*gorm.DB, func() error, error) {
-	if databaseURL == "" {
-		return nil, nil, errors.New("database URL is required")
-	}
 
 	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
 	if err != nil {
@@ -24,6 +21,11 @@ func Open(ctx context.Context, databaseURL string) (*gorm.DB, func() error, erro
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Database connection health check
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	if err := sqlDB.PingContext(ctx); err != nil {
 		sqlDB.Close()
 		return nil, nil, err
@@ -38,8 +40,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 	}
 
 	statements := []string{
+		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_filename TEXT`,
 		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS game_name TEXT`,
-		`UPDATE documents SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(filename, ''), 'Untitled Game') WHERE game_name IS NULL OR game_name = ''`,
+		`UPDATE documents SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(source_filename, ''), 'Untitled Game') WHERE game_name IS NULL OR game_name = ''`,
 		`ALTER TABLE documents ALTER COLUMN game_name SET DEFAULT 'Untitled Game'`,
 		`ALTER TABLE documents ALTER COLUMN game_name SET NOT NULL`,
 		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS task_id TEXT`,
@@ -47,11 +50,6 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 		`UPDATE documents SET is_ready = false WHERE is_ready IS NULL`,
 		`ALTER TABLE documents ALTER COLUMN is_ready SET DEFAULT false`,
 		`ALTER TABLE documents ALTER COLUMN is_ready SET NOT NULL`,
-		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_type TEXT`,
-		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_bucket TEXT`,
-		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_key TEXT`,
-		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_path TEXT`,
-		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_content_type TEXT`,
 		`CREATE INDEX IF NOT EXISTS documents_task_id_idx ON documents(task_id)`,
 		`CREATE INDEX IF NOT EXISTS documents_user_id_idx ON documents(user_id)`,
 	}

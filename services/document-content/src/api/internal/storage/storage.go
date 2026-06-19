@@ -3,10 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
+	"errors"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -15,60 +12,31 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
+	"skybloom/document-content-api/internal/config"
 	"skybloom/document-content-api/internal/models"
 )
 
 type Storage struct {
 	client *s3.Client
 	bucket string
-	prefix string
 }
 
-func NewFromEnv() (*Storage, error) {
-	bucket := strings.TrimSpace(os.Getenv("AWS_S3_BUCKET"))
-	endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("AWS_S3_ENDPOINT_URL")), "/")
-	accessKey := strings.TrimSpace(os.Getenv("AWS_ACCESS_KEY_ID"))
-	secretKey := strings.TrimSpace(os.Getenv("AWS_SECRET_ACCESS_KEY"))
-	region := envOrDefault("AWS_REGION", envOrDefault("AWS_DEFAULT_REGION", "us-east-1"))
-	prefix := strings.Trim(strings.TrimSpace(os.Getenv("AWS_S3_PREFIX")), "/")
-
-	if bucket == "" {
-		return nil, nil
-	}
-	if endpoint == "" || accessKey == "" || secretKey == "" {
-		return nil, fmt.Errorf("AWS_S3_ENDPOINT_URL, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY are required when AWS_S3_BUCKET is set")
-	}
-
-	if strings.HasPrefix(bucket, "s3://") {
-		parsed, err := url.Parse(bucket)
-		if err != nil {
-			return nil, err
-		}
-		bucket = parsed.Host
-		uriPrefix := strings.Trim(parsed.Path, "/")
-		prefix = joinKey(uriPrefix, prefix)
-	}
-
+func NewFromConfig(cfg config.Config) (*Storage, error) {
 	awsConfig, err := awsconfig.LoadDefaultConfig(
 		context.Background(),
-		awsconfig.WithRegion(region),
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-		awsconfig.WithEndpointResolverWithOptions(
-			aws.EndpointResolverWithOptionsFunc(
-				func(service, region string, options ...any) (aws.Endpoint, error) {
-					return aws.Endpoint{URL: endpoint, HostnameImmutable: true}, nil
-				},
-			),
-		),
+		awsconfig.WithRegion(cfg.S3Region),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.S3AccessKey, cfg.S3SecretKey, "")),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	client := s3.NewFromConfig(awsConfig, func(options *s3.Options) {
+		options.BaseEndpoint = aws.String(cfg.S3Endpoint)
 		options.UsePathStyle = true
 	})
-	return &Storage{client: client, bucket: bucket, prefix: prefix}, nil
+
+	return &Storage{client: client, bucket: cfg.S3Bucket}, nil
 }
 
 func (s *Storage) UploadSource(
@@ -79,7 +47,8 @@ func (s *Storage) UploadSource(
 	filename string,
 	contentType string,
 ) (models.SourceRef, error) {
-	key := joinKey(s.prefix, "users", userID, "documents", documentID, "source", filename)
+
+	key := joinKey(userID, documentID, "source", filename)
 	input := &s3.PutObjectInput{
 		Bucket: &s.bucket,
 		Key:    &key,
@@ -92,48 +61,19 @@ func (s *Storage) UploadSource(
 		return models.SourceRef{}, err
 	}
 	return models.SourceRef{
-		Type:        "s3",
-		Bucket:      s.bucket,
-		Key:         key,
-		Filename:    filename,
-		ContentType: contentType,
+		S3Bucket:       s.bucket,
+		SourceFilename: filename,
 	}, nil
 }
 
-func (s *Storage) DeleteDocumentAssets(ctx context.Context, document models.Document) error {
-	targets := uniqueDeleteTargets(document)
-	for _, target := range targets {
-		if target.Prefix != "" {
-			if err := s.deletePrefix(ctx, target.Bucket, target.Prefix); err != nil {
-				return err
-			}
-			continue
-		}
-		if target.Key != "" {
-			if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
-				Bucket: aws.String(target.Bucket),
-				Key:    aws.String(target.Key),
-			}); err != nil {
-				return err
-			}
-		}
+func (s *Storage) DeleteDocumentFiles(ctx context.Context, document models.Document) error {
+	if document.S3Bucket == nil {
+		return errors.New("document bucket is nil")
 	}
 
-	if document.SourcePath != nil && strings.TrimSpace(*document.SourcePath) != "" {
-		if err := os.RemoveAll(filepath.Dir(*document.SourcePath)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+	bucket := *document.S3Bucket
+	prefix := models.S3DirectoryPath(document.UserID, document.ID) + "/"
 
-type deleteTarget struct {
-	Bucket string
-	Prefix string
-	Key    string
-}
-
-func (s *Storage) deletePrefix(ctx context.Context, bucket string, prefix string) error {
 	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 		Prefix: aws.String(prefix),
@@ -170,49 +110,6 @@ func (s *Storage) deletePrefix(ctx context.Context, bucket string, prefix string
 	return nil
 }
 
-func uniqueDeleteTargets(document models.Document) []deleteTarget {
-	targets := make([]deleteTarget, 0, 2)
-	seen := map[deleteTarget]bool{}
-	add := func(bucket *string, key *string) {
-		if bucket == nil || key == nil {
-			return
-		}
-		cleanBucket := strings.TrimSpace(*bucket)
-		cleanKey := strings.Trim(strings.TrimSpace(*key), "/")
-		if cleanBucket == "" || cleanKey == "" {
-			return
-		}
-
-		target := deleteTarget{
-			Bucket: cleanBucket,
-			Prefix: documentS3Prefix(cleanKey, document.ID.String()),
-		}
-		if target.Prefix == "" {
-			target.Key = cleanKey
-		}
-		if !seen[target] {
-			targets = append(targets, target)
-			seen[target] = true
-		}
-	}
-
-	add(document.SourceBucket, document.SourceKey)
-	add(document.S3Bucket, document.S3Key)
-	return targets
-}
-
-func documentS3Prefix(key string, documentID string) string {
-	marker := "/documents/" + documentID + "/"
-	index := strings.Index(key, marker)
-	if index == -1 {
-		if strings.HasPrefix(key, strings.TrimPrefix(marker, "/")) {
-			return strings.TrimPrefix(marker, "/")
-		}
-		return ""
-	}
-	return key[:index+len(marker)]
-}
-
 func joinKey(parts ...string) string {
 	clean := make([]string, 0, len(parts))
 	for _, part := range parts {
@@ -224,9 +121,3 @@ func joinKey(parts ...string) string {
 	return strings.Join(clean, "/")
 }
 
-func envOrDefault(key string, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}

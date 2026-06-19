@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strings"
 )
 
 type Config struct {
@@ -19,27 +18,25 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+
 	return Config{
 		DatabaseURL: databaseURL,
-		Host:        envOrDefault("CONTENT_GRPC_HOST", "0.0.0.0"),
-		Port:        envOrDefault("CONTENT_GRPC_PORT", "50051"),
+		Host:        "0.0.0.0",
+		Port:        "50051",
 	}, nil
 }
 
 func databaseURLFromEnv() (string, error) {
-	if raw := strings.TrimSpace(os.Getenv("DATABASE_URL")); raw != "" {
-		return normalizePostgresURL(raw), nil
-	}
-
-	host := firstNonEmpty(os.Getenv("POSTGRES_HOST"), os.Getenv("AWS_RDS_POSTGRES_HOST"))
-	port := firstNonEmpty(os.Getenv("POSTGRES_PORT"), "5432")
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
 	dbName := os.Getenv("POSTGRES_DB")
 	user := os.Getenv("POSTGRES_USER")
 	password := os.Getenv("POSTGRES_PASSWORD")
-	sslMode := firstNonEmpty(os.Getenv("POSTGRES_SSLMODE"), "require")
-	if strings.TrimSpace(host) == "" || strings.TrimSpace(dbName) == "" ||
-		strings.TrimSpace(user) == "" || password == "" {
-		return "", errors.New("set DATABASE_URL or POSTGRES_HOST, POSTGRES_DB, POSTGRES_USER, and POSTGRES_PASSWORD")
+	sslMode := os.Getenv("POSTGRES_SSLMODE")
+
+	if host == "" || port == "" || dbName == "" ||
+		user == "" || password == "" || sslMode == "" {
+		return "", errors.New("missing PostgreSQL database env variables")
 	}
 
 	u := &url.URL{
@@ -49,35 +46,7 @@ func databaseURLFromEnv() (string, error) {
 		Path:   "/" + dbName,
 	}
 	query := u.Query()
-	if sslMode != "" {
-		query.Set("sslmode", sslMode)
-	}
+	query.Set("sslmode", sslMode)
 	u.RawQuery = query.Encode()
 	return u.String(), nil
-}
-
-func normalizePostgresURL(raw string) string {
-	if strings.HasPrefix(raw, "postgresql+psycopg://") {
-		return "postgres://" + strings.TrimPrefix(raw, "postgresql+psycopg://")
-	}
-	if strings.HasPrefix(raw, "postgresql://") {
-		return "postgres://" + strings.TrimPrefix(raw, "postgresql://")
-	}
-	return raw
-}
-
-func envOrDefault(key string, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }
