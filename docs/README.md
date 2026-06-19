@@ -36,6 +36,8 @@ ignored so secrets do not get committed.
 
 Frontend app/game variables are merged into those root env files. Compose no longer reads `frontend/app/.env.*` or `frontend/game/.env.*`.
 
+RabbitMQ and Redis are Compose services for every root profile. Service code uses fixed Compose hostnames (`rabbitmq`, `redis`, and `game-redis`) instead of env-configured broker/cache URLs. They are private Docker-network services by default; `docker-compose.local.yml` additionally publishes local host ports for development and the RabbitMQ management UI.
+
 When the Docker stack is running, Nginx also serves it from the public base URL
 configured in `SKYBLOOM_PUBLIC_BASE_URL`:
 
@@ -50,7 +52,7 @@ $SKYBLOOM_PUBLIC_BASE_URL/docs
 ```
 
 All browser-facing API calls should go through the reverse proxy on port 80.
-Backend containers are private Docker-network services.
+Backend containers are private Docker-network services, including the shared `rabbitmq`, `redis`, and `game-redis` containers.
 
 The full application uses the root compose files. For a worker-only host, use `services/document-content/docker-compose.worker.yml` with the matching worker override, for example `docker-compose.worker.staging.yml` or `docker-compose.worker.production.yml`.
 

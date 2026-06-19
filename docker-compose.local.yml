@@ -25,19 +25,12 @@ services:
   document-content-api:
     env_file:
       - ./.env.local
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - services-network
 
   document-content-grpc:
     env_file:
       - ./.env.local
-    depends_on:
-      - redis
 
   document-content-worker:
     container_name: document-content-worker
@@ -69,76 +62,23 @@ services:
   game-service:
     env_file:
       - ./.env.local
-    environment:
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      REDIS_URL: redis://redis:6379/0
-      GAME_STATUS_REDIS_URL: redis://redis:6379/0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      game-redis:
-        condition: service_started
 
   game-generation-worker:
     env_file:
       - ./.env.local
-    environment:
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      REDIS_URL: redis://redis:6379/0
-      GAME_STATUS_REDIS_URL: redis://redis:6379/0
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      document-content-grpc:
-        condition: service_healthy
-      game-redis:
-        condition: service_started
 
   user-service:
     env_file:
       - ./.env.local
 
   rabbitmq:
-    container_name: rabbitmq
-    image: rabbitmq:3-management-alpine
     ports:
-      - "5672:5672"
-      - "15672:15672"
-    volumes:
-      - rabbitmq-data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - services-network
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
 
   redis:
-    container_name: redis
-    image: redis:7-alpine
-    command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
-      interval: 10s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
-    restart: unless-stopped
-    networks:
-      - services-network
+      - "${REDIS_PORT:-6379}:6379"
 
 volumes:
-  rabbitmq-data:
-  redis-data:
   models:

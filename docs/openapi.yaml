@@ -9,6 +9,7 @@ info:
     Backend services are private Docker-network services and should be accessed
     through these paths. Local, dev, staging, and production profiles are
     selected with a single root env file plus the matching compose override.
+    RabbitMQ and Redis run as private Compose services in every root profile; service code connects to them through fixed Compose hostnames.
 
     Protected backend routes require a Supabase JWT stored in the
     `skybloom_access_token` cookie. Nginx verifies the cookie through
