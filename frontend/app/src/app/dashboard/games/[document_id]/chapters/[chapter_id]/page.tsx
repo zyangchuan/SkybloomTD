@@ -8,6 +8,7 @@ import OrangeSquare from '@/components/OrangeSquare';
 import ButtonWhite from '@/components/ButtonWhite';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { syncAuthCookie } from '@/lib/auth-cookie';
+import  PageBgm  from '@/components/PageBgm';
 
 interface SubChapter {
   sub_chapter_id: string;
@@ -135,6 +136,7 @@ export default function LevelsPage({ params }: PageProps) {
 
   return (
     <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-8 flex flex-col justify-center items-center">
+      <PageBgm src="/bgm/paradise_found.mp3"/>
       <OrangeSquare className="w-full flex flex-col p-6 sm:p-8 bg-[#fdfaf2] border-4 border-yellow-800 rounded-3xl shadow-2xl relative min-h-[500px]">
         
         {/* Navigation Header */}

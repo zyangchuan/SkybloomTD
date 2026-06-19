@@ -11,18 +11,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"skybloom/game-service/internal/config"
-	"skybloom/game-service/internal/gameobject"
 	"skybloom/game-service/internal/gamesession"
 	"skybloom/game-service/internal/generation"
 	"skybloom/game-service/internal/mapcache"
 	"skybloom/game-service/internal/mapgen"
 	"skybloom/game-service/internal/models"
 	"skybloom/game-service/internal/quizcache"
-	"skybloom/game-service/internal/quiztext"
 	"skybloom/game-service/internal/repository"
 )
 
@@ -32,9 +29,13 @@ const gameTickInterval = 50 * time.Millisecond
 const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
+const evolveTowerAction = "evolve_tower"
 const awardQuizEssenceAction = "award_quiz_essence"
 const pauseGameAction = "pause_game"
 const resumeGameAction = "resume_game"
+
+// add action to speed up game
+const setSpeedAction = "set_speed"
 
 const (
 	waveClearDelayTicks     = int64(60)
@@ -98,173 +99,6 @@ type Server struct {
 	upgrader websocket.Upgrader
 }
 
-type Message struct {
-	Type string `json:"type"`
-	Data any    `json:"data,omitempty"`
-}
-
-type InitialState struct {
-	Map mapgen.GeneratedMap `json:"map"`
-}
-
-type GameState struct {
-	SessionID   string            `json:"session_id"`
-	LevelID     string            `json:"level_id"`
-	Health      int               `json:"health"`
-	Essence     int               `json:"essence"`
-	Wave        int               `json:"wave"`
-	Tick        int64             `json:"tick"`
-	ServerTime  time.Time         `json:"server_time"`
-	BirdTypes   []BirdTypeInfo    `json:"bird_types,omitempty"`
-	Birds       []PlacedBirdState `json:"birds"`
-	Smogs       []SmogState       `json:"smogs"`
-	Projectiles []ProjectileState `json:"projectiles"`
-	Events      []GameEvent       `json:"events,omitempty"`
-}
-
-type BirdTypeInfo struct {
-	Type   string               `json:"type"`
-	Stats  gameobject.BirdStats `json:"stats"`
-	Attack string               `json:"attack"`
-}
-
-type PlacedBirdState struct {
-	ID              string               `json:"id"`
-	Type            string               `json:"type"`
-	Position        gameobject.Position  `json:"position"`
-	Stats           gameobject.BirdStats `json:"stats"`
-	LastFiredAtTick int64                `json:"last_fired_at_tick"`
-}
-
-type SmogState struct {
-	ID        string              `json:"id"`
-	Health    int                 `json:"health"`
-	Position  gameobject.Position `json:"position"`
-	Speed     float64             `json:"speed"`
-	PathIndex int                 `json:"path_index"`
-}
-
-type ProjectileState struct {
-	ID              string                    `json:"id"`
-	Type            gameobject.ProjectileType `json:"type"`
-	Damage          float64                   `json:"damage"`
-	ProjectileSpeed float64                   `json:"projectile_speed"`
-	Position        gameobject.Position       `json:"position"`
-	Direction       gameobject.Vector         `json:"direction"`
-	TargetID        string                    `json:"target_id,omitempty"`
-	RemainingRange  float64                   `json:"remaining_range"`
-	HitRadius       float64                   `json:"hit_radius"`
-}
-
-type GameEvent struct {
-	Type          string   `json:"type"`
-	BirdID        string   `json:"bird_id,omitempty"`
-	SmogID        string   `json:"smog_id,omitempty"`
-	ProjectileID  string   `json:"projectile_id,omitempty"`
-	ProjectileIDs []string `json:"projectile_ids,omitempty"`
-	Damage        float64  `json:"damage,omitempty"`
-	Health        int      `json:"health,omitempty"`
-	Wave          int      `json:"wave,omitempty"`
-}
-
-type GameOverState struct {
-	SessionID string `json:"session_id"`
-	LevelID   string `json:"level_id"`
-	Health    int    `json:"health"`
-	Wave      int    `json:"wave"`
-	Tick      int64  `json:"tick"`
-	Reason    string `json:"reason"`
-}
-
-type GameVictoryState struct {
-	SessionID string `json:"session_id"`
-	LevelID   string `json:"level_id"`
-	Health    int    `json:"health"`
-	Wave      int    `json:"wave"`
-	Tick      int64  `json:"tick"`
-	Reason    string `json:"reason"`
-}
-
-type GameExitedState struct {
-	SessionID string `json:"session_id,omitempty"`
-	Deleted   bool   `json:"deleted"`
-	Reason    string `json:"reason"`
-}
-
-type QuizPromptState struct {
-	QuizID           string   `json:"quiz_id"`
-	QuizType         string   `json:"quiz_type"`
-	QuestionMarkdown string   `json:"question_markdown"`
-	OptionsMarkdown  []string `json:"options_markdown"`
-	Remaining        int      `json:"remaining"`
-}
-
-type QuizUnavailableState struct {
-	Reason string `json:"reason"`
-}
-
-type QuizResultState struct {
-	QuizID                 string `json:"quiz_id"`
-	Correct                bool   `json:"correct"`
-	SelectedIndex          int    `json:"selected_index"`
-	CorrectIndex           int    `json:"correct_index"`
-	SelectedOptionMarkdown string `json:"selected_option_markdown"`
-	CorrectOptionMarkdown  string `json:"correct_option_markdown"`
-	EssenceAwarded         int    `json:"essence_awarded"`
-	Essence                int    `json:"essence,omitempty"`
-	Remaining              int    `json:"remaining"`
-}
-
-type placeTowerRequest struct {
-	BirdType string `json:"bird_type"`
-	X        int    `json:"x"`
-	Y        int    `json:"y"`
-}
-
-type gameExitRequest struct {
-	SessionID string `json:"session_id"`
-}
-
-type quizAnswerRequest struct {
-	QuizID        string `json:"quiz_id"`
-	SelectedIndex int    `json:"selected_index"`
-}
-
-type clientAction struct {
-	Type          string
-	PlaceTower    placeTowerRequest
-	EssenceReward int
-	Result        chan actionResult
-}
-
-type actionResult struct {
-	Essence int
-	Err     error
-}
-
-type runningGameLoop struct {
-	sessionID     string
-	levelID       string
-	generationID  string
-	userID        string
-	currentQuizID string
-	stop          context.CancelFunc
-	actions       chan clientAction
-	done          chan struct{}
-}
-
-func (l *runningGameLoop) stopped() bool {
-	if l == nil {
-		return true
-	}
-	select {
-	case <-l.done:
-		return true
-	default:
-		return false
-	}
-}
-
 func stopGameLoop(loop *runningGameLoop) {
 	if loop == nil {
 		return
@@ -276,65 +110,20 @@ func stopGameLoop(loop *runningGameLoop) {
 	}
 }
 
-type runtimeSession struct {
-	session     gamesession.State
-	economy     gamesession.Economy
-	birds       []placedBird
-	smogs       []gameobject.Smog
-	projectiles []gameobject.Projectile
-	levelMap    mapgen.GeneratedMap
-	path        []gameobject.Position
-	loopStarted bool
-	loopPaused  bool
-
-	waveStartedAtTick int64
-	waveSpawned       int
-	nextWaveTick      int64
-}
-
-type placedBird struct {
-	birdType string
-	bird     gameobject.Bird
-}
-
 func New(cfg config.Config, levels LevelRepository, maps MapCache) *Server {
-	return NewWithGeneration(cfg, levels, maps, nil, nil, nil)
+	return NewWithGenerationCachesAndSessions(cfg, levels, maps, nil, nil, nil, nil, nil)
 }
 
-func NewWithGeneration(
-	cfg config.Config,
-	levels LevelRepository,
-	maps MapCache,
-	jobs GenerationRepository,
-	starter GenerationStarter,
-	statuses GenerationStatusStore,
-) *Server {
-	return NewWithGenerationAndCaches(cfg, levels, maps, nil, jobs, starter, statuses)
+func NewWithGeneration(cfg config.Config, levels LevelRepository, maps MapCache, jobs GenerationRepository, starter GenerationStarter, statuses GenerationStatusStore) *Server {
+	return NewWithGenerationCachesAndSessions(cfg, levels, maps, nil, jobs, starter, statuses, nil)
 }
 
-func NewWithGenerationAndCaches(
-	cfg config.Config,
-	levels LevelRepository,
-	maps MapCache,
-	quizzes QuizCache,
-	jobs GenerationRepository,
-	starter GenerationStarter,
-	statuses GenerationStatusStore,
-) *Server {
+func NewWithGenerationAndCaches(cfg config.Config, levels LevelRepository, maps MapCache, quizzes QuizCache, jobs GenerationRepository, starter GenerationStarter, statuses GenerationStatusStore) *Server {
 	return NewWithGenerationCachesAndSessions(cfg, levels, maps, quizzes, jobs, starter, statuses, nil)
 }
 
-func NewWithGenerationCachesAndSessions(
-	cfg config.Config,
-	levels LevelRepository,
-	maps MapCache,
-	quizzes QuizCache,
-	jobs GenerationRepository,
-	starter GenerationStarter,
-	statuses GenerationStatusStore,
-	sessions GameSessionStore,
-) *Server {
-	server := &Server{
+func NewWithGenerationCachesAndSessions(cfg config.Config, levels LevelRepository, maps MapCache, quizzes QuizCache, jobs GenerationRepository, starter GenerationStarter, statuses GenerationStatusStore, sessions GameSessionStore) *Server {
+	s := &Server{
 		config:   cfg,
 		levels:   levels,
 		jobs:     jobs,
@@ -344,10 +133,8 @@ func NewWithGenerationCachesAndSessions(
 		quizzes:  quizzes,
 		sessions: sessions,
 	}
-	server.upgrader = websocket.Upgrader{
-		CheckOrigin: server.checkOrigin,
-	}
-	return server
+	s.upgrader = websocket.Upgrader{CheckOrigin: s.checkOrigin}
+	return s
 }
 
 func (s *Server) Router() http.Handler {
@@ -531,6 +318,26 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				default:
 				}
 			}
+		case "game.speed":
+    		var req struct {
+       			 Multiplier int `json:"multiplier"`
+  		    }
+   		    if err := decodeMessageData(message.Data, &req); err != nil || req.Multiplier < 1 {
+      			req.Multiplier = 1
+    		}
+			if req.Multiplier == 2 {
+				req.Multiplier = 2
+			}
+  		    if req.Multiplier > 4 {
+   			    req.Multiplier = 4
+   		    }
+   		   if gameLoop != nil && !gameLoop.stopped() {
+   			    select {
+				case gameLoop.actions <- clientAction{Type: setSpeedAction, SpeedMultiplier: req.Multiplier}:
+       		    default:
+       			}
+		   }
+		   
 		case "game.resume":
 			if gameLoop != nil && !gameLoop.stopped() {
 				select {
@@ -547,21 +354,20 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				}
 				continue
 			}
-			if gameLoop == nil || gameLoop.stopped() {
-				gameLoop = nil
-				if writeErr := writeActionRejected(conn, writeMu, placeTowerAction, "game session is not running"); writeErr != nil {
+			if fatal := enqueueAction(conn, writeMu, &gameLoop, placeTowerAction, clientAction{Type: placeTowerAction, PlaceTower: action}); fatal {
+				return
+			}
+		case "game.action.evolve_tower":
+			action, err := decodeEvolveTowerAction(message.Data)
+			if err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, evolveTowerAction, err.Error()); writeErr != nil {
 					log.Printf("websocket action rejection write failed: %v", writeErr)
 					return
 				}
 				continue
 			}
-			select {
-			case gameLoop.actions <- clientAction{Type: placeTowerAction, PlaceTower: action}:
-			default:
-				if writeErr := writeActionRejected(conn, writeMu, placeTowerAction, "action queue is full"); writeErr != nil {
-					log.Printf("websocket action rejection write failed: %v", writeErr)
-					return
-				}
+			if fatal := enqueueAction(conn, writeMu, &gameLoop, evolveTowerAction, clientAction{Type: evolveTowerAction, EvolveTower: action}); fatal {
+				return
 			}
 		case "ping":
 			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "pong"}); err != nil {
@@ -588,951 +394,6 @@ func isExpectedWebsocketClose(err error) bool {
 		strings.Contains(err.Error(), "connection reset by peer")
 }
 
-func (s *Server) handleStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
-	if s.starter == nil {
-		return errors.New("level generation is not configured")
-	}
-	var request struct {
-		SubChapterID string `json:"sub_chapter_id"`
-	}
-	if err := decodeMessageData(data, &request); err != nil {
-		return errors.New("game.start data must include sub_chapter_id")
-	}
-	subChapterID := strings.TrimSpace(request.SubChapterID)
-	if !uuidPattern.MatchString(subChapterID) {
-		return errors.New("sub_chapter_id must be a valid UUID")
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	result, err := s.starter.Start(callCtx, userID, subChapterID)
-	if err != nil {
-		return err
-	}
-	return writeWebsocketJSON(conn, writeMu, Message{Type: "level_generation.started", Data: result})
-}
-
-func (s *Server) handleLoad(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
-	var request struct {
-		LevelID string `json:"level_id"`
-	}
-	if err := decodeMessageData(data, &request); err != nil {
-		return errors.New("game.load data must include level_id")
-	}
-	levelID := strings.TrimSpace(request.LevelID)
-	if !uuidPattern.MatchString(levelID) {
-		return errors.New("level_id must be a valid UUID")
-	}
-	return s.writeInitialState(ctx, conn, writeMu, userID, levelID)
-}
-
-func (s *Server) writeInitialState(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, levelID string) error {
-	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	level, err := s.levels.GetBootstrap(callCtx, levelID, userID)
-	if errors.Is(err, models.ErrLevelNotFound) {
-		return errors.New("level not found")
-	}
-	if err != nil {
-		log.Printf("level bootstrap lookup failed level_id=%s user_id=%s: %v", levelID, userID, err)
-		return errors.New("failed to load level")
-	}
-
-	levelMap, err := s.loadMap(callCtx, level)
-	if err != nil {
-		log.Printf("level map load failed level_id=%s generation_id=%s: %v", levelID, level.GenerationID, err)
-		return errors.New("failed to load level map")
-	}
-	if err := s.cacheQuizzes(callCtx, level); err != nil {
-		log.Printf("level quiz cache write failed level_id=%s generation_id=%s: %v", levelID, level.GenerationID, err)
-		return errors.New("failed to load level quizzes")
-	}
-
-	initialState := InitialState{
-		Map: levelMap,
-	}
-	return writeWebsocketJSON(conn, writeMu, Message{Type: "game.initial_state", Data: initialState})
-}
-
-func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) (*runningGameLoop, error) {
-	if s.sessions == nil {
-		return nil, errors.New("game session store is not configured")
-	}
-	var request struct {
-		LevelID string `json:"level_id"`
-	}
-	if err := decodeMessageData(data, &request); err != nil {
-		return nil, errors.New("game.session.start data must include level_id")
-	}
-	levelID := strings.TrimSpace(request.LevelID)
-	if !uuidPattern.MatchString(levelID) {
-		return nil, errors.New("level_id must be a valid UUID")
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// Flush/Clear old quiz mistakes for this level and user so they start the new run with a clean slate
-	if err := s.levels.ClearQuizMistakes(callCtx, userID, levelID); err != nil {
-		log.Printf("failed to clear quiz mistakes level_id=%s user_id=%s: %v", levelID, userID, err)
-	}
-
-	level, err := s.levels.GetBootstrap(callCtx, levelID, userID)
-	if errors.Is(err, models.ErrLevelNotFound) {
-		return nil, errors.New("level not found")
-	}
-	if err != nil {
-		log.Printf("level bootstrap lookup failed level_id=%s user_id=%s: %v", levelID, userID, err)
-		return nil, errors.New("failed to load level")
-	}
-	if err := s.cacheQuizzes(callCtx, level); err != nil {
-		log.Printf("level quiz cache write failed level_id=%s generation_id=%s: %v", levelID, level.GenerationID, err)
-		return nil, errors.New("failed to load level quizzes")
-	}
-	levelMap, err := s.loadMap(callCtx, level)
-	if err != nil {
-		log.Printf("level map load failed level_id=%s generation_id=%s: %v", levelID, level.GenerationID, err)
-		return nil, errors.New("failed to load level map")
-	}
-
-	session, err := s.sessions.Start(callCtx, gamesession.StartOptions{
-		UserID:       userID,
-		LevelID:      level.LevelID,
-		GenerationID: level.GenerationID,
-		SubChapterID: level.SubChapterID,
-	})
-	if err != nil {
-		log.Printf("game session create failed level_id=%s user_id=%s: %v", levelID, userID, err)
-		return nil, errors.New("failed to start game session")
-	}
-	storedRuntime, err := s.sessions.LoadRuntimeState(callCtx, session.SessionID)
-	if err != nil {
-		log.Printf("game session runtime load failed session_id=%s: %v", session.SessionID, err)
-		return nil, errors.New("failed to load game session")
-	}
-	storedRuntime = normalizeRuntimeState(storedRuntime)
-	restoredBirds, err := placedBirdsFromStored(storedRuntime.Birds)
-	if err != nil {
-		log.Printf("game session birds restore failed session_id=%s: %v", session.SessionID, err)
-		return nil, errors.New("failed to restore game session")
-	}
-	restoredProjectiles := projectilesFromStored(storedRuntime.Projectiles)
-	session.Health = storedRuntime.Health
-	session.Essence = storedRuntime.Essence
-	session.Wave = storedRuntime.Wave
-	session.Tick = storedRuntime.Tick
-
-	runtime := runtimeSession{
-		session:     session,
-		economy:     gamesession.NewEconomy(session.Essence),
-		birds:       restoredBirds,
-		smogs:       smogsFromStored(storedRuntime.Smogs),
-		projectiles: restoredProjectiles,
-		levelMap:    levelMap,
-		path:        gamePath(levelMap),
-		loopStarted: storedRuntime.LoopStarted,
-
-		waveStartedAtTick: storedRuntime.WaveStartedAtTick,
-		waveSpawned:       storedRuntime.WaveSpawned,
-		nextWaveTick:      storedRuntime.NextWaveTick,
-	}
-	state := gameStateFromRuntime(runtime, session.UpdatedAt, birdTypeCatalog(), nil)
-	if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.session.started", Data: state}); err != nil {
-		return nil, err
-	}
-	if runtime.session.Health <= 0 {
-		if err := writeGameOver(conn, writeMu, runtime, "health_depleted"); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-	if gameWon(runtime) {
-		if err := writeGameVictory(conn, writeMu, runtime, "all_waves_cleared"); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-
-	loopCtx, stop := context.WithCancel(ctx)
-	loop := &runningGameLoop{
-		sessionID:    runtime.session.SessionID,
-		levelID:      runtime.session.LevelID,
-		generationID: runtime.session.GenerationID,
-		userID:       runtime.session.UserID,
-		stop:         stop,
-		actions:      make(chan clientAction, 64),
-		done:         make(chan struct{}),
-	}
-	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop.actions, loop.done)
-	return loop, nil
-}
-
-func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, actions <-chan clientAction, done chan<- struct{}) {
-	ticker := time.NewTicker(gameTickInterval)
-	defer ticker.Stop()
-	defer close(done)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case action := <-actions:
-			switch action.Type {
-			case placeTowerAction:
-				if err := s.processClientAction(ctx, &runtime, action); err != nil {
-					if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
-						log.Printf("websocket action rejection write failed: %v", writeErr)
-						return
-					}
-					continue
-				}
-				if err := writeActionAccepted(conn, writeMu, action.Type, runtime.birds[len(runtime.birds)-1]); err != nil {
-					log.Printf("websocket action accepted write failed: %v", err)
-					return
-				}
-			case awardQuizEssenceAction:
-				runtime.loopStarted = true
-				essence, err := s.awardEssence(ctx, &runtime, action.EssenceReward)
-				if action.Result != nil {
-					action.Result <- actionResult{Essence: essence, Err: err}
-				}
-			case pauseGameAction:
-				runtime.loopPaused = true
-			case resumeGameAction:
-				runtime.loopPaused = false
-			default:
-				if action.Result != nil {
-					action.Result <- actionResult{Err: errors.New("unsupported action")}
-				}
-			}
-		case now := <-ticker.C:
-			if runtime.loopPaused {
-				continue
-			}
-			events := advanceRuntimeTick(&runtime, now)
-			if err := s.saveRuntimeState(ctx, runtime); err != nil {
-				log.Printf("game session runtime save failed session_id=%s: %v", runtime.session.SessionID, err)
-			}
-			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, runtime.session.UpdatedAt, nil, events)}); err != nil {
-				log.Printf("game state write failed session_id=%s: %v", runtime.session.SessionID, err)
-				return
-			}
-			if runtime.session.Health <= 0 {
-				if err := writeGameOver(conn, writeMu, runtime, "health_depleted"); err != nil {
-					log.Printf("game over write failed session_id=%s: %v", runtime.session.SessionID, err)
-				}
-				return
-			}
-			if gameWon(runtime) {
-				if err := writeGameVictory(conn, writeMu, runtime, "all_waves_cleared"); err != nil {
-					log.Printf("game victory write failed session_id=%s: %v", runtime.session.SessionID, err)
-				}
-				return
-			}
-		}
-	}
-}
-
-func (s *Server) handleGameExit(ctx context.Context, loop *runningGameLoop, request gameExitRequest) (GameExitedState, error) {
-	sessionID := strings.TrimSpace(request.SessionID)
-	generationID := ""
-	if loop == nil {
-		if sessionID == "" {
-			return GameExitedState{Deleted: false, Reason: "no_running_session"}, nil
-		}
-	} else {
-		sessionID = loop.sessionID
-		generationID = loop.generationID
-		stopGameLoop(loop)
-	}
-	if strings.TrimSpace(sessionID) == "" {
-		return GameExitedState{Deleted: false, Reason: "no_running_session"}, nil
-	}
-	if s.sessions == nil {
-		return GameExitedState{}, errors.New("game session store is not configured")
-	}
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if loop != nil {
-		if err := s.levels.ClearQuizMistakes(callCtx, loop.userID, loop.levelID); err != nil {
-			log.Printf("failed to clear quiz mistakes on exit level_id=%s user_id=%s: %v", loop.levelID, loop.userID, err)
-		}
-	} else if runtime, err := s.sessions.LoadRuntimeState(callCtx, sessionID); err == nil {
-		generationID = runtime.GenerationID
-	} else if !errors.Is(err, gamesession.ErrSessionNotFound) {
-		log.Printf("failed to load game session runtime for quiz cache cleanup session_id=%s: %v", sessionID, err)
-	}
-
-	if err := s.deleteQuizCache(callCtx, generationID); err != nil {
-		log.Printf("failed to clear level quiz cache generation_id=%s: %v", generationID, err)
-		return GameExitedState{}, errors.New("failed to clear level quizzes")
-	}
-	if err := s.sessions.Delete(callCtx, sessionID); err != nil {
-		return GameExitedState{}, errors.New("failed to exit game session")
-	}
-	return GameExitedState{SessionID: sessionID, Deleted: true, Reason: "client_exit"}, nil
-}
-
-func (s *Server) deleteQuizCache(ctx context.Context, generationID string) error {
-	generationID = strings.TrimSpace(generationID)
-	if s.quizzes == nil || generationID == "" {
-		return nil
-	}
-	return s.quizzes.Delete(ctx, generationID)
-}
-
-func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop) error {
-	if loop == nil || loop.stopped() {
-		return errors.New("game session is not running")
-	}
-	if s.quizzes == nil {
-		return errors.New("quiz cache is not configured")
-	}
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	quiz, remaining, err := s.quizzes.PeekRandom(callCtx, loop.generationID)
-	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
-		loop.currentQuizID = ""
-		return writeWebsocketJSON(conn, writeMu, Message{
-			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
-		})
-	}
-	if err != nil {
-		return errors.New("failed to load quiz")
-	}
-	loop.currentQuizID = quiz.ID
-	return writeWebsocketJSON(conn, writeMu, Message{
-		Type: "game.quiz.presented",
-		Data: quizPromptState(quiz, remaining),
-	})
-}
-
-func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop, request quizAnswerRequest) error {
-	if loop == nil || loop.stopped() {
-		return errors.New("game session is not running")
-	}
-	if s.quizzes == nil {
-		return errors.New("quiz cache is not configured")
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
-	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
-		loop.currentQuizID = ""
-		return writeWebsocketJSON(conn, writeMu, Message{
-			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
-		})
-	}
-	if err != nil {
-		return errors.New("failed to load quiz")
-	}
-	expectedQuizID := loop.currentQuizID
-	if expectedQuizID == "" {
-		expectedQuizID = quizzes.CurrentQuizID
-	}
-	if expectedQuizID == "" && len(quizzes.Quizzes) > 0 {
-		expectedQuizID = quizzes.Quizzes[0].ID
-	}
-	if expectedQuizID != "" && expectedQuizID != request.QuizID {
-		return errors.New("quiz_id is not the current quiz")
-	}
-	currentQuiz, ok := cachedQuizByID(quizzes.Quizzes, request.QuizID)
-	if !ok {
-		return errors.New("quiz not found")
-	}
-	if request.SelectedIndex < 0 || request.SelectedIndex >= len(currentQuiz.OptionsMarkdown) {
-		return errors.New("selected_index is out of range")
-	}
-
-	answeredQuiz, remaining, err := s.quizzes.Take(callCtx, loop.generationID, request.QuizID)
-	if errors.Is(err, quizcache.ErrQuizNotFound) || errors.Is(err, quizcache.ErrQuizzesNotFound) {
-		return errors.New("quiz not found")
-	}
-	if err != nil {
-		return errors.New("failed to remove answered quiz")
-	}
-	if loop.currentQuizID == request.QuizID {
-		loop.currentQuizID = ""
-	}
-
-	correct := request.SelectedIndex == answeredQuiz.AnswerIndex
-	essenceAwarded := 0
-	essence := 0
-	if correct {
-		essenceAwarded = correctQuizEssenceAward
-		essence, err = s.awardEssenceThroughLoop(ctx, loop, correctQuizEssenceAward)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err := writeWebsocketJSON(conn, writeMu, Message{
-		Type: "game.quiz.result",
-		Data: QuizResultState{
-			QuizID:                 answeredQuiz.ID,
-			Correct:                correct,
-			SelectedIndex:          request.SelectedIndex,
-			CorrectIndex:           answeredQuiz.AnswerIndex,
-			SelectedOptionMarkdown: optionMarkdown(answeredQuiz.OptionsMarkdown, request.SelectedIndex),
-			CorrectOptionMarkdown:  optionMarkdown(answeredQuiz.OptionsMarkdown, answeredQuiz.AnswerIndex),
-			EssenceAwarded:         essenceAwarded,
-			Essence:                essence,
-			Remaining:              remaining,
-		},
-	}); err != nil {
-		return err
-	}
-
-	if !correct {
-		s.saveQuizMistakeAsync(loop, answeredQuiz, request.SelectedIndex)
-	}
-
-	return nil
-}
-
-func cachedQuizByID(quizzes []quizcache.CachedQuiz, quizID string) (quizcache.CachedQuiz, bool) {
-	for _, quiz := range quizzes {
-		if quiz.ID == quizID {
-			return quiz, true
-		}
-	}
-	return quizcache.CachedQuiz{}, false
-}
-
-func (s *Server) awardEssenceThroughLoop(ctx context.Context, loop *runningGameLoop, amount int) (int, error) {
-	if loop == nil || loop.stopped() {
-		return 0, errors.New("game session is not running")
-	}
-	result := make(chan actionResult, 1)
-	action := clientAction{
-		Type:          awardQuizEssenceAction,
-		EssenceReward: amount,
-		Result:        result,
-	}
-	select {
-	case loop.actions <- action:
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	case <-time.After(2 * time.Second):
-		return 0, errors.New("game action queue timed out")
-	}
-
-	select {
-	case response := <-result:
-		return response.Essence, response.Err
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	case <-time.After(2 * time.Second):
-		return 0, errors.New("game action response timed out")
-	}
-}
-
-func (s *Server) saveQuizMistakeAsync(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) {
-	if s.levels == nil {
-		log.Printf("quiz mistake save skipped quiz_id=%s: level repository is not configured", quiz.ID)
-		return
-	}
-	input := quizMistakeInput(loop, quiz, selectedIndex)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.levels.SaveQuizMistake(ctx, input); err != nil {
-			log.Printf("quiz mistake save failed quiz_id=%s user_id=%s: %v", input.QuizID, input.UserID, err)
-		}
-	}()
-}
-
-func quizMistakeInput(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) repository.QuizMistakeInput {
-	return repository.QuizMistakeInput{
-		UserID:           loop.userID,
-		LevelID:          loop.levelID,
-		GenerationID:     loop.generationID,
-		QuizID:           quiz.ID,
-		QuizIndex:        quiz.QuizIndex,
-		QuizType:         quiz.QuizType,
-		QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
-		OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown),
-		AnswerIndex:      quiz.AnswerIndex,
-		SelectedIndex:    selectedIndex,
-	}
-}
-
-func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSession, action clientAction) error {
-	switch action.Type {
-	case placeTowerAction:
-		return s.placeTower(ctx, runtime, action.PlaceTower)
-	default:
-		return errors.New("unsupported action")
-	}
-}
-
-func (s *Server) placeTower(ctx context.Context, runtime *runtimeSession, request placeTowerRequest) error {
-	if runtime == nil {
-		return errors.New("game session is not running")
-	}
-	birdType := strings.TrimSpace(request.BirdType)
-	stats, err := gameobject.BirdStatsForType(birdType)
-	if err != nil {
-		return errors.New("unknown bird type")
-	}
-	if !isInsideMap(runtime.levelMap, request.X, request.Y) {
-		return errors.New("tower position is outside the map")
-	}
-	if isEnemyPath(runtime.levelMap, request.X, request.Y) {
-		return errors.New("tower cannot be placed on the enemy path")
-	}
-	if isOccupied(runtime.birds, request.X, request.Y) {
-		return errors.New("tower position is occupied")
-	}
-
-	nextEconomy := runtime.economy
-	if !nextEconomy.Consume(stats.Cost) {
-		return errors.New("insufficient essence")
-	}
-
-	bird, err := gameobject.NewBird(uuid.NewString(), birdType, gameobject.Position{X: float64(request.X), Y: float64(request.Y)})
-	if err != nil {
-		return errors.New("failed to create bird")
-	}
-	previousEconomy := runtime.economy
-	previousBirds := runtime.birds
-	runtime.economy = nextEconomy
-	runtime.session.Essence = nextEconomy.Essence
-	runtime.birds = append(append([]placedBird{}, runtime.birds...), placedBird{birdType: birdType, bird: bird})
-	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
-		runtime.economy = previousEconomy
-		runtime.session.Essence = previousEconomy.Essence
-		runtime.birds = previousBirds
-		log.Printf("game session placement save failed session_id=%s: %v", runtime.session.SessionID, err)
-		return errors.New("failed to save tower placement")
-	}
-
-	return nil
-}
-
-func (s *Server) awardEssence(ctx context.Context, runtime *runtimeSession, amount int) (int, error) {
-	if runtime == nil {
-		return 0, errors.New("game session is not running")
-	}
-	if amount <= 0 {
-		return runtime.economy.Essence, nil
-	}
-	previousEconomy := runtime.economy
-	runtime.economy.Add(amount)
-	runtime.session.Essence = runtime.economy.Essence
-	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
-		runtime.economy = previousEconomy
-		runtime.session.Essence = previousEconomy.Essence
-		return previousEconomy.Essence, err
-	}
-	return runtime.economy.Essence, nil
-}
-
-func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) error {
-	return s.sessions.SaveRuntimeState(ctx, runtime.session.SessionID, gamesession.RuntimeState{
-		Health:            runtime.session.Health,
-		Essence:           runtime.economy.Essence,
-		Wave:              runtime.session.Wave,
-		Tick:              runtime.session.Tick,
-		LoopStarted:       runtime.loopStarted,
-		LoopPaused:        false,
-		WaveStartedAtTick: runtime.waveStartedAtTick,
-		WaveSpawned:       runtime.waveSpawned,
-		NextWaveTick:      runtime.nextWaveTick,
-		Birds:             storedBirds(runtime.birds),
-		Smogs:             storedSmogs(runtime.smogs),
-		Projectiles:       storedProjectiles(runtime.projectiles),
-	})
-}
-
-func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdTypes []BirdTypeInfo, events []GameEvent) GameState {
-	session := runtime.session
-	return GameState{
-		SessionID:   session.SessionID,
-		LevelID:     session.LevelID,
-		Health:      session.Health,
-		Essence:     runtime.economy.Essence,
-		Wave:        session.Wave,
-		Tick:        session.Tick,
-		ServerTime:  serverTime.UTC(),
-		BirdTypes:   birdTypes,
-		Birds:       placedBirdStates(runtime.birds),
-		Smogs:       smogStates(runtime.smogs),
-		Projectiles: projectileStates(runtime.projectiles),
-		Events:      events,
-	}
-}
-
-type waveDefinition struct {
-	Wave   int
-	Count  int
-	Health int
-	Speed  float64
-}
-
-func waveDefinitions() []waveDefinition {
-	return []waveDefinition{
-		scaledWaveDefinition(1, 15),
-		scaledWaveDefinition(2, 24),
-		scaledWaveDefinition(3, 36),
-	}
-}
-
-func scaledWaveDefinition(wave int, count int) waveDefinition {
-	return waveDefinition{
-		Wave:   wave,
-		Count:  count,
-		Health: scaledSmogHealth(wave),
-		Speed:  scaledSmogSpeed(wave),
-	}
-}
-
-func scaledSmogHealth(wave int) int {
-	waveOffset := wave - 1
-	if waveOffset < 0 {
-		waveOffset = 0
-	}
-	return baseSmogHealth + (waveOffset * 40) + (waveOffset * waveOffset * 5)
-}
-
-func scaledSmogSpeed(wave int) float64 {
-	waveOffset := float64(wave - 1)
-	if waveOffset < 0 {
-		waveOffset = 0
-	}
-	return baseSmogSpeed + (waveOffset * 0.3) + (waveOffset * waveOffset * 0.03)
-}
-
-func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
-	if runtime == nil {
-		return nil
-	}
-	if !runtime.loopStarted {
-		return nil
-	}
-	runtime.session.Tick++
-	runtime.session.Essence = runtime.economy.Essence
-	runtime.session.UpdatedAt = now.UTC()
-
-	events := make([]GameEvent, 0)
-	events = append(events, moveSmogs(runtime, gameTickInterval.Seconds())...)
-	if runtime.session.Health <= 0 {
-		return events
-	}
-	events = append(events, spawnSmogs(runtime)...)
-	events = append(events, fireBirds(runtime)...)
-	events = append(events, resolveProjectiles(runtime, gameTickInterval.Seconds())...)
-	runtime.smogs = aliveSmogs(runtime.smogs)
-	events = append(events, scheduleNextWaveIfCleared(runtime)...)
-	return events
-}
-
-func spawnSmogs(runtime *runtimeSession) []GameEvent {
-	if len(runtime.path) == 0 || runtime.nextWaveTick <= 0 || runtime.session.Tick < runtime.nextWaveTick {
-		return nil
-	}
-	wave, ok := activeWaveDefinition(runtime)
-	if !ok || runtime.waveSpawned >= wave.Count {
-		return nil
-	}
-
-	events := make([]GameEvent, 0)
-	if runtime.waveSpawned == 0 {
-		runtime.session.Wave = wave.Wave
-		runtime.waveStartedAtTick = runtime.session.Tick
-		events = append(events, GameEvent{Type: "wave.started", Wave: wave.Wave})
-	}
-
-	// Calculate subwave/group spawn ticks dynamically
-	groupSize := wave.Count / 3
-	if groupSize < 1 {
-		groupSize = 1
-	}
-	groupIndex := int64(runtime.waveSpawned / groupSize)
-	indexInGroup := int64(runtime.waveSpawned % groupSize)
-
-	groupDurationTicks := int64(groupSize) * smogSpawnIntervalTicks
-	groupStartIntervalTicks := groupDurationTicks + groupGapTicks
-
-	nextSpawnTick := runtime.waveStartedAtTick + (groupIndex * groupStartIntervalTicks) + (indexInGroup * smogSpawnIntervalTicks)
-
-	if runtime.session.Tick < nextSpawnTick {
-		return events
-	}
-
-	smog := gameobject.Smog{
-		ID:        uuid.NewString(),
-		Health:    wave.Health,
-		Position:  runtime.path[0],
-		Speed:     wave.Speed,
-		PathIndex: 0,
-	}
-	runtime.waveSpawned++
-	runtime.smogs = append(runtime.smogs, smog)
-	events = append(events, GameEvent{Type: "smog.spawned", SmogID: smog.ID, Wave: wave.Wave, Health: smog.Health})
-	return events
-}
-
-func activeWaveDefinition(runtime *runtimeSession) (waveDefinition, bool) {
-	waves := waveDefinitions()
-	if runtime.session.Wave <= 0 || runtime.waveSpawned == 0 {
-		nextIndex := runtime.session.Wave
-		if nextIndex < 0 || nextIndex >= len(waves) {
-			return waveDefinition{}, false
-		}
-		return waves[nextIndex], true
-	}
-	for _, wave := range waves {
-		if wave.Wave == runtime.session.Wave {
-			return wave, true
-		}
-	}
-	return waveDefinition{}, false
-}
-
-func currentWaveDefinition(waveNumber int) (waveDefinition, bool) {
-	for _, wave := range waveDefinitions() {
-		if wave.Wave == waveNumber {
-			return wave, true
-		}
-	}
-	return waveDefinition{}, false
-}
-
-func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
-	if runtime.session.Wave <= 0 || len(runtime.smogs) > 0 {
-		return nil
-	}
-	currentWave, ok := currentWaveDefinition(runtime.session.Wave)
-	if !ok || runtime.waveSpawned < currentWave.Count {
-		return nil
-	}
-	if runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
-		return nil
-	}
-
-	events := []GameEvent{{Type: "wave.cleared", Wave: runtime.session.Wave}}
-	if runtime.session.Wave >= len(waveDefinitions()) {
-		runtime.nextWaveTick = 0
-		return events
-	}
-
-	runtime.waveStartedAtTick = 0
-	runtime.waveSpawned = 0
-	runtime.nextWaveTick = runtime.session.Tick + waveClearDelayTicks
-	return events
-}
-
-func gameWon(runtime runtimeSession) bool {
-	if runtime.session.Health <= 0 || runtime.session.Wave < len(waveDefinitions()) || len(runtime.smogs) > 0 {
-		return false
-	}
-	finalWave, ok := currentWaveDefinition(runtime.session.Wave)
-	return ok && runtime.waveSpawned >= finalWave.Count && runtime.nextWaveTick == 0
-}
-
-func moveSmogs(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
-	if runtime.session.Health <= 0 {
-		return nil
-	}
-	events := make([]GameEvent, 0)
-	nextSmogs := make([]gameobject.Smog, 0, len(runtime.smogs))
-	for i := range runtime.smogs {
-		smog := runtime.smogs[i]
-		smog.Move(deltaSeconds, runtime.path)
-		if smogReachedEnd(smog, runtime.path) {
-			runtime.session.Health -= baseHealthDamage
-			if runtime.session.Health < 0 {
-				runtime.session.Health = 0
-			}
-			events = append(events, GameEvent{
-				Type:   "smog.escaped",
-				SmogID: smog.ID,
-				Damage: float64(baseHealthDamage),
-				Health: runtime.session.Health,
-			})
-			continue
-		}
-		nextSmogs = append(nextSmogs, smog)
-	}
-	runtime.smogs = nextSmogs
-	return events
-}
-
-func fireBirds(runtime *runtimeSession) []GameEvent {
-	if runtime.session.Health <= 0 {
-		return nil
-	}
-	events := make([]GameEvent, 0)
-	for i := range runtime.birds {
-		bird := &runtime.birds[i].bird
-		if !bird.CanAttack(runtime.session.Tick, gameTicksPerSecond) {
-			continue
-		}
-		targetIndex := targetSmogIndex(*bird, runtime.smogs)
-		if targetIndex < 0 {
-			continue
-		}
-		target := runtime.smogs[targetIndex]
-		projectiles := bird.Attack(target, runtime.session.Tick)
-		if len(projectiles) == 0 {
-			continue
-		}
-		runtime.projectiles = append(runtime.projectiles, projectiles...)
-		events = append(events, GameEvent{
-			Type:          "bird.attack",
-			BirdID:        bird.ID,
-			SmogID:        target.ID,
-			ProjectileIDs: projectileIDs(projectiles),
-		})
-	}
-	return events
-}
-
-func resolveProjectiles(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
-	events := make([]GameEvent, 0)
-	active := make([]gameobject.Projectile, 0, len(runtime.projectiles))
-	for i := range runtime.projectiles {
-		projectile := runtime.projectiles[i]
-		projectile.Move(deltaSeconds)
-		switch projectile.Type {
-		case gameobject.ProjectileTypeLocked:
-			if !projectile.HasArrived() {
-				active = append(active, projectile)
-				continue
-			}
-			target := findSmogByID(runtime.smogs, projectile.TargetID)
-			if target == nil {
-				continue
-			}
-			beforeHealth := target.Health
-			if projectile.ApplyLockedDamage(target) {
-				events = append(events, GameEvent{
-					Type:         "smog.damage",
-					SmogID:       target.ID,
-					ProjectileID: projectile.ID,
-					Damage:       float64(beforeHealth - target.Health),
-					Health:       target.Health,
-				})
-			}
-		case gameobject.ProjectileTypeDirectional:
-			hit, damage := collideDirectionalProjectile(&projectile, runtime.smogs)
-			if hit != nil {
-				events = append(events, GameEvent{
-					Type:         "smog.damage",
-					SmogID:       hit.ID,
-					ProjectileID: projectile.ID,
-					Damage:       damage,
-					Health:       hit.Health,
-				})
-			}
-			if !projectile.IsExpired() {
-				active = append(active, projectile)
-			}
-		default:
-			if !projectile.IsExpired() {
-				active = append(active, projectile)
-			}
-		}
-	}
-	runtime.projectiles = active
-	return events
-}
-
-func collideDirectionalProjectile(projectile *gameobject.Projectile, smogs []gameobject.Smog) (*gameobject.Smog, float64) {
-	if projectile == nil || projectile.Type != gameobject.ProjectileTypeDirectional || projectile.IsExpired() {
-		return nil, 0
-	}
-	for i := range smogs {
-		if !smogs[i].IsAlive() {
-			continue
-		}
-		if projectile.Position.DistanceTo(smogs[i].Position) > projectile.HitRadius {
-			continue
-		}
-		beforeHealth := smogs[i].Health
-		smogs[i].TakeDamage(projectile.Damage)
-		projectile.RemainingRange = 0
-		return &smogs[i], float64(beforeHealth - smogs[i].Health)
-	}
-	return nil, 0
-}
-
-func targetSmogIndex(bird gameobject.Bird, smogs []gameobject.Smog) int {
-	bestIndex := -1
-	for i := range smogs {
-		if !bird.TargetInRange(smogs[i]) {
-			continue
-		}
-		if bestIndex < 0 || smogs[i].PathIndex > smogs[bestIndex].PathIndex {
-			bestIndex = i
-		}
-	}
-	return bestIndex
-}
-
-func aliveSmogs(smogs []gameobject.Smog) []gameobject.Smog {
-	active := make([]gameobject.Smog, 0, len(smogs))
-	for _, smog := range smogs {
-		if smog.IsAlive() {
-			active = append(active, smog)
-		}
-	}
-	return active
-}
-
-func findSmogByID(smogs []gameobject.Smog, id string) *gameobject.Smog {
-	for i := range smogs {
-		if smogs[i].ID == id {
-			return &smogs[i]
-		}
-	}
-	return nil
-}
-
-func projectileIDs(projectiles []gameobject.Projectile) []string {
-	ids := make([]string, 0, len(projectiles))
-	for _, projectile := range projectiles {
-		ids = append(ids, projectile.ID)
-	}
-	return ids
-}
-
-func smogReachedEnd(smog gameobject.Smog, path []gameobject.Position) bool {
-	if len(path) == 0 {
-		return false
-	}
-	return smog.PathIndex >= len(path)-1 && smog.Position.DistanceTo(path[len(path)-1]) < 0.000001
-}
-
-func gamePath(levelMap mapgen.GeneratedMap) []gameobject.Position {
-	path := make([]gameobject.Position, 0, len(levelMap.EnemyPath))
-	for _, tile := range levelMap.EnemyPath {
-		path = append(path, gameobject.Position{X: float64(tile.X), Y: float64(tile.Y)})
-	}
-	return path
-}
-
-func normalizeRuntimeState(runtime gamesession.RuntimeState) gamesession.RuntimeState {
-	if runtime.NextWaveTick == 0 && runtime.Wave <= 0 {
-		runtime.NextWaveTick = 1
-	}
-	if runtime.NextWaveTick == 0 && runtime.Wave > 0 && runtime.WaveSpawned == 0 {
-		if wave, ok := currentWaveDefinition(runtime.Wave); ok {
-			runtime.WaveSpawned = wave.Count
-		}
-	}
-	if runtime.WaveStartedAtTick == 0 && runtime.Wave > 0 && runtime.WaveSpawned > 0 {
-		runtime.WaveStartedAtTick = runtime.Tick
-	}
-	return runtime
-}
-
 func decodePlaceTowerAction(data any) (placeTowerRequest, error) {
 	var request placeTowerRequest
 	if err := decodeMessageData(data, &request); err != nil {
@@ -1540,6 +401,20 @@ func decodePlaceTowerAction(data any) (placeTowerRequest, error) {
 	}
 	if strings.TrimSpace(request.BirdType) == "" {
 		return placeTowerRequest{}, errors.New("bird_type is required")
+	}
+	return request, nil
+}
+
+func decodeEvolveTowerAction(data any) (evolveTowerRequest, error) {
+	var request evolveTowerRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return evolveTowerRequest{}, errors.New("evolve tower action data must include tower_id and bird_type")
+	}
+	if strings.TrimSpace(request.TowerID) == "" {
+		return evolveTowerRequest{}, errors.New("tower_id is required")
+	}
+	if strings.TrimSpace(request.BirdType) == "" {
+		return evolveTowerRequest{}, errors.New("bird_type is required")
 	}
 	return request, nil
 }
@@ -1577,27 +452,6 @@ func decodeQuizAnswer(data any) (quizAnswerRequest, error) {
 	return request, nil
 }
 
-func birdTypeCatalog() []BirdTypeInfo {
-	birdTypes := gameobject.BirdTypes()
-	catalog := make([]BirdTypeInfo, 0, len(birdTypes))
-	for _, birdType := range birdTypes {
-		stats, err := gameobject.BirdStatsForType(birdType)
-		if err != nil {
-			continue
-		}
-		attack, err := gameobject.AttackTypeForBirdType(birdType)
-		if err != nil {
-			continue
-		}
-		catalog = append(catalog, BirdTypeInfo{
-			Type:   birdType,
-			Stats:  stats,
-			Attack: attack,
-		})
-	}
-	return catalog
-}
-
 func isInsideMap(levelMap mapgen.GeneratedMap, x int, y int) bool {
 	return x >= 0 && y >= 0 && x < levelMap.Width && y < levelMap.Height
 }
@@ -1620,159 +474,24 @@ func isOccupied(birds []placedBird, x int, y int) bool {
 	return false
 }
 
-func placedBirdStates(birds []placedBird) []PlacedBirdState {
-	states := make([]PlacedBirdState, 0, len(birds))
-	for _, placed := range birds {
-		states = append(states, PlacedBirdState{
-			ID:              placed.bird.ID,
-			Type:            placed.birdType,
-			Position:        placed.bird.Position,
-			Stats:           placed.bird.Stats,
-			LastFiredAtTick: placed.bird.LastFiredAtTick,
-		})
-	}
-	return states
-}
-
-func smogStates(smogs []gameobject.Smog) []SmogState {
-	states := make([]SmogState, 0, len(smogs))
-	for _, smog := range smogs {
-		states = append(states, SmogState{
-			ID:        smog.ID,
-			Health:    smog.Health,
-			Position:  smog.Position,
-			Speed:     smog.Speed,
-			PathIndex: smog.PathIndex,
-		})
-	}
-	return states
-}
-
-func projectileStates(projectiles []gameobject.Projectile) []ProjectileState {
-	states := make([]ProjectileState, 0, len(projectiles))
-	for _, projectile := range projectiles {
-		states = append(states, ProjectileState{
-			ID:              projectile.ID,
-			Type:            projectile.Type,
-			Damage:          projectile.Damage,
-			ProjectileSpeed: projectile.ProjectileSpeed,
-			Position:        projectile.Position,
-			Direction:       projectile.Direction,
-			TargetID:        projectile.TargetID,
-			RemainingRange:  projectile.RemainingRange,
-			HitRadius:       projectile.HitRadius,
-		})
-	}
-	return states
-}
-
-func quizPromptState(quiz quizcache.CachedQuiz, remaining int) QuizPromptState {
-	return QuizPromptState{
-		QuizID:           quiz.ID,
-		QuizType:         quiz.QuizType,
-		QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
-		OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown),
-		Remaining:        remaining,
-	}
-}
-
-func storedBirds(birds []placedBird) []gamesession.StoredBird {
-	stored := make([]gamesession.StoredBird, 0, len(birds))
-	for _, placed := range birds {
-		stored = append(stored, gamesession.StoredBird{
-			ID:              placed.bird.ID,
-			Type:            placed.birdType,
-			Position:        placed.bird.Position,
-			Stats:           placed.bird.Stats,
-			LastFiredAtTick: placed.bird.LastFiredAtTick,
-		})
-	}
-	return stored
-}
-
-func storedSmogs(smogs []gameobject.Smog) []gamesession.StoredSmog {
-	stored := make([]gamesession.StoredSmog, 0, len(smogs))
-	for _, smog := range smogs {
-		stored = append(stored, gamesession.StoredSmog{
-			ID:        smog.ID,
-			Health:    smog.Health,
-			Position:  smog.Position,
-			Speed:     smog.Speed,
-			PathIndex: smog.PathIndex,
-		})
-	}
-	return stored
-}
-
-func smogsFromStored(stored []gamesession.StoredSmog) []gameobject.Smog {
-	smogs := make([]gameobject.Smog, 0, len(stored))
-	for _, item := range stored {
-		smogs = append(smogs, gameobject.Smog{
-			ID:        item.ID,
-			Health:    item.Health,
-			Position:  item.Position,
-			Speed:     item.Speed,
-			PathIndex: item.PathIndex,
-		})
-	}
-	return smogs
-}
-
-func storedProjectiles(projectiles []gameobject.Projectile) []gamesession.StoredProjectile {
-	stored := make([]gamesession.StoredProjectile, 0, len(projectiles))
-	for _, projectile := range projectiles {
-		stored = append(stored, gamesession.StoredProjectile{
-			ID:              projectile.ID,
-			Type:            projectile.Type,
-			Damage:          projectile.Damage,
-			ProjectileSpeed: projectile.ProjectileSpeed,
-			Position:        projectile.Position,
-			Direction:       projectile.Direction,
-			TargetID:        projectile.TargetID,
-			RemainingRange:  projectile.RemainingRange,
-			HitRadius:       projectile.HitRadius,
-		})
-	}
-	return stored
-}
-
-func projectilesFromStored(stored []gamesession.StoredProjectile) []gameobject.Projectile {
-	projectiles := make([]gameobject.Projectile, 0, len(stored))
-	for _, item := range stored {
-		projectiles = append(projectiles, gameobject.Projectile{
-			ID:              item.ID,
-			Type:            item.Type,
-			Damage:          item.Damage,
-			ProjectileSpeed: item.ProjectileSpeed,
-			Position:        item.Position,
-			Direction:       item.Direction,
-			TargetID:        item.TargetID,
-			RemainingRange:  item.RemainingRange,
-			HitRadius:       item.HitRadius,
-		})
-	}
-	return projectiles
-}
-
-func placedBirdsFromStored(stored []gamesession.StoredBird) ([]placedBird, error) {
-	birds := make([]placedBird, 0, len(stored))
-	for _, item := range stored {
-		behaviour, err := gameobject.AttackBehaviourForType(item.Type)
-		if err != nil {
-			return nil, err
+func enqueueAction(conn *websocket.Conn, writeMu *sync.Mutex, loop **runningGameLoop, actionType string, action clientAction) (fatal bool) {
+	if *loop == nil || (*loop).stopped() {
+		*loop = nil
+		if err := writeActionRejected(conn, writeMu, actionType, "game session is not running"); err != nil {
+			log.Printf("websocket action rejection write failed: %v", err)
+			return true
 		}
-		birds = append(birds, placedBird{
-			birdType: item.Type,
-			bird: gameobject.Bird{
-				ID:              item.ID,
-				Position:        item.Position,
-				Stats:           item.Stats,
-				AttackBehaviour: behaviour,
-				LastFiredAtTick: item.LastFiredAtTick,
-			},
-		})
+		return false
 	}
-	return birds, nil
+	select {
+	case (*loop).actions <- action:
+	default:
+		if err := writeActionRejected(conn, writeMu, actionType, "action queue is full"); err != nil {
+			log.Printf("websocket action rejection write failed: %v", err)
+			return true
+		}
+	}
+	return false
 }
 
 func writeActionAccepted(conn *websocket.Conn, writeMu *sync.Mutex, action string, bird placedBird) error {
@@ -1802,10 +521,10 @@ func writeActionRejected(conn *websocket.Conn, writeMu *sync.Mutex, action strin
 	})
 }
 
-func writeGameOver(conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, reason string) error {
+func writeGameEnd(conn *websocket.Conn, writeMu *sync.Mutex, msgType string, runtime runtimeSession, reason string) error {
 	return writeWebsocketJSON(conn, writeMu, Message{
-		Type: "game.over",
-		Data: GameOverState{
+		Type: msgType,
+		Data: GameEndState{
 			SessionID: runtime.session.SessionID,
 			LevelID:   runtime.session.LevelID,
 			Health:    runtime.session.Health,
@@ -1816,18 +535,12 @@ func writeGameOver(conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSes
 	})
 }
 
+func writeGameOver(conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, reason string) error {
+	return writeGameEnd(conn, writeMu, "game.over", runtime, reason)
+}
+
 func writeGameVictory(conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, reason string) error {
-	return writeWebsocketJSON(conn, writeMu, Message{
-		Type: "game.victory",
-		Data: GameVictoryState{
-			SessionID: runtime.session.SessionID,
-			LevelID:   runtime.session.LevelID,
-			Health:    runtime.session.Health,
-			Wave:      runtime.session.Wave,
-			Tick:      runtime.session.Tick,
-			Reason:    reason,
-		},
-	})
+	return writeGameEnd(conn, writeMu, "game.victory", runtime, reason)
 }
 
 func (s *Server) generationStatus(w http.ResponseWriter, r *http.Request) {
@@ -1952,40 +665,6 @@ func (s *Server) quizMistakes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, quizMistakeSummaryState(levelID, mistakes))
-}
-
-func quizMistakeSummaryState(levelID string, mistakes []repository.QuizMistakeSummaryItem) QuizMistakeSummaryState {
-	items := make([]QuizMistakeSummaryItem, 0, len(mistakes))
-	for _, mistake := range mistakes {
-		options := quiztext.SanitizeMarkdownSlice(mistake.OptionsMarkdown)
-		items = append(items, QuizMistakeSummaryItem{
-			ID:                     mistake.ID,
-			LevelID:                mistake.LevelID,
-			GenerationID:           mistake.GenerationID,
-			QuizID:                 mistake.QuizID,
-			QuizIndex:              mistake.QuizIndex,
-			QuizType:               mistake.QuizType,
-			QuestionMarkdown:       quiztext.SanitizeMarkdown(mistake.QuestionMarkdown),
-			OptionsMarkdown:        options,
-			AnswerIndex:            mistake.AnswerIndex,
-			SelectedIndex:          mistake.SelectedIndex,
-			CorrectOptionMarkdown:  optionMarkdown(options, mistake.AnswerIndex),
-			SelectedOptionMarkdown: optionMarkdown(options, mistake.SelectedIndex),
-			CreatedAt:              mistake.CreatedAt,
-		})
-	}
-	return QuizMistakeSummaryState{
-		LevelID:  levelID,
-		Count:    len(items),
-		Mistakes: items,
-	}
-}
-
-func optionMarkdown(options []string, index int) string {
-	if index < 0 || index >= len(options) {
-		return ""
-	}
-	return options[index]
 }
 
 func (s *Server) authenticatedUserID(r *http.Request) string {

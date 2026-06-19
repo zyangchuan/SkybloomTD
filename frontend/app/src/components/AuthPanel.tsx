@@ -9,7 +9,9 @@ import ButtonGreen from '@/components/ButtonGreen';
 import RetroInput from '@/components/RetroInput';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
+import  SignInBgm  from './SignInBgm';
 
+// s
 function getDisplayName(session: Session) {
   const fullName = session.user.user_metadata?.full_name;
   const name = session.user.user_metadata?.name;
@@ -193,6 +195,7 @@ export default function AuthPanel() {
   if (session) {
     return (
       <div className="flex h-full w-full flex-col items-center justify-center gap-5 px-8 text-center">
+        <SignInBgm />
         <div className="text-3xl text-white drop-shadow-[0_2px_0_rgba(0,0,0,0.25)]">
           Welcome, {getDisplayName(session)}
         </div>
@@ -213,6 +216,7 @@ export default function AuthPanel() {
 
   return (
     <div className="flex h-full w-full flex-col items-center justify-center px-6 text-center select-none py-4">
+      <SignInBgm />
       {/* Social Logins at the top */}
       <ButtonWhite
         className="h-10 w-full text-lg cursor-pointer"
