@@ -16,6 +16,8 @@ import (
 	"skybloom/document-content-api/internal/models"
 )
 
+const documentBucket = "documents"
+
 type Storage struct {
 	client *s3.Client
 	bucket string
@@ -36,7 +38,7 @@ func NewFromConfig(cfg config.Config) (*Storage, error) {
 		options.UsePathStyle = true
 	})
 
-	return &Storage{client: client, bucket: cfg.S3Bucket}, nil
+	return &Storage{client: client, bucket: documentBucket}, nil
 }
 
 func (s *Storage) UploadSource(

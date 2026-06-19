@@ -24,7 +24,6 @@ TASK_STATUS_TTL_SECONDS = 604800
 # File storage configuration
 INPUT_ROOT = Path(required_env("INPUT_ROOT"))
 OUTPUT_ROOT = Path(required_env("OUTPUT_ROOT"))
-AWS_S3_BUCKET = required_env("AWS_S3_BUCKET")
 AWS_REGION = required_env("AWS_REGION")
 AWS_S3_ENDPOINT_URL = required_env("AWS_S3_ENDPOINT_URL")
 

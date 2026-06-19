@@ -15,7 +15,6 @@ type Config struct {
 	DocumentContentQueue string
 	RedisURL             string
 	TaskStatusTTL        time.Duration
-	S3Bucket             string
 	S3Endpoint           string
 	S3AccessKey          string
 	S3SecretKey          string
@@ -29,14 +28,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	bucket := os.Getenv("AWS_S3_BUCKET")
 	endpoint := os.Getenv("AWS_S3_ENDPOINT_URL")
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
 
-	if bucket == "" || endpoint == "" ||
-		accessKey == "" || secretKey == "" || region == "" {
+	if endpoint == "" || accessKey == "" || secretKey == "" || region == "" {
 		return Config{}, errors.New("missing environment variables")
 	}
 
@@ -47,7 +44,6 @@ func Load() (Config, error) {
 		DocumentContentQueue: "document-content-queue",
 		RedisURL:             "redis://redis:6379/0",
 		TaskStatusTTL:        7 * 24 * time.Hour,
-		S3Bucket:             bucket,
 		S3Endpoint:           endpoint,
 		S3AccessKey:          accessKey,
 		S3SecretKey:          secretKey,
