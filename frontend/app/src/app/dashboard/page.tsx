@@ -19,7 +19,6 @@ import GameCardItem from '@/components/GameCardItem';
 import UploadDocumentModal from '@/components/UploadDocumentModal';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
-import PageBgm from '@/components/PageBgm';
 
 interface DocumentSummary {
   document_id: string;
@@ -302,7 +301,6 @@ export default function DashboardPage() {
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center font-sans p-4">
-       <PageBgm src="/bgm/paradise_found.mp3"/>
       <Image src="/skybloomtd-logo.png" alt="SkybloomTD" width={400} height={400} className="mb-6 drop-shadow-lg" />
       
       <OrangeSquare className="w-full max-w-5xl flex flex-col items-center justify-center py-10 px-8">

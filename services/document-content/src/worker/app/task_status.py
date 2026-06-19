@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
-import redis 
+import redis
 
 from .config import REDIS_URL, TASK_STATUS_TTL_SECONDS
 

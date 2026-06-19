@@ -60,13 +60,6 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('icon_heart', '/game/assets/gui/icons/Icon_Small_HeartFull.svg');
     this.load.svg('icon_essence', '/game/assets/gui/icons/Icon_Small_CoinDollar.svg');
     this.load.svg('icon_pause', '/game/assets/gui/icons/Icon_Small_WhiteOutline_Pause.svg');
-    this.load.svg('icon_volume_thumb', '/game/assets/gui/sliders/ScrollBar_Blank_Button.svg');
-    this.load.svg('icon_blank_volume_track', '/game/assets/gui/sliders/ScrollBar_Blank_Base.svg');
-    this.load.svg('icon_blue_volume_track', '/game/assets/gui/sliders/ScrollBar_Blue_Base.svg');
-    this.load.svg('icon_pointer', '/game/assets/gui/icons/ScrollBar_Blank_Pointer.svg');
-    this.load.svg('icon_audio_on', '/game/assets/gui/icons/Icon_Large_Audio_Grey.svg');
-    this.load.svg('icon_audio_off', '/game/assets/gui/icons/Icon_Large_AudioOff_Grey.svg');
-    
 
     // Preload bird item assets
     this.load.svg('box_square', '/game/assets/gui/boxes_banners/Box_Square.svg', { width: 256, height: 256 });
@@ -74,7 +67,6 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
-    this.load.svg('btn_green_round', '/game/assets/gui/buttons_text/ButtonText_Small_Green_Round.svg', { width: 200, height: 80 });
     this.load.svg('textbox_blank_side', '/game/assets/gui/boxes_banners/TextBox_Blank_Side.svg', { width: 450, height: 160 });
     this.load.image('head_sparrow', '/game/assets/birds/sparrow_head.png');
     this.load.image('head_woodpecker', '/game/assets/birds/woodpecker_head.png');
@@ -95,25 +87,6 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_woodpecker', '/game/assets/birds/woodpecker_projectile.png');
     this.load.image('projectile_eagle', '/game/assets/birds/eagle_projectile.png');
     this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
-
-    // Evolved bird assets
-    this.load.image('tower_evolve_sparrow',    '/game/assets/birds/evolve_sparrow_tower.png');
-    this.load.image('tower_evolve_woodpecker', '/game/assets/birds/evolve_woodpecker_tower.png');
-    this.load.image('tower_evolve_eagle',      '/game/assets/birds/evolve_eagle_tower.png');
-    this.load.image('tower_evolve_peacock',    '/game/assets/birds/evolve_peacock_tower.png');
-    this.load.image('head_evolve_sparrow',    '/game/assets/birds/evolve_sparrow_head.png');
-    this.load.image('head_evolve_woodpecker', '/game/assets/birds/evolve_woodpecker_head.png');
-    this.load.image('head_evolve_eagle',      '/game/assets/birds/evolve_eagle_head.png');
-    this.load.image('head_evolve_peacock',    '/game/assets/birds/evolve_peacock_head.png');
-    this.load.image('projectile_evolve_sparrow',    '/game/assets/birds/evolve_sparrow_projectile.png');
-    this.load.image('projectile_evolve_woodpecker', '/game/assets/birds/evolve_woodpecker_projectile.png');
-    this.load.image('projectile_evolve_eagle',      '/game/assets/birds/evolve_eagle_projectile.png');
-    this.load.image('projectile_evolve_peacock',    '/game/assets/birds/evolve_peacock_projectile.png');
-
-    // Background music and sound effects
-    this.load.audio('front_game_bgm', '/game/assets/bgm/boogie_party.mp3');
-    this.load.audio('middle_game_bgm', '/game/assets/bgm/i_got_a_stick_arr_bryan_teoh.mp3');
-    this.load.audio('end_game_bgm', '/game/assets/bgm/ancient_mystery_waltz_vivace.mp3');
   }
 
   create() {

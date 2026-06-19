@@ -5,25 +5,18 @@ import { DAMAGE_TO_BIRD } from '../data/birds';
 interface SmogEntry {
   sprite: Phaser.GameObjects.Sprite;
   healthBar: Phaser.GameObjects.Graphics;
-  targetX: number; 
-  targetY: number;
-  health: number;
-  maxHealth: number;
+  targetX: number; targetY: number;
+  health: number; maxHealth: number;
 }
 
 interface ProjectileEntry {
   sprite: Phaser.GameObjects.Sprite;
-  targetX: number;
-  targetY: number; 
-  targetRotation: number;
+  targetX: number; targetY: number; targetRotation: number;
 }
 
 export class EntitySync {
   readonly towers: Map<string, Tower> = new Map();
   activeSmogsList: Array<{ id: string, x: number, y: number, pathIndex: number }> = [];
-
-  // a callback that GameScene sets to handle tower click events, allowing clicks to interact with the HUD/upgrade system
-  onTowerClick: ((tower: Tower) => void) | null = null;
 
   private smogs: Map<string, SmogEntry> = new Map();
   private smogMaxHealth: Map<string, number> = new Map();
@@ -46,23 +39,12 @@ export class EntitySync {
         const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
-        tower.tileSize = this.tileSize;
         if (stats?.range) tower.range = stats.range;
-        const scaleMult = type.startsWith('evolve_') ? 1.65 : 1.3;
-        tower.setScale(this.tileSize / tower.width * scaleMult).setDepth(4);
-        if (type.startsWith('evolve_')) {
-          tower.evolveLevel = 1;
-        }
-        tower.setInteractive({ useHandCursor: true });
-        tower.on('pointerdown', () => this.onTowerClick?.(tower));
+        tower.setScale(this.tileSize / tower.width * 1.3).setDepth(4);
         this.towers.set(id, tower);
       } else {
         const tower = this.towers.get(id)!;
         if (stats?.range) tower.range = stats.range;
-        // Server confirmed evolution: type changed from base to evolve_X
-        if (tower.evolveLevel === 0 && type === `evolve_${tower.birdType}`) {
-          tower.evolve();
-        }
       }
     });
     for (const [id, tower] of this.towers.entries()) {
@@ -127,7 +109,7 @@ export class EntitySync {
   // ─── Per-frame interpolation ─────────────────────────────────────────────────
 
   interpolate() {
-    this.towers.forEach((tower) => tower.update(this.activeSmogsList));
+    this.towers.forEach((tower) => tower.update());
     this.interpolateSmogs();
     this.interpolateProjectiles();
   }
