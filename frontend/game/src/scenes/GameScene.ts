@@ -6,11 +6,13 @@ import { QuizManager } from '../ui/QuizManager';
 import { GameOverlay } from '../ui/GameOverlay';
 import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
+import { BgmManager } from '../audio/BgmManager';
 
 export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
+  private currentWave = 0;
 
   // Grid params
   private tileSize = 0;
@@ -27,6 +29,7 @@ export default class GameScene extends Phaser.Scene {
   private overlay!: GameOverlay;
   private drag!: DragController;
   private entities!: EntitySync;
+  private audio!: BgmManager;
 
   constructor() { super('GameScene'); }
 
@@ -45,7 +48,9 @@ export default class GameScene extends Phaser.Scene {
     this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
     this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
     this.quiz     = new QuizManager(this, this.ws);
+    this.audio = new BgmManager(this);
     this.quiz.createHUD();
+
 
     this.drag = new DragController(
       this,
@@ -91,7 +96,11 @@ export default class GameScene extends Phaser.Scene {
 
   private handleServerMessage(msg: any) {
     switch (msg.type) {
-      case 'game.state':
+      case 'game.state': 
+        const waveIndex: number = msg.data?.wave || 0;
+        if (waveIndex != this.currentWave) {
+          this.audio.updateForWave(waveIndex);
+        }
       case 'game.session.started':
         if (!this.overlay.isPaused()) this.updateFromState(msg.data);
         break;
