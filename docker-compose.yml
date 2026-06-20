@@ -19,7 +19,7 @@ services:
       - rabbitmq
       - redis
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O - \"$${NGINX_HEALTHCHECK_URL}\" | grep -q ok"]
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/nginx-health | grep -q ok"]
       interval: 10s
       timeout: 3s
       retries: 5

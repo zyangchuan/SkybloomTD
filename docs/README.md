@@ -7,32 +7,33 @@ The public API contract is in `docs/openapi.yaml`.
 Local compose runs use `.env.local` with `docker-compose.local.yml`:
 
 ```text
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
 Dev compose runs use `.env.dev` with `docker-compose.dev.yml`:
 
 ```text
-docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 Staging compose runs use `.env.staging` with
 `docker-compose.staging.yml`:
 
 ```text
-docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.staging.yml up --build -d
 ```
 
 Production compose runs use `.env.production` with
 `docker-compose.production.yml`:
 
 ```text
-docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.production.yml up --build -d
 ```
 
 The tracked `*.example` files show the expected keys. Real root env files
 like `.env.local`, `.env.dev`, `.env.staging`, and `.env.production` stay
-ignored so secrets do not get committed.
+ignored so secrets do not get committed. The compose overrides declare these
+files with `env_file`, so the commands do not need CLI `--env-file`.
 
 Frontend app/game variables are merged into those root env files. Compose no longer reads `frontend/app/.env.*` or `frontend/game/.env.*`.
 

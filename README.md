@@ -150,15 +150,15 @@ The root `docker-compose.yml` defines the shared service graph. Profile-specific
 Build and start the local stack:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
 Run a shared environment in the background:
 
 ```bash
-docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
-docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
-docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.production.yml up --build -d
 ```
 
 Open locally:
@@ -178,25 +178,25 @@ guest / guest
 Stop the local stack:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml down
+docker compose -f docker-compose.yml -f docker-compose.local.yml down
 ```
 
 Stop and remove local volumes:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
 
 ## Document Worker Only
 
-The old standalone `services/document-content/docker-compose.yml` was removed. The full app uses the root compose files. If you need to run only the GPU document worker, use the worker-specific compose files from `services/document-content`:
+The full local app, including the GPU document worker, uses the root compose files. If you need to run only the GPU document worker on a staging or production GPU host, use the worker-specific compose files from `services/document-content`:
 
 ```bash
 cd services/document-content
-docker compose --env-file .env.production -f docker-compose.worker.yml -f docker-compose.worker.production.yml up --build -d
+docker compose -f docker-compose.worker.yml -f docker-compose.worker.production.yml up --build -d
 ```
 
-Use `.env.local`, `.env.staging`, or `.env.production` with the matching worker override for the target machine. Worker-only hosts still need reachable RabbitMQ and Redis endpoints; the full root stack provides those as Compose services named `rabbitmq` and `redis`.
+The worker override declares its own `env_file`, such as `.env.staging` or `.env.production`. Worker-only hosts still need reachable RabbitMQ and Redis endpoints; the full root stack provides those as Compose services named `rabbitmq` and `redis`.
 
 ## Common WSL Fixes
 
@@ -229,7 +229,7 @@ If the app cannot reach Redis/RabbitMQ:
 - Recreate containers after env changes:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build --force-recreate
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build --force-recreate
 ```
 
 ## References
