@@ -22,8 +22,8 @@ REDIS_URL = "redis://redis:6379/0"
 TASK_STATUS_TTL_SECONDS = 604800
 
 # File storage configuration
-INPUT_ROOT = Path(required_env("INPUT_ROOT"))
-OUTPUT_ROOT = Path(required_env("OUTPUT_ROOT"))
+INPUT_ROOT = Path("/temp")
+OUTPUT_ROOT = Path("/output")
 AWS_REGION = required_env("AWS_REGION")
 AWS_S3_ENDPOINT_URL = required_env("AWS_S3_ENDPOINT_URL")
 
