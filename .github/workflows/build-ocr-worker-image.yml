@@ -4,7 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - staging
+      - runpod-ocr-pipeline
     paths:
       - "services/document-content/src/worker/ocr_worker/**"
       - ".github/workflows/build-ocr-worker-image.yml"
