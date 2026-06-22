@@ -1,19 +1,12 @@
 services:
-  document-content-worker:
-    container_name: document-content-worker
-    hostname: document-content-worker
+  document-content-ocr-coordinator:
+    container_name: document-content-ocr-coordinator
+    hostname: document-content-ocr-coordinator
     build:
       context: ./src/worker
-      dockerfile: Dockerfile
-    image: document-content-worker:latest
-    command: python -m app.rabbitmq_worker
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    volumes:
-      - ./output:/output
-      - ./temp:/temp
-      - models:/root/.paddlex
+      dockerfile: ocr_coordinator/Dockerfile
+    image: document-content-ocr-coordinator:latest
+    command: python -m ocr_coordinator.worker
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -21,13 +14,26 @@ services:
         condition: service_healthy
     networks:
       - document-content-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: ["gpu"]
+    restart: unless-stopped
+
+  document-content-indexing-worker:
+    container_name: document-content-indexing-worker
+    hostname: document-content-indexing-worker
+    build:
+      context: ./src/worker
+      dockerfile: indexing_worker/Dockerfile
+    image: document-content-indexing-worker:latest
+    command: python -m indexing_worker.worker
+    volumes:
+      - ./output:/output
+      - ./temp:/temp
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - document-content-network
     restart: unless-stopped
 
   rabbitmq:
@@ -72,6 +78,5 @@ networks:
     name: document-content-network
 
 volumes:
-  models:
   rabbitmq-data:
   redis-data:

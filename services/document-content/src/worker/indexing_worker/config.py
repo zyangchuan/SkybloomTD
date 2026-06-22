@@ -15,14 +15,13 @@ RABBITMQ_URL = "amqp://guest:guest@rabbitmq:5672/"
 RABBITMQ_HEARTBEAT_SECONDS = 600
 RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS = 300
 RABBITMQ_WORKER_POLL_SECONDS = 10
-DOCUMENT_CONTENT_QUEUE = "document-content-queue"
+DOCUMENT_CONTENT_INDEXING_QUEUE = "document-content-indexing-queue"
 
 # Redis configuration
 REDIS_URL = "redis://redis:6379/0"
 TASK_STATUS_TTL_SECONDS = 604800
 
 # File storage configuration
-INPUT_ROOT = Path(required_env("INPUT_ROOT"))
 OUTPUT_ROOT = Path(required_env("OUTPUT_ROOT"))
 AWS_REGION = required_env("AWS_REGION")
 AWS_S3_ENDPOINT_URL = required_env("AWS_S3_ENDPOINT_URL")

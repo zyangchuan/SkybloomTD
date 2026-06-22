@@ -2,7 +2,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from ..config import (
+from indexing_worker.config import (
     SECTIONING_LLM_MAX_RETRIES,
     SECTIONING_LLM_MODEL,
     SECTIONING_LLM_TIMEOUT_SECONDS,

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from ..ocr.output import remove_document_output
+import shutil
 from .db import DocumentIndexRecord, insert_document_index
 from .sections import parse_markdown_sections
 
@@ -30,4 +30,18 @@ def index_ocr_output(upload_result: dict[str, Any]):
         "s3_bucket": s3_bucket,
         "s3_markdown_key": s3_markdown_key,
         "local_output_cleanup": local_output_cleanup,
+    }
+
+
+def remove_document_output(document_output_dir: Path) -> dict:
+    if not document_output_dir.exists():
+        return {
+            "status": "skipped",
+            "reason": "Output directory is already gone",
+        }
+
+    shutil.rmtree(document_output_dir)
+    return {
+        "status": "removed",
+        "path": str(document_output_dir),
     }

@@ -2,7 +2,7 @@ import logging
 import re
 from typing import Any
 
-from ..config import SECTIONING_OUTLINE_MAX_REPAIRS
+from indexing_worker.config import SECTIONING_OUTLINE_MAX_REPAIRS
 from .outline_validation import normalized_outline_chapters
 from .types import ChapterSection, HeadingCandidate, SubChapterSection
 
