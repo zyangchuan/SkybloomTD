@@ -15,7 +15,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}/skybloomtd-ocr-worker
+  IMAGE_NAME: ghcr.io/zyangchuan/skybloomtd/ocr-worker:latest
 
 jobs:
   build:
