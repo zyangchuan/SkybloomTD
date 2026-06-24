@@ -9,6 +9,7 @@ function isMobileDevice(): boolean {
 export class QuizManager {
   private currentQuizId = '';
   private quizAnswered = false;
+  private quizOpened = false;
   private promptContainer: Phaser.GameObjects.Container | null = null;
   private messageHandler: ((e: MessageEvent) => void) | null = null;
 
@@ -71,12 +72,17 @@ export class QuizManager {
     document.getElementById('quiz-overlay')?.remove();
     this.removeMessageHandler();
     this.quizAnswered = false;
+    if (this.quizOpened) {
+      this.quizOpened = false;
+      this.scene.sound.resumeAll();
+    }
   }
 
   showWindow(promptData: any) {
     const existing = document.getElementById('quiz-iframe') as HTMLIFrameElement;
     if (existing?.contentWindow) {
       this.currentQuizId = promptData.quiz_id;
+      this.quizOpened = true;
       this.quizAnswered = false;
       existing.contentWindow.postMessage({ type: 'quiz-presented', data: promptData }, '*');
       return;
@@ -84,6 +90,11 @@ export class QuizManager {
 
     this.clear();
     this.currentQuizId = promptData.quiz_id;
+    this.quizAnswered = false;
+    if (!this.quizOpened) {
+      this.quizOpened = true;
+      this.scene.sound.pauseAll();
+    }
 
     const parent = document.getElementById('game-container') || document.body;
 
@@ -119,7 +130,7 @@ export class QuizManager {
       if (event.origin !== window.location.origin) return;
       const packet = event.data;
       if (packet.type === 'quiz-submit') this.submitAnswer(packet.index);
-      else if (packet.type === 'quiz-close') this.clear();
+      else if (packet.type === 'quiz-close') { this.clear(); this.scene.sound.resumeAll(); }
       else if (packet.type === 'quiz-next') this.request(true);
     };
     window.addEventListener('message', this.messageHandler);

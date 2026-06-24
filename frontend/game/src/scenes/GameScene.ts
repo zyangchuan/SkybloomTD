@@ -111,7 +111,7 @@ export default class GameScene extends Phaser.Scene {
       case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
       case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;
       case 'game.victory':          this.overlay.showMistakesSummaryWindow(true);  break;
-      case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
+      case 'game.quiz.presented':   this.quiz.showWindow(msg.data);  break;
       case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
       case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
       case 'game.exited':           this.overlay.completePendingExit(); break;
