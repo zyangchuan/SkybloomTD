@@ -11,6 +11,14 @@ services:
       - .env
     volumes:
       - ./temp:/temp
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - document-content-network
+    restart: unless-stopped
 
   document-content-grpc:
     container_name: document-content-grpc
@@ -22,6 +30,9 @@ services:
       - "50051:50051"
     env_file:
       - .env
+    networks:
+      - document-content-network
+    restart: unless-stopped
 
   document-content-ocr-coordinator:
     container_name: document-content-ocr-coordinator
@@ -33,6 +44,14 @@ services:
     command: python -m ocr_coordinator.worker
     env_file:
       - .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - document-content-network
+    restart: unless-stopped
 
   document-content-indexing-worker:
     container_name: document-content-indexing-worker
@@ -47,6 +66,57 @@ services:
     volumes:
       - ./output:/output
       - ./temp:/temp
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - document-content-network
+    restart: unless-stopped
+
+  rabbitmq:
+    container_name: rabbitmq
+    hostname: rabbitmq
+    image: rabbitmq:3-management-alpine
+    expose:
+      - "5672"
+      - "15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - document-content-network
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    expose:
+      - "6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - document-content-network
+
+networks:
+  document-content-network:
+    name: document-content-network
 
 volumes:
   models:
+  rabbitmq-data:
+  redis-data:

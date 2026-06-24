@@ -26,6 +26,7 @@ function getDisplayName(session: Session) {
 }
 
 const authRedirectStorageKey = 'skybloom.auth.redirectPath';
+const sessionCheckTimeoutMs = 8000;
 
 function getCurrentPath() {
   return `${window.location.pathname}${window.location.search}`;
@@ -41,6 +42,31 @@ function getAuthCallbackURL() {
     return envUrl;
   }
   return `${window.location.origin}/auth/callback`;
+}
+
+function getAuthErrorMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : 'Unable to check your session. Please try signing in again.';
+}
+
+async function withSessionCheckTimeout<T>(promise: Promise<T>) {
+  let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+          reject(new Error('Session check timed out. You can still sign in.'));
+        }, sessionCheckTimeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+  }
 }
 
 export default function AuthPanel() {
@@ -59,42 +85,70 @@ export default function AuthPanel() {
 
   useEffect(() => {
     let isMounted = true;
-    const supabase = getSupabaseBrowserClient();
-
-    supabase.auth.getSession().then(async ({ data, error }) => {
-      if (!isMounted) {
-        return;
+    let unsubscribeAuth: (() => void) | undefined;
+    const loadingFallbackId = window.setTimeout(() => {
+      if (isMounted) {
+        setIsLoading(false);
       }
+    }, sessionCheckTimeoutMs);
 
-      if (error) {
-        setAuthError(error.message);
-      }
+    async function checkSession() {
+      try {
+        const supabase = getSupabaseBrowserClient();
 
-      setSession(data.session);
-      setIsLoading(false);
-      if (data.session) {
-        await syncAuthCookie(data.session);
-        router.push('/dashboard');
-      }
-    });
+        const {
+          data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+          if (!isMounted) return;
+          setSession(nextSession);
+          setIsLoading(false);
+          setAuthError(null);
+          setIsSubmitting(false);
+          void syncAuthCookie(nextSession).catch((error) => {
+            console.error('Failed to sync auth cookie:', error);
+          });
+          if (nextSession) {
+            router.push('/dashboard');
+          }
+        });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
-      if (!isMounted) return;
-      setSession(nextSession);
-      setIsLoading(false);
-      setAuthError(null);
-      setIsSubmitting(false);
-      await syncAuthCookie(nextSession);
-      if (nextSession) {
-        router.push('/dashboard');
+        unsubscribeAuth = () => subscription.unsubscribe();
+
+        const { data, error } = await withSessionCheckTimeout(supabase.auth.getSession());
+        if (!isMounted) {
+          return;
+        }
+
+        if (error) {
+          setAuthError(error.message);
+        }
+
+        window.clearTimeout(loadingFallbackId);
+        setSession(data.session);
+        setIsLoading(false);
+        if (data.session) {
+          void syncAuthCookie(data.session).catch((error) => {
+            console.error('Failed to sync auth cookie:', error);
+          });
+          router.push('/dashboard');
+        }
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        window.clearTimeout(loadingFallbackId);
+        setSession(null);
+        setIsLoading(false);
+        setAuthError(getAuthErrorMessage(error));
       }
-    });
+    }
+
+    checkSession();
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      unsubscribeAuth?.();
     };
   }, [router]);
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -37,14 +38,22 @@ def _required(payload: dict[str, Any], key: str) -> str:
 
 
 def _download(url: str, destination: Path) -> None:
-    with urllib.request.urlopen(url, timeout=120) as response:
-        destination.write_bytes(response.read())
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response:
+            destination.write_bytes(response.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"failed to download source PDF: HTTP {exc.code}: {detail}") from exc
 
 
 def _upload(url: str, body: bytes) -> None:
     request = urllib.request.Request(url, data=body, method="PUT")
-    with urllib.request.urlopen(request, timeout=120) as response:
-        response.read()
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"failed to upload OCR markdown: HTTP {exc.code}: {detail}") from exc
 
 
 if __name__ == "__main__":

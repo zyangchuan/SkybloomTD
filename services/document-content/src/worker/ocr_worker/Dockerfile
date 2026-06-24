@@ -1,8 +1,9 @@
-FROM paddlepaddle/paddle:3.3.0-gpu-cuda13.0-cudnn9.13
+FROM paddlepaddle/paddle:3.3.1-gpu-cuda12.9-cudnn9.9
 
 WORKDIR /app
 
 ENV LD_LIBRARY_PATH=/usr/lib/wsl/lib:$LD_LIBRARY_PATH
+ENV FLAGS_use_mkldnn=0
 
 COPY ocr_worker/requirements.txt .
 

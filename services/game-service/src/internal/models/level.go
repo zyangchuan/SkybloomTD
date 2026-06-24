@@ -17,8 +17,8 @@ type Level struct {
 	MapSeed             *int64     `gorm:"type:bigint"`
 	MapAlgorithmVersion *int       `gorm:"column:map_algorithm_version"`
 	SummaryMarkdown     string     `gorm:"type:text;not null"`
-	SourceChunkIDs      []byte     `gorm:"type:jsonb;not null;default:'[]'::jsonb"`
-	SourceMetadata      []byte     `gorm:"type:jsonb;not null;default:'{}'::jsonb"`
+	SourceChunkIDs      JSON       `gorm:"type:jsonb;not null;default:'[]'::jsonb"`
+	SourceMetadata      JSON       `gorm:"type:jsonb;not null;default:'{}'::jsonb"`
 	Model               string     `gorm:"type:text"`
 	CreatedAt           *time.Time `gorm:"default:CURRENT_TIMESTAMP"`
 }
@@ -33,7 +33,7 @@ type Quiz struct {
 	QuizIndex        int        `gorm:"not null;uniqueIndex:quizzes_level_id_quiz_index_key"`
 	QuizType         string     `gorm:"type:text;not null;check:quizzes_quiz_type_check,quiz_type IN ('mcq','true_false')"`
 	QuestionMarkdown string     `gorm:"type:text;not null"`
-	OptionsMarkdown  []byte     `gorm:"type:jsonb;not null"`
+	OptionsMarkdown  JSON       `gorm:"type:jsonb;not null"`
 	AnswerIndex      int        `gorm:"not null;check:quizzes_answer_index_nonnegative_check,answer_index >= 0"`
 	CreatedAt        *time.Time `gorm:"default:CURRENT_TIMESTAMP"`
 }
@@ -51,7 +51,7 @@ type QuizMistake struct {
 	QuizIndex        int        `gorm:"not null"`
 	QuizType         string     `gorm:"type:text;not null"`
 	QuestionMarkdown string     `gorm:"type:text;not null"`
-	OptionsMarkdown  []byte     `gorm:"type:jsonb;not null"`
+	OptionsMarkdown  JSON       `gorm:"type:jsonb;not null"`
 	AnswerIndex      int        `gorm:"not null"`
 	SelectedIndex    int        `gorm:"not null"`
 	CreatedAt        *time.Time `gorm:"default:CURRENT_TIMESTAMP"`

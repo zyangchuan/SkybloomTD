@@ -12,7 +12,7 @@ def create_pipeline() -> PPStructureV3:
         layout_detection_model_name="PP-DocLayout-L",
         text_recognition_batch_size=32,
         text_recognition_model_name="en_PP-OCRv3_mobile_rec",
-        formula_recognition_batch_size=16,
+        formula_recognition_batch_size=32,
         formula_recognition_model_name="PP-FormulaNet_plus-S",
     )
 

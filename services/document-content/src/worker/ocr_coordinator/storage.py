@@ -7,7 +7,7 @@ S3_CLIENT = boto3.client(
     "s3",
     region_name=AWS_REGION,
     endpoint_url=AWS_S3_ENDPOINT_URL,
-    config=Config(s3={"addressing_style": "path"}),
+    config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
 )
 
 

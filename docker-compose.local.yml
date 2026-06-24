@@ -33,43 +33,12 @@ services:
       - ./.env.local
 
   document-content-ocr-coordinator:
-    container_name: document-content-ocr-coordinator
-    hostname: document-content-ocr-coordinator
-    build:
-      context: ./services/document-content/src/worker
-      dockerfile: ocr_coordinator/Dockerfile
-    image: document-content-ocr-coordinator:latest
-    command: python -m ocr_coordinator.worker
     env_file:
       - ./.env.local
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - services-network
 
   document-content-indexing-worker:
-    container_name: document-content-indexing-worker
-    hostname: document-content-indexing-worker
-    build:
-      context: ./services/document-content/src/worker
-      dockerfile: indexing_worker/Dockerfile
-    image: document-content-indexing-worker:latest
-    command: python -m indexing_worker.worker
     env_file:
       - ./.env.local
-    volumes:
-      - ./services/document-content/output:/output
-      - ./services/document-content/temp:/temp
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - services-network
 
   game-service:
     env_file:

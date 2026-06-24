@@ -30,6 +30,16 @@ services:
       - ./.env.staging
     restart: unless-stopped
 
+  document-content-ocr-coordinator:
+    env_file:
+      - ./.env.staging
+    restart: unless-stopped
+
+  document-content-indexing-worker:
+    env_file:
+      - ./.env.staging
+    restart: unless-stopped
+
   game-service:
     env_file:
       - ./.env.staging
