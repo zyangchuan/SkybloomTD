@@ -75,6 +75,11 @@ export class QuizManager {
     if (this.quizOpened) {
       this.quizOpened = false;
       this.scene.sound.resumeAll();
+      /*
+        the animation and tweens resume
+      */
+      //this.scene.tweens.resumeAll();
+      //this.scene.anims.resumeAll();
     }
   }
 
@@ -94,6 +99,11 @@ export class QuizManager {
     if (!this.quizOpened) {
       this.quizOpened = true;
       this.scene.sound.pauseAll();
+      /* 
+        the animation and tweens pause
+      */
+     //this.scene.tweens.pauseAll();
+     //this.scene.anims.pauseAll();
     }
 
     const parent = document.getElementById('game-container') || document.body;

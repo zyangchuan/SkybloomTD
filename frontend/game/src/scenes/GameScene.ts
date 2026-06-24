@@ -48,7 +48,7 @@ export default class GameScene extends Phaser.Scene {
     this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
     this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
     this.quiz     = new QuizManager(this, this.ws);
-    this.audio = new BgmManager(this);
+    this.audio    = new BgmManager(this);
     this.quiz.createHUD();
 
     this.sound.pauseOnBlur = false;
