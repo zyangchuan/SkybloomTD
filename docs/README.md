@@ -55,8 +55,6 @@ $SKYBLOOM_PUBLIC_BASE_URL/docs
 All browser-facing API calls should go through the reverse proxy on port 80.
 Backend containers are private Docker-network services, including the shared `rabbitmq`, `redis`, and `game-redis` containers.
 
-The full application uses the root compose files. For a worker-only host, use `services/document-content/docker-compose.worker.yml` with the matching worker override, for example `docker-compose.worker.staging.yml` or `docker-compose.worker.production.yml`.
-
 Protected API routes use the `skybloom_access_token` cookie. The browser sends
 it automatically to the reverse proxy, Nginx verifies it through user-service,
 and private services receive trusted user headers.

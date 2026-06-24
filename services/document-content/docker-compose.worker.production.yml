@@ -1,8 +1,0 @@
-services:
-  document-content-ocr-coordinator:
-    env_file:
-      - .env.production
-
-  document-content-indexing-worker:
-    env_file:
-      - .env.production
