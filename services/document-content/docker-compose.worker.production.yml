@@ -1,4 +1,0 @@
-services:
-  document-content-worker:
-    env_file:
-      - .env.production

@@ -120,7 +120,7 @@ func (r *LevelRepository) GetBootstrap(ctx context.Context, levelID string, user
 	for _, quiz := range quizzes {
 		var options []string
 		if len(quiz.OptionsMarkdown) > 0 {
-			if err := json.Unmarshal(quiz.OptionsMarkdown, &options); err != nil {
+			if err := json.Unmarshal([]byte(quiz.OptionsMarkdown), &options); err != nil {
 				return LevelBootstrap{}, err
 			}
 		}
@@ -170,7 +170,7 @@ func (r *LevelRepository) SaveQuizMistake(ctx context.Context, input QuizMistake
 		QuizIndex:        input.QuizIndex,
 		QuizType:         input.QuizType,
 		QuestionMarkdown: quiztext.SanitizeMarkdown(input.QuestionMarkdown),
-		OptionsMarkdown:  optionsJSON,
+		OptionsMarkdown:  models.JSON(optionsJSON),
 		AnswerIndex:      input.AnswerIndex,
 		SelectedIndex:    input.SelectedIndex,
 	}).Error
@@ -197,7 +197,7 @@ func (r *LevelRepository) ListQuizMistakes(ctx context.Context, userID string, l
 	for _, mistake := range mistakes {
 		var options []string
 		if len(mistake.OptionsMarkdown) > 0 {
-			if err := json.Unmarshal(mistake.OptionsMarkdown, &options); err != nil {
+			if err := json.Unmarshal([]byte(mistake.OptionsMarkdown), &options); err != nil {
 				return nil, err
 			}
 		}
@@ -442,8 +442,8 @@ func (r *LevelRepository) Insert(
 		ChapterID:       sourceContext.ChapterID,
 		SubChapterID:    sourceContext.SubChapterID,
 		SummaryMarkdown: quiztext.SanitizeMarkdown(generation.SummaryMarkdown),
-		SourceChunkIDs:  chunkIDs,
-		SourceMetadata:  sourceMetadata,
+		SourceChunkIDs:  models.JSON(chunkIDs),
+		SourceMetadata:  models.JSON(sourceMetadata),
 		Model:           model,
 	}
 	if options.GenerationID != "" {
@@ -466,7 +466,7 @@ func (r *LevelRepository) Insert(
 			QuizIndex:        index,
 			QuizType:         quiz.QuizType,
 			QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
-			OptionsMarkdown:  optionsJSON,
+			OptionsMarkdown:  models.JSON(optionsJSON),
 			AnswerIndex:      quiz.AnswerIndex,
 		})
 	}

@@ -187,17 +187,6 @@ Stop and remove local volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
 
-## Document Worker Only
-
-The full local app, including the GPU document worker, uses the root compose files. If you need to run only the GPU document worker on a staging or production GPU host, use the worker-specific compose files from `services/document-content`:
-
-```bash
-cd services/document-content
-docker compose -f docker-compose.worker.yml -f docker-compose.worker.production.yml up --build -d
-```
-
-The worker override declares its own `env_file`, such as `.env.staging` or `.env.production`. Worker-only hosts still need reachable RabbitMQ and Redis endpoints; the full root stack provides those as Compose services named `rabbitmq` and `redis`.
-
 ## Common WSL Fixes
 
 If the OCR worker cannot see the GPU:

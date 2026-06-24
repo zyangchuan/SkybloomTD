@@ -8,7 +8,7 @@ import (
 )
 
 func Open(ctx context.Context, databaseURL string) (*gorm.DB, func() error, error) {
-	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: databaseURL, PreferSimpleProtocol: true}), &gorm.Config{})
 	if err != nil {
 		return nil, nil, err
 	}

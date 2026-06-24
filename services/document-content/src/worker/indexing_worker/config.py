@@ -15,7 +15,7 @@ RABBITMQ_URL = "amqp://guest:guest@rabbitmq:5672/"
 RABBITMQ_HEARTBEAT_SECONDS = 600
 RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS = 300
 RABBITMQ_WORKER_POLL_SECONDS = 10
-DOCUMENT_CONTENT_QUEUE = "document-content-queue"
+DOCUMENT_CONTENT_INDEXING_QUEUE = "document-content-indexing-queue"
 
 # Redis configuration
 REDIS_URL = "redis://redis:6379/0"

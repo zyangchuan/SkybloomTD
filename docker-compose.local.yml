@@ -32,32 +32,13 @@ services:
     env_file:
       - ./.env.local
 
-  document-content-worker:
-    container_name: document-content-worker
-    hostname: document-content-worker
-    build:
-      context: ./services/document-content/src/worker
-      dockerfile: Dockerfile
-    image: document-content-worker:latest
-    command: python -m app.rabbitmq_worker
+  document-content-ocr-coordinator:
     env_file:
       - ./.env.local
-    environment:
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    volumes:
-      - ./services/document-content/src/worker:/app
-      - ./services/document-content/output:/output
-      - ./services/document-content/temp:/temp
-      - models:/root/.paddlex
-      - /usr/lib/wsl/lib:/usr/lib/wsl/lib
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - services-network
+
+  document-content-indexing-worker:
+    env_file:
+      - ./.env.local
 
   game-service:
     env_file:

@@ -37,6 +37,16 @@ services:
       - ./.env.dev
     restart: unless-stopped
 
+  document-content-ocr-coordinator:
+    env_file:
+      - ./.env.dev
+    restart: unless-stopped
+
+  document-content-indexing-worker:
+    env_file:
+      - ./.env.dev
+    restart: unless-stopped
+
   game-service:
     env_file:
       - ./.env.dev

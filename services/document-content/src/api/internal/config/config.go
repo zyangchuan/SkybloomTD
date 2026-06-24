@@ -41,7 +41,7 @@ func Load() (Config, error) {
 		Port:                 "8000",
 		DatabaseURL:          databaseURL,
 		RabbitMQURL:          "amqp://guest:guest@rabbitmq:5672/",
-		DocumentContentQueue: "document-content-queue",
+		DocumentContentQueue: "document-content-ocr-queue",
 		RedisURL:             "redis://redis:6379/0",
 		TaskStatusTTL:        7 * 24 * time.Hour,
 		S3Endpoint:           endpoint,

@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
 
-from ..config import DATABASE_URL
+from indexing_worker.config import DATABASE_URL
 from .types import ChapterSection, SubChapterSection
 
 
