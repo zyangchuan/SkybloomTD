@@ -12,7 +12,7 @@ export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
-  private currentWave = 0;
+  private currentWave = -1;
 
   // Grid params
   private tileSize = 0;
@@ -51,6 +51,7 @@ export default class GameScene extends Phaser.Scene {
     this.audio = new BgmManager(this);
     this.quiz.createHUD();
 
+    this.sound.pauseOnBlur = false;
 
     this.drag = new DragController(
       this,
@@ -96,13 +97,16 @@ export default class GameScene extends Phaser.Scene {
 
   private handleServerMessage(msg: any) {
     switch (msg.type) {
-      case 'game.state': 
+       case 'game.state': 
         const waveIndex: number = msg.data?.wave || 0;
         if (waveIndex != this.currentWave) {
           this.audio.updateForWave(waveIndex);
+          this.currentWave = waveIndex;
         }
       case 'game.session.started':
-        if (!this.overlay.isPaused()) this.updateFromState(msg.data);
+        if (!this.overlay.isPaused()) {
+           this.updateFromState(msg.data);
+        }
         break;
       case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
       case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;

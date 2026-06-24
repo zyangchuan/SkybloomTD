@@ -51,13 +51,13 @@ export class BgmManager {
     updateForWave(wave: number) {
 
         if (wave <= 1) {
-            this.play('front_game_bgm');
+            this.play('audio_wave_1');
         }
         if (wave == 2) {
-            this.play('middle_game_bgm');
+            this.play('audio_wave_1');
         }
         if (wave >= 3) {
-            this.play('end_game_bgm');
+            this.play('audio_wave_1');
         }  
     }
 
