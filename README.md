@@ -2,9 +2,9 @@
 
 This guide covers the current Docker Compose setup for local development and shared dev, staging, and production deployments. Local GPU OCR notes assume Windows WSL 2, but the compose profiles are the same on Linux servers.
 
-## What Runs Locally
+## What Runs In Compose
 
-The local compose stack starts:
+The root compose stack starts these shared services:
 
 - `reverse-proxy`: Nginx entrypoint at `http://localhost`
 - `frontend`: Next.js app
@@ -15,9 +15,9 @@ The local compose stack starts:
 - `game-service`: game websocket/API service
 - `game-generation-worker`: level and quiz generation worker
 - `user-service`: auth/user service
-- `rabbitmq`: local message queue
-- `redis`: document task-status and generation-status Redis
-- `game-redis`: map/session cache Redis
+- `rabbitmq`: message queue for document and game jobs
+- `redis`: document task-status and game generation-status Redis
+- `game-redis`: map, quiz, and gameplay session cache Redis
 
 ## Prerequisites
 
@@ -132,49 +132,33 @@ Edit the copied env file and fill in the required values:
 - Supabase JWT settings
 - Supabase S3-compatible storage credentials
 - Postgres settings
-- RabbitMQ and Redis URLs for the selected environment
 - OpenAI API key
 
-For local broker/status services, keep these values pointing at the compose
-services:
-
-```env
-RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
-RABBITMQ_HEARTBEAT_SECONDS=600
-RABBITMQ_BLOCKED_CONNECTION_TIMEOUT_SECONDS=300
-RABBITMQ_WORKER_POLL_SECONDS=1
-REDIS_URL=redis://redis:6379/0
-GAME_STATUS_REDIS_URL=redis://redis:6379/0
-GAME_MAP_REDIS_URL=redis://game-redis:6379/0
-GAME_SESSION_REDIS_URL=redis://game-redis:6379/0
-DOCUMENT_CONTENT_QUEUE=document.process
-GAME_GENERATION_QUEUE=game.generation.generate
-TASK_STATUS_TTL_SECONDS=604800
-```
+RabbitMQ, Redis, game Redis, queue names, and task/status cache TTLs are fixed in code for the Compose network. The services use the container names `rabbitmq`, `redis`, and `game-redis`.
 
 ## Compose Profiles
 
-The root `docker-compose.yml` defines the shared service graph. Profile-specific override files select commands, env files, mounts, and local support services.
+The root `docker-compose.yml` defines the shared service graph. Profile-specific override files select commands, env files, mounts, and local host ports. RabbitMQ and Redis are defined in the shared root compose file for every profile.
 
 | Profile | Env file | Override file | Typical use |
 | --- | --- | --- | --- |
 | Local | `.env.local` | `docker-compose.local.yml` | Full local stack with bind mounts, RabbitMQ, Redis, and GPU OCR worker |
-| Dev | `.env.dev` | `docker-compose.dev.yml` | Shared development server using external broker/cache/database services |
-| Staging | `.env.staging` | `docker-compose.staging.yml` | Production-like staging deployment |
-| Production | `.env.production` | `docker-compose.production.yml` | Production deployment |
+| Dev | `.env.dev` | `docker-compose.dev.yml` | Shared development server using Compose RabbitMQ/Redis and external database/storage |
+| Staging | `.env.staging` | `docker-compose.staging.yml` | Production-like staging deployment with private Compose RabbitMQ/Redis |
+| Production | `.env.production` | `docker-compose.production.yml` | Production deployment with private Compose RabbitMQ/Redis |
 
 Build and start the local stack:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
 Run a shared environment in the background:
 
 ```bash
-docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
-docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
-docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.production.yml up --build -d
 ```
 
 Open locally:
@@ -185,7 +169,7 @@ Open locally:
 - OpenAPI YAML: `http://localhost/openapi.yaml`
 - RabbitMQ management UI: `http://localhost:15672`
 
-Default local RabbitMQ credentials:
+Default RabbitMQ credentials in the example env files:
 
 ```text
 guest / guest
@@ -194,25 +178,14 @@ guest / guest
 Stop the local stack:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml down
+docker compose -f docker-compose.yml -f docker-compose.local.yml down
 ```
 
 Stop and remove local volumes:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml down -v
+docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
-
-## Document Worker Only
-
-The old standalone `services/document-content/docker-compose.yml` was removed. The full app uses the root compose files. If you need to run only the GPU document worker, use the worker-specific compose files from `services/document-content`:
-
-```bash
-cd services/document-content
-docker compose --env-file .env.production -f docker-compose.worker.yml -f docker-compose.worker.production.yml up --build -d
-```
-
-Use `.env.local`, `.env.staging`, or `.env.production` with the matching worker override for the target machine.
 
 ## Common WSL Fixes
 
@@ -238,15 +211,14 @@ If Docker cannot access the GPU but `nvidia-smi` works in WSL:
 - Make sure Docker Desktop WSL integration is enabled for your Ubuntu distro.
 - If using Docker Engine inside WSL, reinstall/configure `nvidia-container-toolkit`.
 
-If the app keeps using remote Redis/RabbitMQ unexpectedly:
+If the app cannot reach Redis/RabbitMQ:
 
 - Check `.env.local`.
-- The local compose override forces document and game backend services to use
-  `rabbitmq` and `redis` inside the compose network.
+- The services use hardcoded Compose hostnames: `rabbitmq`, `redis`, and `game-redis`.
 - Recreate containers after env changes:
 
 ```bash
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build --force-recreate
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build --force-recreate
 ```
 
 ## References

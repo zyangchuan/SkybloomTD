@@ -2,21 +2,21 @@ import json
 import logging
 from datetime import datetime, timezone
 
-import redis
-
-from .config import REDIS_URL, TASK_STATUS_TTL_SECONDS
+from ocr_coordinator.config import REDIS_URL, TASK_STATUS_TTL_SECONDS
 
 
 LOG = logging.getLogger(__name__)
-_client: redis.Redis | None = None
+_client = None
 
 
-def redis_client() -> redis.Redis | None:
+def redis_client():
     global _client
 
     if not REDIS_URL:
         return None
     if _client is None:
+        import redis
+
         _client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
     return _client
 

@@ -1,7 +1,5 @@
 pika
 boto3
-paddleocr
-paddlex[ocr]
 openai
 psycopg[binary]
 SQLAlchemy

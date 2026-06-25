@@ -6,12 +6,10 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-
-	"skybloom/user-service/internal/models"
 )
 
 func Open(ctx context.Context, databaseURL string) (*gorm.DB, func() error, error) {
-	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
+	db, err := gorm.Open(postgres.New(postgres.Config{DSN: databaseURL, PreferSimpleProtocol: true}), &gorm.Config{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -36,8 +34,18 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 		if err := tx.Exec("REVOKE ALL ON SCHEMA private FROM PUBLIC").Error; err != nil {
 			return fmt.Errorf("revoke private schema grants: %w", err)
 		}
-		if err := tx.AutoMigrate(&models.User{}); err != nil {
+		if err := tx.Exec(`CREATE TABLE IF NOT EXISTS private.users (
+			id UUID PRIMARY KEY,
+			email TEXT,
+			user_name TEXT NOT NULL,
+			metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`).Error; err != nil {
 			return fmt.Errorf("migrate users table: %w", err)
+		}
+		if err := tx.Exec("CREATE INDEX IF NOT EXISTS users_email_idx ON private.users(email)").Error; err != nil {
+			return fmt.Errorf("create users email index: %w", err)
 		}
 		if err := tx.Exec("REVOKE ALL ON TABLE private.users FROM PUBLIC").Error; err != nil {
 			return fmt.Errorf("revoke users table grants: %w", err)

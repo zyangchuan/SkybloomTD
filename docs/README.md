@@ -7,34 +7,37 @@ The public API contract is in `docs/openapi.yaml`.
 Local compose runs use `.env.local` with `docker-compose.local.yml`:
 
 ```text
-docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.local.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 ```
 
 Dev compose runs use `.env.dev` with `docker-compose.dev.yml`:
 
 ```text
-docker compose --env-file .env.dev -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 ```
 
 Staging compose runs use `.env.staging` with
 `docker-compose.staging.yml`:
 
 ```text
-docker compose --env-file .env.staging -f docker-compose.yml -f docker-compose.staging.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.staging.yml up --build -d
 ```
 
 Production compose runs use `.env.production` with
 `docker-compose.production.yml`:
 
 ```text
-docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.production.yml up --build -d
+docker compose -f docker-compose.yml -f docker-compose.production.yml up --build -d
 ```
 
 The tracked `*.example` files show the expected keys. Real root env files
 like `.env.local`, `.env.dev`, `.env.staging`, and `.env.production` stay
-ignored so secrets do not get committed.
+ignored so secrets do not get committed. The compose overrides declare these
+files with `env_file`, so the commands do not need CLI `--env-file`.
 
 Frontend app/game variables are merged into those root env files. Compose no longer reads `frontend/app/.env.*` or `frontend/game/.env.*`.
+
+RabbitMQ and Redis are Compose services for every root profile. Service code uses fixed Compose hostnames (`rabbitmq`, `redis`, and `game-redis`) instead of env-configured broker/cache URLs. They are private Docker-network services by default; `docker-compose.local.yml` additionally publishes local host ports for development and the RabbitMQ management UI.
 
 When the Docker stack is running, Nginx also serves it from the public base URL
 configured in `SKYBLOOM_PUBLIC_BASE_URL`:
@@ -50,9 +53,7 @@ $SKYBLOOM_PUBLIC_BASE_URL/docs
 ```
 
 All browser-facing API calls should go through the reverse proxy on port 80.
-Backend containers are private Docker-network services.
-
-The full application uses the root compose files. For a worker-only host, use `services/document-content/docker-compose.worker.yml` with the matching worker override, for example `docker-compose.worker.staging.yml` or `docker-compose.worker.production.yml`.
+Backend containers are private Docker-network services, including the shared `rabbitmq`, `redis`, and `game-redis` containers.
 
 Protected API routes use the `skybloom_access_token` cookie. The browser sends
 it automatically to the reverse proxy, Nginx verifies it through user-service,
