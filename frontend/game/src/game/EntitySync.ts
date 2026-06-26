@@ -61,18 +61,18 @@ export class EntitySync {
     const getEnemyBaseMultiplier = (enemyType: string) => {
 
       if (enemyType === "enemy_smog") {
-        return { width: 1.0, height: 1.1 };
+        return { width: 1.4, height: 1.4 };
       }
 
       if (enemyType === "enemy_noise") {
-        return { width: 1.1, height: 1.1 };
+        return { width: 1.4, height: 1.4 };
       }
 
       if (enemyType === "enemy_junk") {
-        return { width: 1.2, height: 1.2 };
+        return { width: 1.5, height: 1.5 };
       }
 
-      return { width: 1.0, height: 1.1 };
+      return { width: 1.4, height: 1.4 };
     }
 
     const getEnemyDisplaySize = (enemyType: string, health: number, maxHealth: number) => {
