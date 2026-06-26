@@ -43,11 +43,11 @@ const (
 	baseHealthDamage        = 10
 	correctQuizEssenceAward = 30
 	baseSmogHealth          = 60
-	baseJunkHealth          = 300
+	baseJunkHealth          = 200
 	baseNoiseHealth         = 20
 	baseSmogSpeed           = 0.8
 	baseJunkSpeed           = 0.1
-	baseNoiseSpeed          = 3.0
+	baseNoiseSpeed          = 1.5
 )
 
 type LevelRepository interface {
@@ -1318,7 +1318,7 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 	if groupSize < 1 {
 		groupSize = 1
 	}
-	
+
 	groupIndex := int64(runtime.waveSpawned / groupSize)
 	indexInGroup := int64(runtime.waveSpawned % groupSize)
 

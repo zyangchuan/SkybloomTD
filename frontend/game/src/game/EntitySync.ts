@@ -27,7 +27,7 @@ export class EntitySync {
     private tileSize: number,
     private offsetX: number,
     private offsetY: number,
-  ) {}
+  ) { }
 
   // ─── Sync from server state ──────────────────────────────────────────────────
 
@@ -57,6 +57,42 @@ export class EntitySync {
       id: s.id, x: s.position.x, y: s.position.y, pathIndex: s.path_index || 0,
     }));
     const activeIds = new Set<string>();
+
+    const getEnemyBaseMultiplier = (enemyType: string) => {
+
+      if (enemyType === "enemy_smog") {
+        return { width: 1.0, height: 1.1 };
+      }
+
+      if (enemyType === "enemy_noise") {
+        return { width: 1.1, height: 1.1 };
+      }
+
+      if (enemyType === "enemy_junk") {
+        return { width: 1.2, height: 1.2 };
+      }
+
+      return { width: 1.0, height: 1.1 };
+    }
+
+    const getEnemyDisplaySize = (enemyType: string, health: number, maxHealth: number) => {
+
+      const base = getEnemyBaseMultiplier(enemyType);
+
+      let multiplier = 1;
+
+      if (health < maxHealth / 2) {
+        multiplier = 0.78;
+      }
+
+      return {
+        width: this.tileSize * multiplier * base.width,
+        height: this.tileSize * multiplier * base.height
+      }
+
+    }
+
+
     smogsList.forEach(({ id, type, health, position }) => {
       activeIds.add(id);
       const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
@@ -65,47 +101,17 @@ export class EntitySync {
       const maxHealth = this.smogMaxHealth.get(id) || health || 1;
       if (!this.smogs.has(id)) {
         const smog = `enemy_${type ?? "smog"}`;
-        const multiplierWidth = () => {
-
-          if (smog === "enemy_smog") {
-            return 0.9;
-          }
-
-          if (smog === "enemy_noise") {
-            return 1.0
-          }
-
-          if (smog == "enemy_junk") {
-            return 1.1;
-          }
-
-          return 0.9;
-        }
-
-         const multiplierHeight = () => {
-
-          if (smog === "enemy_smog") {
-            return 1.0;
-          }
-
-          if (smog === "enemy_noise") {
-            return 1.0;
-          }
-
-           if (smog == "enemy_junk") {
-            return 1.1;
-          }
-
-          return 1.0;
-        }
-       
         const sprite = this.scene.add.sprite(posX, posY, smog)
-          .setDisplaySize(this.tileSize * multiplierWidth(), this.tileSize * multiplierHeight()).setDepth(15);
+          .setDisplaySize(this.tileSize * getEnemyBaseMultiplier(type).width, this.tileSize * getEnemyBaseMultiplier(type).height).setDepth(15);
         const healthBar = this.scene.add.graphics().setDepth(16);
         this.smogs.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth });
       } else {
         const e = this.smogs.get(id)!;
         e.targetX = posX; e.targetY = posY; e.health = health; e.maxHealth = maxHealth;
+
+        // when it is  50 percent health
+        const displaySize = getEnemyDisplaySize(type, health, maxHealth);
+        e.sprite.setDisplaySize(displaySize.width, displaySize.height);
       }
     });
     for (const [id, e] of this.smogs.entries()) {
