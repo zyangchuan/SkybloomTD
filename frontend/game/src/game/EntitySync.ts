@@ -64,9 +64,43 @@ export class EntitySync {
       if (!this.smogMaxHealth.has(id)) this.smogMaxHealth.set(id, health);
       const maxHealth = this.smogMaxHealth.get(id) || health || 1;
       if (!this.smogs.has(id)) {
-        const smog = `enemy_${type ?? `smog`}`;
+        const smog = `enemy_${type ?? "smog"}`;
+        const multiplierWidth = () => {
+
+          if (smog === "enemy_smog") {
+            return 0.9;
+          }
+
+          if (smog === "enemy_noise") {
+            return 1.0
+          }
+
+          if (smog == "enemy_junk") {
+            return 1.1;
+          }
+
+          return 0.9;
+        }
+
+         const multiplierHeight = () => {
+
+          if (smog === "enemy_smog") {
+            return 1.0;
+          }
+
+          if (smog === "enemy_noise") {
+            return 1.0;
+          }
+
+           if (smog == "enemy_junk") {
+            return 1.1;
+          }
+
+          return 1.0;
+        }
+       
         const sprite = this.scene.add.sprite(posX, posY, smog)
-          .setDisplaySize(this.tileSize * 1.4, this.tileSize * 1.4).setDepth(15);
+          .setDisplaySize(this.tileSize * multiplierWidth(), this.tileSize * multiplierHeight()).setDepth(15);
         const healthBar = this.scene.add.graphics().setDepth(16);
         this.smogs.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth });
       } else {
@@ -124,7 +158,7 @@ export class EntitySync {
       const pct = Math.max(0, Math.min(1, health / maxHealth));
       const barW = 60, barH = 8;
       const barX = sprite.x - barW / 2;
-      const barY = sprite.y - this.tileSize / 2 - 12;
+      const barY = sprite.y - this.tileSize / 2 - 1;
       healthBar.fillStyle(0x1e293b, 1.0).fillRoundedRect(barX, barY, barW, barH, 3);
       if (pct > 0) {
         const color = pct < 0.3 ? 0xef4444 : pct < 0.6 ? 0xf59e0b : 0x10b981;
