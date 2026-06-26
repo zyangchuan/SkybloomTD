@@ -60,15 +60,15 @@ export class EntitySync {
 
     const getEnemyBaseMultiplier = (enemyType: string) => {
 
-      if (enemyType === "enemy_smog") {
+      if (enemyType === "smog") {
         return { width: 1.0, height: 1.1 };
       }
 
-      if (enemyType === "enemy_noise") {
+      if (enemyType === "noise") {
         return { width: 1.1, height: 1.1 };
       }
 
-      if (enemyType === "enemy_junk") {
+      if (enemyType === "junk") {
         return { width: 1.5, height: 1.5 };
       }
 
