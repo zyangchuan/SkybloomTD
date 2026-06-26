@@ -1212,12 +1212,12 @@ func waveDefinitions() []waveDefinition {
 		}},
 		{Wave: 2, Groups: []spawnGroup{
 			scaledGroup(2, "smog", 7),
-			scaledGroup(2, "junk", 3),
+			scaledGroup(2, "junk", 2),
 		}},
 		{Wave: 3, Groups: []spawnGroup{
 			scaledGroup(3, "smog", 8),
-			scaledGroup(3, "junk", 6),
-			scaledGroup(3, "noise", 4),
+			scaledGroup(3, "junk", 3),
+			scaledGroup(3, "noise", 10),
 		}},
 	}
 }
@@ -1309,10 +1309,16 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 	}
 
 	// Calculate subwave/group spawn ticks dynamically
-	groupSize := wave.Count() / 2
+	groupSize := wave.Count()
+
+	// first wave easy
+	if wave.Wave == 1 {
+		groupSize = wave.Count() / 2
+	}
 	if groupSize < 1 {
 		groupSize = 1
 	}
+	
 	groupIndex := int64(runtime.waveSpawned / groupSize)
 	indexInGroup := int64(runtime.waveSpawned % groupSize)
 
