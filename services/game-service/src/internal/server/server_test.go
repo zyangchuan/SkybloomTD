@@ -1161,38 +1161,50 @@ func TestAdvanceRuntimeTickSpawnsSmogsEverySecond(t *testing.T) {
 	}
 }
 
-func TestWaveDefinitionsScaleEnemyStatsByWave(t *testing.T) {
+func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 	waves := waveDefinitions()
-	expected := []waveDefinition{
-		{Wave: 1, Count: 15, Health: 60, Speed: 0.8},
-		{Wave: 2, Count: 24, Health: 105, Speed: 1.13},
-		{Wave: 3, Count: 36, Health: 160, Speed: 1.52},
+	expectedTypes := map[int][]string{
+		1: {"smog"},
+		2: {"smog", "junk"},
+		3: {"smog", "junk", "noise"},
+	}
+	expectedCount := map[int]int{1: 15, 2: 24, 3: 36}
+
+	if len(waves) != len(expectedTypes) {
+		t.Fatalf("expected %d waves, got %d", len(expectedTypes), len(waves))
+	}
+	for i, wave := range waves {
+		if wave.Wave != i+1 {
+			t.Fatalf("wave at index %d: expected wave number %d, got %d", i, i+1, wave.Wave)
+		}
+		if wave.Count() != expectedCount[wave.Wave] {
+			t.Fatalf("wave %d: expected total count %d, got %d", wave.Wave, expectedCount[wave.Wave], wave.Count())
+		}
+		want := expectedTypes[wave.Wave]
+		if len(wave.Groups) != len(want) {
+			t.Fatalf("wave %d: expected %d groups, got %d", wave.Wave, len(want), len(wave.Groups))
+		}
+		for j, g := range wave.Groups {
+			if g.Type != want[j] {
+				t.Fatalf("wave %d group %d: expected type %q, got %q", wave.Wave, j, want[j], g.Type)
+			}
+			if g.Health <= 0 {
+				t.Fatalf("wave %d %s: expected positive health, got %d", wave.Wave, g.Type, g.Health)
+			}
+			// Regression guard: enemies must crawl, not teleport across the map.
+			if g.Speed <= 0 || g.Speed > 10 {
+				t.Fatalf("wave %d %s: speed %.2f outside sane range", wave.Wave, g.Type, g.Speed)
+			}
+		}
 	}
 
-	if len(waves) != len(expected) {
-		t.Fatalf("expected %d waves, got %d", len(expected), len(waves))
-	}
-	for i := range expected {
-		if waves[i].Wave != expected[i].Wave {
-			t.Fatalf("wave %d: expected wave number %d, got %d", i, expected[i].Wave, waves[i].Wave)
-		}
-		if waves[i].Count != expected[i].Count {
-			t.Fatalf("wave %d: expected count %d, got %d", waves[i].Wave, expected[i].Count, waves[i].Count)
-		}
-		if waves[i].Health != expected[i].Health {
-			t.Fatalf("wave %d: expected health %d, got %d", waves[i].Wave, expected[i].Health, waves[i].Health)
-		}
-		if diff := waves[i].Speed - expected[i].Speed; diff < -0.0000001 || diff > 0.0000001 {
-			t.Fatalf("wave %d: expected speed %.2f, got %.2f", waves[i].Wave, expected[i].Speed, waves[i].Speed)
-		}
-	}
-
+	// The smog group leads every wave, so its stats track the per-wave ramp.
 	for i := 1; i < len(waves); i++ {
-		if waves[i].Health <= waves[i-1].Health {
-			t.Fatalf("expected wave %d health to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
+		if waves[i].Groups[0].Health <= waves[i-1].Groups[0].Health {
+			t.Fatalf("expected wave %d smog health to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
 		}
-		if waves[i].Speed <= waves[i-1].Speed {
-			t.Fatalf("expected wave %d speed to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
+		if waves[i].Groups[0].Speed <= waves[i-1].Groups[0].Speed {
+			t.Fatalf("expected wave %d smog speed to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
 		}
 	}
 }

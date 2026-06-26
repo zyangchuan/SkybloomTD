@@ -558,7 +558,7 @@ func TestGameWonReturnsTrueWhenAllConditionsMet(t *testing.T) {
 
 	runtime := runtimeSession{
 		session:      gamesession.State{Health: gamesession.InitialHealth, Wave: len(waves)},
-		waveSpawned:  finalWave.Count,
+		waveSpawned:  finalWave.Count(),
 		nextWaveTick: 0,
 		smogs:        nil,
 	}
