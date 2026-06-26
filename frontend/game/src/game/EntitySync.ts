@@ -57,14 +57,15 @@ export class EntitySync {
       id: s.id, x: s.position.x, y: s.position.y, pathIndex: s.path_index || 0,
     }));
     const activeIds = new Set<string>();
-    smogsList.forEach(({ id, health, position }) => {
+    smogsList.forEach(({ id, type, health, position }) => {
       activeIds.add(id);
       const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
       const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
       if (!this.smogMaxHealth.has(id)) this.smogMaxHealth.set(id, health);
       const maxHealth = this.smogMaxHealth.get(id) || health || 1;
       if (!this.smogs.has(id)) {
-        const sprite = this.scene.add.sprite(posX, posY, 'enemy_smog')
+        const smog = `enemy_${type ?? `smog`}`;
+        const sprite = this.scene.add.sprite(posX, posY, smog)
           .setDisplaySize(this.tileSize * 1.4, this.tileSize * 1.4).setDepth(15);
         const healthBar = this.scene.add.graphics().setDepth(16);
         this.smogs.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth });

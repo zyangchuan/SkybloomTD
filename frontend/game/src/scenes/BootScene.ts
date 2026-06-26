@@ -79,8 +79,10 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('tower_eagle', '/game/assets/birds/eagle_tower.png');
     this.load.image('tower_peacock', '/game/assets/birds/peacock_tower.png');
 
-    // Preload smogs
-    this.load.image('enemy_smog', '/game/assets/smogs/smog.png');
+    // Preload smogs (enemies)
+    this.load.image('enemy_smog', '/game/assets/enemies/smog.png');
+    this.load.image('enemy_junk', '/game/assets/enemies/junk.png');
+    this.load.image('enemy_noise', '/game/assets/enemies/noise.png');
 
     // Preload bird projectiles
     this.load.image('projectile_sparrow', '/game/assets/birds/sparrow_projectile.png');
