@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useEffect, useState, useRef } from "react";
 
@@ -8,7 +9,9 @@ export default function PageBgm() {
     const audio = useRef<HTMLAudioElement | null>(null);
 
     // setVolume to be used after adding volumeSlider
-    const [volume, _setVolume] = useState(0.5);
+    const [volume, setVolume] = useState(0.5);
+    const [muted, setMuted] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
     useEffect(() => {
         // to not have music in quiz interface 
@@ -59,7 +62,86 @@ export default function PageBgm() {
 
     }, []);
 
-    return null;
+    const handleToggleMute = () => {
+        if (audio.current) {
+            const next = !muted;
+            setMuted(next);
+            if (next) {
+                audio.current.volume = 0; 
+            } else {
+                audio.current.volume = volume;
+            }
+        }
+        return;
+    }
+
+    const handleToggleVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newVolume = parseFloat(e.target.value);
+        setVolume(newVolume);
+        if (audio.current) {
+            audio.current.volume = newVolume;
+        } 
+
+        if (newVolume == 0) {
+            setMuted(true);
+        } else {
+            setMuted(false);
+        }
+    }
+
+    return (
+        <div className="fixed! top-10 left-[345px] z-50!">
+            <button
+                type="button"
+                onClick={() => setSettingsOpen((prev) => !prev)}
+                className="relative h-12 w-12 border-0 bg-transparent p-0 cursor-pointer"
+                aria-label="Open settings"
+            >
+
+                <Image
+                    src="/gui/buttons_icons/IconButton_Small_Orange_Rounded.svg"
+                    alt=""
+                    fill
+                    className="object-contain"
+                />
+
+                <Image
+                    src="/gui/icons/Icon_Large_Menu_Blank.svg"
+                    alt=""
+                    width={28}
+                    height={28}
+                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+                />
+            </button>
+            
+            {settingsOpen && (
+               <div className="mt-2 flex items-center gap-3 rounded-md bg-white/90 px-4 py-3 shadow-md">
+                 <Image
+                    src={muted? "/gui/icons/Icon_Large_AudioOff_Blank.svg"
+                              : "/gui/icons/Icon_Large_Audio_Blank.svg"
+                    }
+                    alt="audio"
+                    onClick={handleToggleMute}
+                    width={24}
+                    height={24}
+                    className="cursor-pointer"
+                    />
+                 <input 
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={muted? 0 : volume}
+                    onChange={handleToggleVolume}
+                    className="w-24"
+                    />
+                  </div>  
+
+            )}
+        </div>
+    );
+
+
 
 
 }
