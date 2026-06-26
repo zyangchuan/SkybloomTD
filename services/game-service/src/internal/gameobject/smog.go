@@ -2,6 +2,7 @@ package gameobject
 
 type Smog struct {
 	ID        string
+	Type      string // "smog", "junk", "noise"
 	Health    int
 	Position  Position
 	Speed     float64

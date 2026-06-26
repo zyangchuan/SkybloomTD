@@ -43,7 +43,11 @@ const (
 	baseHealthDamage        = 10
 	correctQuizEssenceAward = 30
 	baseSmogHealth          = 60
+	baseJunkHealth          = 300
+	baseNoiseHealth         = 20
 	baseSmogSpeed           = 0.8
+	baseJunkSpeed           = 0.1
+	baseNoiseSpeed          = 3.0
 )
 
 type LevelRepository interface {
@@ -138,6 +142,7 @@ type PlacedBirdState struct {
 
 type SmogState struct {
 	ID        string              `json:"id"`
+	Type      string              `json:"type"`
 	Health    int                 `json:"health"`
 	Position  gameobject.Position `json:"position"`
 	Speed     float64             `json:"speed"`
@@ -1168,46 +1173,101 @@ func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdType
 	}
 }
 
-type waveDefinition struct {
-	Wave   int
+type spawnGroup struct {
+	Type   string
 	Count  int
 	Health int
 	Speed  float64
 }
 
+type waveDefinition struct {
+	Wave   int
+	Groups []spawnGroup
+}
+
+// count how many groups (all waves)
+func (w waveDefinition) Count() int {
+	total := 0
+	for _, g := range w.Groups {
+		total += g.Count
+	}
+	return total
+}
+
+// return the particular enemy at what group
+func (w waveDefinition) enemyAt(index int) (spawnGroup, bool) {
+	for _, g := range w.Groups {
+		if index < g.Count {
+			return g, true
+		}
+		index -= g.Count
+	}
+	return spawnGroup{}, false
+}
+
 func waveDefinitions() []waveDefinition {
 	return []waveDefinition{
-		scaledWaveDefinition(1, 15),
-		scaledWaveDefinition(2, 24),
-		scaledWaveDefinition(3, 36),
+		{Wave: 1, Groups: []spawnGroup{
+			scaledGroup(1, "smog", 10),
+		}},
+		{Wave: 2, Groups: []spawnGroup{
+			scaledGroup(2, "smog", 7),
+			scaledGroup(2, "junk", 3),
+		}},
+		{Wave: 3, Groups: []spawnGroup{
+			scaledGroup(3, "smog", 8),
+			scaledGroup(3, "junk", 6),
+			scaledGroup(3, "noise", 4),
+		}},
 	}
 }
 
-func scaledWaveDefinition(wave int, count int) waveDefinition {
-	return waveDefinition{
-		Wave:   wave,
+func scaledGroup(wave int, enemyType string, count int) spawnGroup {
+	return spawnGroup{
+		Type:   enemyType,
 		Count:  count,
-		Health: scaledSmogHealth(wave),
-		Speed:  scaledSmogSpeed(wave),
+		Health: scaledSmogHealth(wave, enemyType),
+		Speed:  scaledSmogSpeed(wave, enemyType),
 	}
 }
 
-func scaledSmogHealth(wave int) int {
+func scaledSmogHealth(wave int, enemyType string) int {
 	waveOffset := wave - 1
 	if waveOffset < 0 {
 		waveOffset = 0
 	}
-	return baseSmogHealth + (waveOffset * 40) + (waveOffset * waveOffset * 5)
+	baseHealth := 60
+
+	switch enemyType {
+	case "smog":
+		baseHealth = baseSmogHealth
+	case "junk":
+		baseHealth = baseJunkHealth
+	default:
+		baseHealth = baseNoiseHealth
+	}
+	return baseHealth + (waveOffset * 40) + (waveOffset * waveOffset * 5)
 }
 
-func scaledSmogSpeed(wave int) float64 {
+func scaledSmogSpeed(wave int, enemyType string) float64 {
 	waveOffset := float64(wave - 1)
 	if waveOffset < 0 {
 		waveOffset = 0
 	}
-	return baseSmogSpeed + (waveOffset * 0.3) + (waveOffset * waveOffset * 0.03)
-}
 
+	baseSpeed := 0.8
+
+	switch enemyType {
+	case "smog":
+		baseSpeed = baseSmogSpeed
+	case "junk":
+		baseSpeed = baseJunkSpeed
+	default:
+		baseSpeed = baseNoiseSpeed
+	}
+
+	return baseSpeed + (waveOffset * 0.3) + (waveOffset * waveOffset * 0.03)
+}
 func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
 	if runtime == nil {
 		return nil
@@ -1237,7 +1297,7 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 		return nil
 	}
 	wave, ok := activeWaveDefinition(runtime)
-	if !ok || runtime.waveSpawned >= wave.Count {
+	if !ok || runtime.waveSpawned >= wave.Count() {
 		return nil
 	}
 
@@ -1249,7 +1309,7 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 	}
 
 	// Calculate subwave/group spawn ticks dynamically
-	groupSize := wave.Count / 3
+	groupSize := wave.Count() / 2
 	if groupSize < 1 {
 		groupSize = 1
 	}
@@ -1265,11 +1325,16 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 		return events
 	}
 
+	group, found := wave.enemyAt(runtime.waveSpawned)
+	if !found {
+		return events
+	}
 	smog := gameobject.Smog{
 		ID:        uuid.NewString(),
-		Health:    wave.Health,
+		Type:      group.Type,
+		Health:    group.Health,
 		Position:  runtime.path[0],
-		Speed:     wave.Speed,
+		Speed:     group.Speed,
 		PathIndex: 0,
 	}
 	runtime.waveSpawned++
@@ -1309,7 +1374,7 @@ func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
 		return nil
 	}
 	currentWave, ok := currentWaveDefinition(runtime.session.Wave)
-	if !ok || runtime.waveSpawned < currentWave.Count {
+	if !ok || runtime.waveSpawned < currentWave.Count() {
 		return nil
 	}
 	if runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
@@ -1333,7 +1398,7 @@ func gameWon(runtime runtimeSession) bool {
 		return false
 	}
 	finalWave, ok := currentWaveDefinition(runtime.session.Wave)
-	return ok && runtime.waveSpawned >= finalWave.Count && runtime.nextWaveTick == 0
+	return ok && runtime.waveSpawned >= finalWave.Count() && runtime.nextWaveTick == 0
 }
 
 func moveSmogs(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
@@ -1524,7 +1589,7 @@ func normalizeRuntimeState(runtime gamesession.RuntimeState) gamesession.Runtime
 	}
 	if runtime.NextWaveTick == 0 && runtime.Wave > 0 && runtime.WaveSpawned == 0 {
 		if wave, ok := currentWaveDefinition(runtime.Wave); ok {
-			runtime.WaveSpawned = wave.Count
+			runtime.WaveSpawned = wave.Count()
 		}
 	}
 	if runtime.WaveStartedAtTick == 0 && runtime.Wave > 0 && runtime.WaveSpawned > 0 {
@@ -1639,6 +1704,7 @@ func smogStates(smogs []gameobject.Smog) []SmogState {
 	for _, smog := range smogs {
 		states = append(states, SmogState{
 			ID:        smog.ID,
+			Type:      smog.Type,
 			Health:    smog.Health,
 			Position:  smog.Position,
 			Speed:     smog.Speed,
@@ -1695,6 +1761,7 @@ func storedSmogs(smogs []gameobject.Smog) []gamesession.StoredSmog {
 	for _, smog := range smogs {
 		stored = append(stored, gamesession.StoredSmog{
 			ID:        smog.ID,
+			Type:      smog.Type,
 			Health:    smog.Health,
 			Position:  smog.Position,
 			Speed:     smog.Speed,
@@ -1709,6 +1776,7 @@ func smogsFromStored(stored []gamesession.StoredSmog) []gameobject.Smog {
 	for _, item := range stored {
 		smogs = append(smogs, gameobject.Smog{
 			ID:        item.ID,
+			Type:      item.Type,
 			Health:    item.Health,
 			Position:  item.Position,
 			Speed:     item.Speed,

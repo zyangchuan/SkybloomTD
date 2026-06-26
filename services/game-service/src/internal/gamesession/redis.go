@@ -54,6 +54,7 @@ type StoredBird struct {
 
 type StoredSmog struct {
 	ID        string              `json:"id"`
+	Type      string              `json:"type"`
 	Health    int                 `json:"health"`
 	Position  gameobject.Position `json:"position"`
 	Speed     float64             `json:"speed"`
