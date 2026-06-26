@@ -61,35 +61,18 @@ export class EntitySync {
     const getEnemyBaseMultiplier = (enemyType: string) => {
 
       if (enemyType === "enemy_smog") {
-        return { width: 1.4, height: 1.4 };
+        return { width: 1.0, height: 1.1 };
       }
 
       if (enemyType === "enemy_noise") {
-        return { width: 1.4, height: 1.4 };
+        return { width: 1.1, height: 1.1 };
       }
 
       if (enemyType === "enemy_junk") {
         return { width: 1.5, height: 1.5 };
       }
 
-      return { width: 1.4, height: 1.4 };
-    }
-
-    const getEnemyDisplaySize = (enemyType: string, health: number, maxHealth: number) => {
-
-      const base = getEnemyBaseMultiplier(enemyType);
-
-      let multiplier = 1;
-
-      if (health < maxHealth / 2) {
-        multiplier = 0.78;
-      }
-
-      return {
-        width: this.tileSize * multiplier * base.width,
-        height: this.tileSize * multiplier * base.height
-      }
-
+      return { width: 1.0, height: 1.1 };
     }
 
 
@@ -108,10 +91,6 @@ export class EntitySync {
       } else {
         const e = this.smogs.get(id)!;
         e.targetX = posX; e.targetY = posY; e.health = health; e.maxHealth = maxHealth;
-
-        // when it is  50 percent health
-        const displaySize = getEnemyDisplaySize(type, health, maxHealth);
-        e.sprite.setDisplaySize(displaySize.width, displaySize.height);
       }
     });
     for (const [id, e] of this.smogs.entries()) {

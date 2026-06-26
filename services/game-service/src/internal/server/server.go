@@ -47,7 +47,7 @@ const (
 	baseNoiseHealth         = 20
 	baseSmogSpeed           = 0.8
 	baseJunkSpeed           = 0.1
-	baseNoiseSpeed          = 1.5
+	baseNoiseSpeed          = 1.2
 )
 
 type LevelRepository interface {
@@ -1246,7 +1246,7 @@ func scaledSmogHealth(wave int, enemyType string) int {
 	default:
 		baseHealth = baseNoiseHealth
 	}
-	return baseHealth + (waveOffset * 40) + (waveOffset * waveOffset * 5)
+	return baseHealth + (waveOffset * 10) + (waveOffset * waveOffset * 2)
 }
 
 func scaledSmogSpeed(wave int, enemyType string) float64 {
@@ -1266,7 +1266,7 @@ func scaledSmogSpeed(wave int, enemyType string) float64 {
 		baseSpeed = baseNoiseSpeed
 	}
 
-	return baseSpeed + (waveOffset * 0.3) + (waveOffset * waveOffset * 0.03)
+	return baseSpeed + (waveOffset * 0.1) + (waveOffset * waveOffset * 0.01)
 }
 func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
 	if runtime == nil {
