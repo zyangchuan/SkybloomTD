@@ -1,21 +1,62 @@
 package gameobject
 
-type Smog struct {
+import "errors"
+
+const (
+	EnemyTypeSmog  = "smog"
+	EnemyTypeJunk  = "junk"
+	EnemyTypeNoise = "noise"
+)
+
+type Enemy struct {
 	ID        string
-	Type      string // "smog", "junk", "noise"
+	Type      string
 	Health    int
 	Position  Position
 	Speed     float64
 	PathIndex int
 }
 
-func (s *Smog) Move(deltaSeconds float64, path []Position) {
+type EnemyStats struct {
+	Health int     `json:"health"`
+	Speed  float64 `json:"speed"`
+}
+
+func EnemyStatsForType(enemyType string) (EnemyStats, error) {
+	switch enemyType {
+	case EnemyTypeSmog:
+		return EnemyStats{
+			Health: 40,
+			Speed:  0.8,
+		}, nil
+	case EnemyTypeJunk:
+		return EnemyStats{
+			Health: 300,
+			Speed:  0.3,
+		}, nil
+	case EnemyTypeNoise:
+		return EnemyStats{
+			Health: 15,
+			Speed:  1.4,
+		}, nil
+	default:
+		return EnemyStats{}, errors.New("unknown enemy type")
+	}
+}
+
+func EnemyTypes() []string {
+	return []string{
+		EnemyTypeSmog,
+		EnemyTypeJunk,
+		EnemyTypeNoise,
+	}
+}
+
+func (s *Enemy) Move(deltaSeconds float64, path []Position) {
 	if s == nil || deltaSeconds <= 0 || s.Speed <= 0 || len(path) == 0 {
 		return
 	}
-	if s.PathIndex < 0 {
-		s.PathIndex = 0
-	}
+	s.PathIndex = max(0, s.PathIndex)
 	if s.PathIndex >= len(path)-1 {
 		return
 	}
@@ -42,7 +83,7 @@ func (s *Smog) Move(deltaSeconds float64, path []Position) {
 	}
 }
 
-func (s *Smog) TakeDamage(damage float64) {
+func (s *Enemy) TakeDamage(damage float64) {
 	if s == nil || damage <= 0 || s.Health <= 0 {
 		return
 	}
@@ -52,6 +93,6 @@ func (s *Smog) TakeDamage(damage float64) {
 	}
 }
 
-func (s Smog) IsAlive() bool {
+func (s Enemy) IsAlive() bool {
 	return s.Health > 0
 }

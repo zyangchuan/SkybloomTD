@@ -121,7 +121,7 @@ export default class GameScene extends Phaser.Scene {
     if (state.session_id !== undefined) this.sessionId = state.session_id;
     this.hud.update({ health: state.health, essence: state.essence, wave: state.wave });
     if (state.birds       !== undefined) this.entities.syncTowers(state.birds);
-    if (state.smogs       !== undefined) this.entities.syncSmogs(state.smogs);
+    if (state.enemies     !== undefined) this.entities.syncEnemies(state.enemies);
     if (state.projectiles !== undefined) this.entities.syncProjectiles(state.projectiles);
   }
 

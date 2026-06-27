@@ -210,11 +210,14 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if len(startedState.BirdTypes) != 4 {
 		t.Fatalf("expected 4 bird type infos, got %d", len(startedState.BirdTypes))
 	}
+	if len(startedState.EnemyTypes) != 3 {
+		t.Fatalf("expected 3 enemy type infos, got %d", len(startedState.EnemyTypes))
+	}
 	if len(startedState.Birds) != 0 {
 		t.Fatalf("expected no placed birds at session start, got %d", len(startedState.Birds))
 	}
-	if len(startedState.Smogs) != 0 {
-		t.Fatalf("expected no smogs before first tick, got %d", len(startedState.Smogs))
+	if len(startedState.Enemies) != 0 {
+		t.Fatalf("expected no enemies before first tick, got %d", len(startedState.Enemies))
 	}
 	if len(startedState.Projectiles) != 0 {
 		t.Fatalf("expected no projectiles before first tick, got %d", len(startedState.Projectiles))
@@ -240,14 +243,18 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if tickState.Health != gamesession.InitialHealth || tickState.Essence != gamesession.InitialEssence || tickState.Wave != 1 {
 		t.Fatalf("unexpected tick state %+v", tickState)
 	}
-	if len(tickState.Smogs) != 1 {
-		t.Fatalf("expected first tick to spawn one smog, got %d", len(tickState.Smogs))
+	if len(tickState.Enemies) != 1 {
+		t.Fatalf("expected first tick to spawn one enemy, got %d", len(tickState.Enemies))
 	}
-	if tickState.Smogs[0].Health != baseSmogHealth {
-		t.Fatalf("expected first smog health %d, got %d", baseSmogHealth, tickState.Smogs[0].Health)
+	enemyStats, err := gameobject.EnemyStatsForType(gameobject.EnemyTypeSmog)
+	if err != nil {
+		t.Fatalf("load enemy stats: %v", err)
 	}
-	if tickState.Smogs[0].Speed != baseSmogSpeed {
-		t.Fatalf("expected first smog speed %.2f, got %f", baseSmogSpeed, tickState.Smogs[0].Speed)
+	if tickState.Enemies[0].Health != enemyStats.Health {
+		t.Fatalf("expected first enemy health %d, got %d", enemyStats.Health, tickState.Enemies[0].Health)
+	}
+	if tickState.Enemies[0].Speed != enemyStats.Speed {
+		t.Fatalf("expected first enemy speed %.2f, got %f", enemyStats.Speed, tickState.Enemies[0].Speed)
 	}
 }
 
@@ -960,7 +967,7 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 				Stats:    gameobject.BirdStats{Damage: 10, ProjectileSpeed: gameobject.StandardProjectileSpeed, FireRate: 1, Range: 3.5, Cost: 50},
 			},
 		},
-		smogs: []gamesession.StoredSmog{
+		enemies: []gamesession.StoredEnemy{
 			{
 				ID:        "cccccccc-cccc-cccc-cccc-cccccccccccc",
 				Health:    20,
@@ -1021,11 +1028,11 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 	if state.Birds[0].Type != gameobject.BirdTypeSparrow {
 		t.Fatalf("unexpected restored bird type %q", state.Birds[0].Type)
 	}
-	if len(state.Smogs) != 1 {
-		t.Fatalf("expected one restored smog, got %d", len(state.Smogs))
+	if len(state.Enemies) != 1 {
+		t.Fatalf("expected one restored enemy, got %d", len(state.Enemies))
 	}
-	if state.Smogs[0].ID != "cccccccc-cccc-cccc-cccc-cccccccccccc" || state.Smogs[0].Health != 20 {
-		t.Fatalf("unexpected restored smog %+v", state.Smogs[0])
+	if state.Enemies[0].ID != "cccccccc-cccc-cccc-cccc-cccccccccccc" || state.Enemies[0].Health != 20 {
+		t.Fatalf("unexpected restored enemy %+v", state.Enemies[0])
 	}
 	if len(state.Projectiles) != 1 {
 		t.Fatalf("expected one restored projectile, got %d", len(state.Projectiles))
@@ -1035,7 +1042,7 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 	}
 }
 
-func TestAdvanceRuntimeTickDamagesHealthWhenSmogEscapes(t *testing.T) {
+func TestAdvanceRuntimeTickDamagesHealthWhenEnemyEscapes(t *testing.T) {
 	runtime := runtimeSession{
 		session: gamesession.State{
 			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -1053,8 +1060,8 @@ func TestAdvanceRuntimeTickDamagesHealthWhenSmogEscapes(t *testing.T) {
 			{X: 0, Y: 0},
 			{X: 1, Y: 0},
 		},
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 10, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 10, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
 		},
 	}
 
@@ -1063,11 +1070,11 @@ func TestAdvanceRuntimeTickDamagesHealthWhenSmogEscapes(t *testing.T) {
 	if runtime.session.Health != 0 {
 		t.Fatalf("expected health to drop to 0, got %d", runtime.session.Health)
 	}
-	if len(runtime.smogs) != 0 {
-		t.Fatalf("expected escaped smog to be removed, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 0 {
+		t.Fatalf("expected escaped enemy to be removed, got %d", len(runtime.enemies))
 	}
-	if len(events) == 0 || events[0].Type != "smog.escaped" {
-		t.Fatalf("expected smog escaped event, got %+v", events)
+	if len(events) == 0 || events[0].Type != "enemy.escaped" {
+		t.Fatalf("expected enemy escaped event, got %+v", events)
 	}
 }
 
@@ -1102,8 +1109,8 @@ func TestAdvanceRuntimeTickWaitsThreeSecondsAfterWaveCleared(t *testing.T) {
 	if runtime.waveSpawned != 0 {
 		t.Fatalf("expected spawned count reset for next wave, got %d", runtime.waveSpawned)
 	}
-	if len(runtime.smogs) != 0 {
-		t.Fatalf("expected no smogs while waiting, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 0 {
+		t.Fatalf("expected no enemies while waiting, got %d", len(runtime.enemies))
 	}
 	if len(events) != 1 || events[0].Type != "wave.cleared" {
 		t.Fatalf("expected only wave cleared event, got %+v", events)
@@ -1111,23 +1118,23 @@ func TestAdvanceRuntimeTickWaitsThreeSecondsAfterWaveCleared(t *testing.T) {
 
 	runtime.session.Tick = 69
 	events = advanceRuntimeTick(&runtime, time.Now().UTC())
-	if runtime.session.Wave != 1 || len(runtime.smogs) != 0 {
-		t.Fatalf("wave 2 should not start before tick 71: wave=%d smogs=%d events=%+v", runtime.session.Wave, len(runtime.smogs), events)
+	if runtime.session.Wave != 1 || len(runtime.enemies) != 0 {
+		t.Fatalf("wave 2 should not start before tick 71: wave=%d enemies=%d events=%+v", runtime.session.Wave, len(runtime.enemies), events)
 	}
 
 	events = advanceRuntimeTick(&runtime, time.Now().UTC())
 	if runtime.session.Wave != 2 {
 		t.Fatalf("expected wave 2 to start after delay, got %d", runtime.session.Wave)
 	}
-	if len(runtime.smogs) != 1 {
-		t.Fatalf("expected wave 2 to spawn one smog, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 1 {
+		t.Fatalf("expected wave 2 to spawn one enemy, got %d", len(runtime.enemies))
 	}
-	if len(events) < 2 || events[0].Type != "wave.started" || events[1].Type != "smog.spawned" {
-		t.Fatalf("expected wave started and smog spawned events, got %+v", events)
+	if len(events) < 2 || events[0].Type != "wave.started" || events[1].Type != "enemy.spawned" {
+		t.Fatalf("expected wave started and enemy spawned events, got %+v", events)
 	}
 }
 
-func TestAdvanceRuntimeTickSpawnsSmogsEverySecond(t *testing.T) {
+func TestAdvanceRuntimeTickSpawnsEnemiesEverySecond(t *testing.T) {
 	runtime := runtimeSession{
 		session: gamesession.State{
 			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -1144,29 +1151,29 @@ func TestAdvanceRuntimeTickSpawnsSmogsEverySecond(t *testing.T) {
 	}
 
 	advanceRuntimeTick(&runtime, time.Now().UTC())
-	if len(runtime.smogs) != 1 {
-		t.Fatalf("expected first tick to spawn one smog, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 1 {
+		t.Fatalf("expected first tick to spawn one enemy, got %d", len(runtime.enemies))
 	}
 
 	for i := 0; i < 39; i++ {
 		advanceRuntimeTick(&runtime, time.Now().UTC())
 	}
-	if len(runtime.smogs) != 1 {
-		t.Fatalf("expected no second smog before two seconds, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 1 {
+		t.Fatalf("expected no second enemy before two seconds, got %d", len(runtime.enemies))
 	}
 
 	advanceRuntimeTick(&runtime, time.Now().UTC())
-	if len(runtime.smogs) != 2 {
-		t.Fatalf("expected second smog after two seconds, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 2 {
+		t.Fatalf("expected second enemy after two seconds, got %d", len(runtime.enemies))
 	}
 }
 
 func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 	waves := waveDefinitions()
 	expectedTypes := map[int][]string{
-		1: {"smog"},
-		2: {"smog", "junk"},
-		3: {"smog", "junk", "noise"},
+		1: {gameobject.EnemyTypeSmog},
+		2: {gameobject.EnemyTypeSmog, gameobject.EnemyTypeNoise},
+		3: {gameobject.EnemyTypeSmog, gameobject.EnemyTypeJunk, gameobject.EnemyTypeNoise},
 	}
 
 	if len(waves) != len(expectedTypes) {
@@ -1190,7 +1197,7 @@ func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 			if g.Health <= 0 {
 				t.Fatalf("wave %d %s: expected positive health, got %d", wave.Wave, g.Type, g.Health)
 			}
-		
+
 			if g.Speed <= 0 || g.Speed > 10 {
 				t.Fatalf("wave %d %s: speed %.2f outside sane range", wave.Wave, g.Type, g.Speed)
 			}
@@ -1199,10 +1206,10 @@ func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 
 	for i := 1; i < len(waves); i++ {
 		if waves[i].Groups[0].Health <= waves[i-1].Groups[0].Health {
-			t.Fatalf("expected wave %d smog health to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
+			t.Fatalf("expected wave %d enemy health to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
 		}
 		if waves[i].Groups[0].Speed <= waves[i-1].Groups[0].Speed {
-			t.Fatalf("expected wave %d smog speed to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
+			t.Fatalf("expected wave %d enemy speed to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
 		}
 	}
 }
@@ -1276,7 +1283,7 @@ func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
 	}
 }
 
-func TestAdvanceRuntimeTickReportsBirdAttackAndSmogDamage(t *testing.T) {
+func TestAdvanceRuntimeTickReportsBirdAttackAndEnemyDamage(t *testing.T) {
 	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypeSparrow, gameobject.Position{X: 0, Y: 0})
 	if err != nil {
 		t.Fatalf("NewBird failed: %v", err)
@@ -1291,8 +1298,8 @@ func TestAdvanceRuntimeTickReportsBirdAttackAndSmogDamage(t *testing.T) {
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
 		birds:       []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 0.1, Y: 0}},
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 30, Position: gameobject.Position{X: 0.1, Y: 0}},
 		},
 	}
 
@@ -1301,15 +1308,15 @@ func TestAdvanceRuntimeTickReportsBirdAttackAndSmogDamage(t *testing.T) {
 	if len(runtime.projectiles) != 0 {
 		t.Fatalf("expected locked projectile to resolve in one tick, got %d active projectiles", len(runtime.projectiles))
 	}
-	if len(runtime.smogs) != 1 || runtime.smogs[0].Health != 20 {
-		t.Fatalf("expected smog health 20, got %+v", runtime.smogs)
+	if len(runtime.enemies) != 1 || runtime.enemies[0].Health != 20 {
+		t.Fatalf("expected enemy health 20, got %+v", runtime.enemies)
 	}
 	var sawAttack, sawDamage bool
 	for _, event := range events {
-		if event.Type == "bird.attack" && event.BirdID == "bird-1" && event.SmogID == "smog-1" {
+		if event.Type == "bird.attack" && event.BirdID == "bird-1" && event.EnemyID == "enemy-1" {
 			sawAttack = true
 		}
-		if event.Type == "smog.damage" && event.SmogID == "smog-1" && event.Health == 20 {
+		if event.Type == "enemy.damage" && event.EnemyID == "enemy-1" && event.Health == 20 {
 			sawDamage = true
 		}
 	}
@@ -1690,7 +1697,7 @@ type fakeGameSessionStore struct {
 	state             gamesession.State
 	economy           gamesession.Economy
 	birds             []gamesession.StoredBird
-	smogs             []gamesession.StoredSmog
+	enemies           []gamesession.StoredEnemy
 	projectiles       []gamesession.StoredProjectile
 	waveStartedAtTick int64
 	waveSpawned       int
@@ -1733,7 +1740,7 @@ func (s *fakeGameSessionStore) LoadRuntimeState(_ context.Context, _ string) (ga
 		WaveSpawned:       s.waveSpawned,
 		NextWaveTick:      s.nextWaveTick,
 		Birds:             append([]gamesession.StoredBird{}, s.birds...),
-		Smogs:             append([]gamesession.StoredSmog{}, s.smogs...),
+		Enemies:           append([]gamesession.StoredEnemy{}, s.enemies...),
 		Projectiles:       append([]gamesession.StoredProjectile{}, s.projectiles...),
 	}, nil
 }
@@ -1741,7 +1748,7 @@ func (s *fakeGameSessionStore) LoadRuntimeState(_ context.Context, _ string) (ga
 func (s *fakeGameSessionStore) SaveRuntimeState(_ context.Context, _ string, runtime gamesession.RuntimeState) error {
 	s.economy = gamesession.NewEconomy(runtime.Essence)
 	s.birds = append([]gamesession.StoredBird{}, runtime.Birds...)
-	s.smogs = append([]gamesession.StoredSmog{}, runtime.Smogs...)
+	s.enemies = append([]gamesession.StoredEnemy{}, runtime.Enemies...)
 	s.projectiles = append([]gamesession.StoredProjectile{}, runtime.Projectiles...)
 	s.state.Health = runtime.Health
 	s.state.Essence = runtime.Essence
@@ -1758,7 +1765,7 @@ func (s *fakeGameSessionStore) Delete(_ context.Context, sessionID string) error
 	s.state = gamesession.State{}
 	s.economy = gamesession.Economy{}
 	s.birds = nil
-	s.smogs = nil
+	s.enemies = nil
 	s.projectiles = nil
 	s.waveStartedAtTick = 0
 	s.waveSpawned = 0

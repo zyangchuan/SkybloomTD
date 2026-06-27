@@ -62,7 +62,7 @@ func quietSession() *fakeGameSessionStore {
 			Health:    gamesession.InitialHealth,
 			Essence:   gamesession.InitialEssence,
 		},
-		nextWaveTick: 100000, // far enough that no smogs spawn during the test
+		nextWaveTick: 100000, // far enough that no enemies spawn during the test
 	}
 }
 
@@ -419,7 +419,7 @@ func TestWebsocketQuizAnswerOutOfRangeIndexReturnsError(t *testing.T) {
 // Unit tests: advanceRuntimeTick / game loop functions
 // ---------------------------------------------------------------------------
 
-func TestAdvanceRuntimeTickMultipleSmogsEscapeHealthClampsAtZero(t *testing.T) {
+func TestAdvanceRuntimeTickMultipleEnemiesEscapeHealthClampsAtZero(t *testing.T) {
 	// baseHealthDamage=10; start at Health=5 so the first escape clamps to 0
 	// and subsequent escapes keep it at 0 (not negative).
 	path := []gameobject.Position{{X: 0, Y: 0}, {X: 1, Y: 0}}
@@ -431,11 +431,11 @@ func TestAdvanceRuntimeTickMultipleSmogsEscapeHealthClampsAtZero(t *testing.T) {
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
 		path:        path,
-		// Three smogs at the very end of the path — all escape on the next tick.
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 30, Speed: 0, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
-			{ID: "smog-2", Health: 30, Speed: 0, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
-			{ID: "smog-3", Health: 30, Speed: 0, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
+		// Three enemies at the very end of the path — all escape on the next tick.
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 30, Speed: 0, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
+			{ID: "enemy-2", Health: 30, Speed: 0, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
+			{ID: "enemy-3", Health: 30, Speed: 0, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
 		},
 	}
 
@@ -444,17 +444,17 @@ func TestAdvanceRuntimeTickMultipleSmogsEscapeHealthClampsAtZero(t *testing.T) {
 	if runtime.session.Health != 0 {
 		t.Fatalf("expected health clamped to 0, got %d", runtime.session.Health)
 	}
-	if len(runtime.smogs) != 0 {
-		t.Fatalf("expected all escaped smogs removed, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 0 {
+		t.Fatalf("expected all escaped enemies removed, got %d", len(runtime.enemies))
 	}
 	escapedCount := 0
 	for _, e := range events {
-		if e.Type == "smog.escaped" {
+		if e.Type == "enemy.escaped" {
 			escapedCount++
 		}
 	}
 	if escapedCount != 3 {
-		t.Fatalf("expected 3 smog.escaped events, got %d", escapedCount)
+		t.Fatalf("expected 3 enemy.escaped events, got %d", escapedCount)
 	}
 }
 
@@ -472,8 +472,8 @@ func TestFireBirdsReturnsNilWhenHealthIsZero(t *testing.T) {
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
 		birds:       []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 0.2, Y: 0}},
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 30, Position: gameobject.Position{X: 0.2, Y: 0}},
 		},
 	}
 
@@ -484,53 +484,53 @@ func TestFireBirdsReturnsNilWhenHealthIsZero(t *testing.T) {
 	}
 }
 
-func TestTargetSmogIndexPrioritizesHighestPathIndex(t *testing.T) {
-	// Sparrow range=3.5; bird is at origin. All three smogs are within range.
+func TestTargetEnemyIndexPrioritizesHighestPathIndex(t *testing.T) {
+	// Sparrow range=3.5; bird is at origin. All three enemies are within range.
 	// The one with the highest PathIndex should be selected.
 	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypeSparrow, gameobject.Position{X: 0, Y: 0})
 	if err != nil {
 		t.Fatalf("NewBird failed: %v", err)
 	}
 
-	smogs := []gameobject.Smog{
+	enemies := []gameobject.Enemy{
 		{ID: "near-start", Health: 10, Position: gameobject.Position{X: 1, Y: 0}, PathIndex: 1},
 		{ID: "far-ahead", Health: 10, Position: gameobject.Position{X: 2, Y: 0}, PathIndex: 5},
 		{ID: "closest", Health: 10, Position: gameobject.Position{X: 0.5, Y: 0}, PathIndex: 0},
 	}
 
-	idx := targetSmogIndex(bird, smogs)
+	idx := targetEnemyIndex(bird, enemies)
 
 	if idx < 0 {
 		t.Fatal("expected a valid target index, got -1 (no target found)")
 	}
-	if smogs[idx].ID != "far-ahead" {
+	if enemies[idx].ID != "far-ahead" {
 		t.Fatalf("expected target 'far-ahead' (PathIndex=5), got %q (PathIndex=%d)",
-			smogs[idx].ID, smogs[idx].PathIndex)
+			enemies[idx].ID, enemies[idx].PathIndex)
 	}
 }
 
-func TestTargetSmogIndexReturnsNegativeOneWhenNoSmogsInRange(t *testing.T) {
+func TestTargetEnemyIndexReturnsNegativeOneWhenNoEnemiesInRange(t *testing.T) {
 	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypeSparrow, gameobject.Position{X: 0, Y: 0})
 	if err != nil {
 		t.Fatalf("NewBird failed: %v", err)
 	}
 
-	// All smogs are far beyond the Sparrow's 3.5 range.
-	smogs := []gameobject.Smog{
+	// All enemies are far beyond the Sparrow's 3.5 range.
+	enemies := []gameobject.Enemy{
 		{ID: "too-far", Health: 10, Position: gameobject.Position{X: 10, Y: 0}, PathIndex: 9},
 	}
 
-	idx := targetSmogIndex(bird, smogs)
+	idx := targetEnemyIndex(bird, enemies)
 	if idx != -1 {
-		t.Fatalf("expected -1 when no smogs in range, got %d", idx)
+		t.Fatalf("expected -1 when no enemies in range, got %d", idx)
 	}
 }
 
 func TestGameWonReturnsFalseWhenHealthIsZero(t *testing.T) {
 	// Even if all waves are cleared, a dead game is not a victory.
 	runtime := runtimeSession{
-		session:     gamesession.State{Health: 0, Wave: len(waveDefinitions())},
-		waveSpawned: 100, // more than enough
+		session:      gamesession.State{Health: 0, Wave: len(waveDefinitions())},
+		waveSpawned:  100, // more than enough
 		nextWaveTick: 0,
 	}
 
@@ -539,16 +539,16 @@ func TestGameWonReturnsFalseWhenHealthIsZero(t *testing.T) {
 	}
 }
 
-func TestGameWonReturnsFalseWhenSmogsAreStillAlive(t *testing.T) {
+func TestGameWonReturnsFalseWhenEnemiesAreStillAlive(t *testing.T) {
 	runtime := runtimeSession{
-		session:     gamesession.State{Health: gamesession.InitialHealth, Wave: len(waveDefinitions())},
-		waveSpawned: 100,
+		session:      gamesession.State{Health: gamesession.InitialHealth, Wave: len(waveDefinitions())},
+		waveSpawned:  100,
 		nextWaveTick: 0,
-		smogs:       []gameobject.Smog{{ID: "last-one", Health: 1}},
+		enemies:      []gameobject.Enemy{{ID: "last-one", Health: 1}},
 	}
 
 	if gameWon(runtime) {
-		t.Fatal("expected gameWon false when smogs are still alive")
+		t.Fatal("expected gameWon false when enemies are still alive")
 	}
 }
 
@@ -560,7 +560,7 @@ func TestGameWonReturnsTrueWhenAllConditionsMet(t *testing.T) {
 		session:      gamesession.State{Health: gamesession.InitialHealth, Wave: len(waves)},
 		waveSpawned:  finalWave.Count(),
 		nextWaveTick: 0,
-		smogs:        nil,
+		enemies:      nil,
 	}
 
 	if !gameWon(runtime) {
