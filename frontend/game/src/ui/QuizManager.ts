@@ -19,30 +19,60 @@ export class QuizManager {
 
   /** Creates the floating "answer a quiz to start" prompt and the QUIZ button. */
   createHUD() {
-    const quizBtn = this.scene.add.sprite(1800, 640, 'btn_orange_round')
-      .setDepth(30).setScale(1.0).setInteractive({ useHandCursor: true });
-    const quizLabel = this.scene.add.text(1800, 640, 'QUIZ', {
+    const width = this.scene.scale.width;
+    const height = this.scene.scale.height;
+    const rightX = width - 130;
+    const centerY = height / 2;
+    const birdY = centerY - 30;
+    const labelY = centerY + 115;
+
+    const quizBtn = this.scene.add.sprite(rightX, birdY, 'bird_wisdom_1')
+      .setDepth(30).setScale(0.5).setInteractive({ useHandCursor: true });
+
+    const labelBg = this.scene.add.nineslice(rightX, labelY, 'box_white_outline_square', undefined, 270, 66, 32, 32, 32, 32)
+      .setDepth(31).setInteractive({ useHandCursor: true });
+
+    const quizLabel = this.scene.add.text(rightX, labelY, 'Bird of Wisdom', {
       fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '24px', color: '#ffffff',
-    }).setOrigin(0.5).setDepth(31);
+      fontSize: '30px', color: '#cbd5e1',
+    }).setOrigin(0.5).setDepth(32);
 
-    quizBtn.on('pointerover', () => { quizBtn.setScale(1.08); quizLabel.setScale(1.08).setColor('#fef3c7'); });
-    quizBtn.on('pointerout',  () => { quizBtn.setScale(1.0);  quizLabel.setScale(1.0).setColor('#ffffff'); });
-    quizBtn.on('pointerdown', () => { this.hidePrompt(); this.request(); });
+    const onOver = () => {
+      quizBtn.setTexture('bird_wisdom_2');
+      labelBg.setScale(1.08);
+      quizLabel.setScale(1.08).setColor('#fef3c7');
+    };
+    const onOut = () => {
+      quizBtn.setTexture('bird_wisdom_1');
+      labelBg.setScale(1.0);
+      quizLabel.setScale(1.0).setColor('#cbd5e1');
+    };
+    const onDown = () => {
+      this.hidePrompt();
+      this.request();
+    };
 
-    const container = this.scene.add.container(1750, 500).setDepth(35);
+    quizBtn.on('pointerover', onOver);
+    quizBtn.on('pointerout', onOut);
+    quizBtn.on('pointerdown', onDown);
+
+    labelBg.on('pointerover', onOver);
+    labelBg.on('pointerout', onOut);
+    labelBg.on('pointerdown', onDown);
+
+    const container = this.scene.add.container(rightX - 70, centerY - 250).setDepth(35).setScale(1.25);
     container.add([
       this.scene.add.image(0, 0, 'textbox_blank_side').setFlipX(true).setOrigin(0.5),
-      this.scene.add.text(0, -10, 'Answer one quiz correctly\nto start the game!', {
+      this.scene.add.text(0, -10, 'Click on me\nto answer a quiz\nand earn more essence!', {
         fontFamily: '"Concert One", system-ui, sans-serif',
-        fontSize: '22px', color: '#000000ff', align: 'center',
+        fontSize: '23px', color: '#000000ff', align: 'center',
       }).setOrigin(0.5),
     ]);
     this.promptContainer = container;
 
     this.scene.tweens.add({
       targets: container,
-      y: { from: 500, to: 490 },
+      y: { from: centerY - 250, to: centerY - 265 },
       duration: 1000, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
     });
   }

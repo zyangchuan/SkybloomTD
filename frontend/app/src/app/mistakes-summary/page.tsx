@@ -299,12 +299,14 @@ function MistakesSummaryContent() {
             </div>
           ) : mistakes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center gap-4 bg-emerald-900/10 border border-emerald-950/20 rounded-2xl p-6">
-              <div className="text-5xl animate-bounce">🌟</div>
+              <div className="animate-bounce">
+                <img src="/gui/icons/Icon_Large_Star.svg" className="w-16 h-16 object-contain" alt="" />
+              </div>
               <h2 className="font-concert text-emerald-900 text-2xl font-bold tracking-wide">
                 FLAWLESS RUN!
               </h2>
               <p className="font-concert text-emerald-950 text-base max-w-[400px]">
-                You made absolute zero mistakes! All mathematical quizzes were solved with perfect accuracy. Stellar job!
+                You made absolute zero mistakes! All quizzes were solved with perfect accuracy. Stellar job!
               </p>
             </div>
           ) : (
