@@ -39,6 +39,7 @@ export class EntitySync {
         const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
+        this.scene.sound.play("sfx_tower_placement", { volume: 0.5 });
         if (stats?.range) tower.range = stats.range;
         tower.setScale(this.tileSize / tower.width * 1.3).setDepth(4);
         this.towers.set(id, tower);
@@ -83,6 +84,28 @@ export class EntitySync {
 
   syncProjectiles(list: any[]) {
     const activeIds = new Set<string>();
+    const baseProjectileSound = (damage: number) => {
+       switch (damage) {
+        case 10:
+          this.scene.sound.play("sfx_bird_sparrow_attack", { volume: 0.5 });
+          break;
+        case 6:
+          this.scene.sound.play("sfx_bird_woodpecker_attack", { volume: 0.5 });
+          break;
+        case 30:
+          this.scene.sound.play("sfx_bird_eagle_attack", { volume: 0.5 });
+          break;
+        case 7:
+           this.scene.sound.play("sfx_bird_peacock_attack", { volume: 0.5 });
+           break;
+        default:
+          console.error("Damage value does not exist in birds");
+          break;
+       }
+
+       return;
+       
+    }
     list.forEach(({ id, damage, position, direction }) => {
       activeIds.add(id);
       const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
@@ -96,6 +119,7 @@ export class EntitySync {
         const sprite = this.scene.add.sprite(posX, posY, textureKey);
         sprite.setScale(this.tileSize / sprite.width * 0.5).setDepth(20).setRotation(targetRotation);
         this.projectiles.set(id, { sprite, targetX: posX, targetY: posY, targetRotation });
+        baseProjectileSound(damage);
       } else {
         const e = this.projectiles.get(id)!;
         e.targetX = posX; e.targetY = posY; e.targetRotation = targetRotation;

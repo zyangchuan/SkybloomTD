@@ -87,6 +87,17 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_woodpecker', '/game/assets/birds/woodpecker_projectile.png');
     this.load.image('projectile_eagle', '/game/assets/birds/eagle_projectile.png');
     this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
+
+    // Preload sound effects
+    this.load.audio('sfx_tower_placement', '/game/assets/sfx/tower_placement.wav');
+    this.load.audio('sfx_enemy_die', '/game/assets/sfx/enemy_die.wav');
+    this.load.audio('sfx_quiz_correct', '/game/assets/sfx/quiz_answer_correct.wav');
+    this.load.audio('sfx_quiz_wrong', '/game/assets/sfx/quiz_answer_wrong.wav');
+    this.load.audio('sfx_bird_sparrow_attack', '/game/assets/sfx/bird_sparrow_attack.wav');
+    this.load.audio('sfx_bird_woodpecker_attack', '/game/assets/sfx/bird_woodpecker_attack.wav');
+    this.load.audio('sfx_bird_eagle_attack', '/game/assets/sfx/bird_eagle_attack.wav');
+    this.load.audio('sfx_bird_peacock_attack', '/game/assets/sfx/bird_peacock_attack.wav');
+
   }
 
   create() {

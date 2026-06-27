@@ -41,10 +41,12 @@ export default class GameScene extends Phaser.Scene {
     this.initGrid(mapData);
     new MapRenderer(this, this.tileSize, this.offsetX, this.offsetY, this.gridWidth, this.gridHeight).render(mapData);
 
+    this.sound.pauseOnBlur = false;
+
     this.entities = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
-    this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
-    this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
-    this.quiz     = new QuizManager(this, this.ws);
+    this.overlay = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
+    this.hud = new GameHUD(this, () => this.overlay.showPauseWindow());
+    this.quiz = new QuizManager(this, this.ws);
     this.quiz.createHUD();
 
     this.drag = new DragController(
@@ -68,13 +70,13 @@ export default class GameScene extends Phaser.Scene {
   // ─── Grid ────────────────────────────────────────────────────────────────────
 
   private initGrid(mapData: any) {
-    this.gridWidth  = mapData.width  || 18;
+    this.gridWidth = mapData.width || 18;
     this.gridHeight = mapData.height || 12;
-    this.tileSize   = Math.floor(Math.min(this.scale.width / this.gridWidth, this.scale.height / this.gridHeight));
-    this.offsetX    = (this.scale.width  - this.gridWidth  * this.tileSize) / 2;
-    this.offsetY    = (this.scale.height - this.gridHeight * this.tileSize) / 2;
-    this.enemyPath  = mapData.enemy_path || [];
-    this.obstacles  = mapData.objects    || [];
+    this.tileSize = Math.floor(Math.min(this.scale.width / this.gridWidth, this.scale.height / this.gridHeight));
+    this.offsetX = (this.scale.width - this.gridWidth * this.tileSize) / 2;
+    this.offsetY = (this.scale.height - this.gridHeight * this.tileSize) / 2;
+    this.enemyPath = mapData.enemy_path || [];
+    this.obstacles = mapData.objects || [];
   }
 
   // ─── WebSocket ───────────────────────────────────────────────────────────────
@@ -95,13 +97,13 @@ export default class GameScene extends Phaser.Scene {
       case 'game.session.started':
         if (!this.overlay.isPaused()) this.updateFromState(msg.data);
         break;
-      case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
-      case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;
-      case 'game.victory':          this.overlay.showMistakesSummaryWindow(true);  break;
-      case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
+      case 'game.action.rejected': this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
+      case 'game.over': this.overlay.showMistakesSummaryWindow(false); break;
+      case 'game.victory': this.overlay.showMistakesSummaryWindow(true); break;
+      case 'game.quiz.presented': this.quiz.showWindow(msg.data); break;
       case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
-      case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
-      case 'game.exited':           this.overlay.completePendingExit(); break;
+      case 'game.quiz.result': this.quiz.handleResult(msg.data); break;
+      case 'game.exited': this.overlay.completePendingExit(); break;
     }
   }
 
@@ -120,9 +122,14 @@ export default class GameScene extends Phaser.Scene {
     if (!state) return;
     if (state.session_id !== undefined) this.sessionId = state.session_id;
     this.hud.update({ health: state.health, essence: state.essence, wave: state.wave });
-    if (state.birds       !== undefined) this.entities.syncTowers(state.birds);
-    if (state.smogs       !== undefined) this.entities.syncSmogs(state.smogs);
+    if (state.birds !== undefined) this.entities.syncTowers(state.birds);
+    if (state.smogs !== undefined) this.entities.syncSmogs(state.smogs);
     if (state.projectiles !== undefined) this.entities.syncProjectiles(state.projectiles);
+
+    // update if enemy is dead
+    for (const e of state.events) {
+      if (e.type === 'smog.damage' && (e.health ?? 0) === 0) this.sound.play('sfx_enemy_die', { volume: 1.0 });
+    }
   }
 
   // ─── UI feedback ─────────────────────────────────────────────────────────────

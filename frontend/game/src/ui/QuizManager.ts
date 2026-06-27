@@ -139,6 +139,7 @@ export class QuizManager {
   handleResult(resultData: any) {
     const iframe = document.getElementById('quiz-iframe') as HTMLIFrameElement;
     iframe?.contentWindow?.postMessage({ type: 'quiz-result', data: resultData }, '*');
+    this.scene.sound.play(resultData?.correct ? 'sfx_quiz_correct' : 'sfx_quiz_wrong', { volume: 0.5 });
     if (resultData?.correct) this.hidePrompt();
   }
 
