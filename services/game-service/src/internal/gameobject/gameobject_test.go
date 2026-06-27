@@ -248,11 +248,11 @@ func TestEnemyStatsForTypeReturnsStatsForEachEnemyType(t *testing.T) {
 	}{
 		{
 			enemyType: EnemyTypeSmog,
-			stats:     EnemyStats{Health: 40, Speed: 1},
+			stats:     EnemyStats{Health: 40, Speed: 0.8},
 		},
 		{
 			enemyType: EnemyTypeJunk,
-			stats:     EnemyStats{Health: 200, Speed: 0.2},
+			stats:     EnemyStats{Health: 300, Speed: 0.3},
 		},
 		{
 			enemyType: EnemyTypeNoise,

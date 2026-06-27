@@ -1172,8 +1172,23 @@ func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 	waves := waveDefinitions()
 	expectedTypes := map[int][]string{
 		1: {gameobject.EnemyTypeSmog},
-		2: {gameobject.EnemyTypeSmog, gameobject.EnemyTypeNoise},
-		3: {gameobject.EnemyTypeSmog, gameobject.EnemyTypeJunk, gameobject.EnemyTypeNoise},
+		2: {
+			gameobject.EnemyTypeSmog,
+			gameobject.EnemyTypeNoise,
+			gameobject.EnemyTypeSmog,
+			gameobject.EnemyTypeNoise,
+		},
+		3: {
+			gameobject.EnemyTypeJunk,
+			gameobject.EnemyTypeSmog,
+			gameobject.EnemyTypeNoise,
+			gameobject.EnemyTypeJunk,
+			gameobject.EnemyTypeSmog,
+			gameobject.EnemyTypeNoise,
+			gameobject.EnemyTypeJunk,
+			gameobject.EnemyTypeSmog,
+			gameobject.EnemyTypeNoise,
+		},
 	}
 
 	if len(waves) != len(expectedTypes) {
@@ -1204,12 +1219,12 @@ func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 		}
 	}
 
-	for i := 1; i < len(waves); i++ {
-		if waves[i].Groups[0].Health <= waves[i-1].Groups[0].Health {
-			t.Fatalf("expected wave %d enemy health to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
+	for _, enemyType := range gameobject.EnemyTypes() {
+		if scaledEnemyHealth(2, enemyType) <= scaledEnemyHealth(1, enemyType) {
+			t.Fatalf("expected wave 2 %s health to exceed wave 1", enemyType)
 		}
-		if waves[i].Groups[0].Speed <= waves[i-1].Groups[0].Speed {
-			t.Fatalf("expected wave %d enemy speed to exceed wave %d: %+v", waves[i].Wave, waves[i-1].Wave, waves)
+		if scaledEnemySpeed(2, enemyType) <= scaledEnemySpeed(1, enemyType) {
+			t.Fatalf("expected wave 2 %s speed to exceed wave 1", enemyType)
 		}
 	}
 }
