@@ -134,7 +134,7 @@ export default class BootScene extends Phaser.Scene {
 
   private connectWebSocket() {
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws';
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const wsUrl = `${protocol}://${window.location.host}/api/game-service/ws`;
 
       this.detailText.setText('Opening websocket connection...');

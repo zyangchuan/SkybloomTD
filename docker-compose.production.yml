@@ -1,5 +1,12 @@
 services:
   reverse-proxy:
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d/production.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docs:/usr/share/nginx/html/docs:ro
+      - /etc/nginx/ssl/skybloomtd.io:/etc/nginx/ssl/skybloomtd.io:ro
     env_file:
       - ./.env.production
     restart: unless-stopped
