@@ -7,6 +7,7 @@ interface SmogEntry {
   healthBar: Phaser.GameObjects.Graphics;
   targetX: number; targetY: number;
   health: number; maxHealth: number;
+  type: string;
 }
 
 interface ProjectileEntry {
@@ -87,7 +88,7 @@ export class EntitySync {
         const sprite = this.scene.add.sprite(posX, posY, smog)
           .setDisplaySize(this.tileSize * getEnemyBaseMultiplier(type).width, this.tileSize * getEnemyBaseMultiplier(type).height).setDepth(15);
         const healthBar = this.scene.add.graphics().setDepth(16);
-        this.smogs.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth });
+        this.smogs.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth, type });
       } else {
         const e = this.smogs.get(id)!;
         e.targetX = posX; e.targetY = posY; e.health = health; e.maxHealth = maxHealth;
@@ -135,7 +136,7 @@ export class EntitySync {
   }
 
   private interpolateSmogs() {
-    this.smogs.forEach(({ sprite, healthBar, targetX, targetY, health, maxHealth }) => {
+    this.smogs.forEach(({ sprite, healthBar, targetX, targetY, health, maxHealth, type  }) => {
       sprite.x = Phaser.Math.Linear(sprite.x, targetX, 0.18);
       sprite.y = Phaser.Math.Linear(sprite.y, targetY, 0.18);
 
@@ -143,7 +144,10 @@ export class EntitySync {
       const pct = Math.max(0, Math.min(1, health / maxHealth));
       const barW = 60, barH = 8;
       const barX = sprite.x - barW / 2;
-      const barY = sprite.y - this.tileSize / 2 - 1;
+      let barY = sprite.y - this.tileSize / 2 - 1;
+      if (type == "junk") {
+        barY = sprite.y - this.tileSize / 2 - 10;
+      }
       healthBar.fillStyle(0x1e293b, 1.0).fillRoundedRect(barX, barY, barW, barH, 3);
       if (pct > 0) {
         const color = pct < 0.3 ? 0xef4444 : pct < 0.6 ? 0xf59e0b : 0x10b981;
