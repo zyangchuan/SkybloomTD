@@ -34,7 +34,7 @@ type BirdStats struct {
 }
 
 type AttackBehaviour interface {
-	Attack(bird Bird, target Smog) []Projectile
+	Attack(bird Bird, target Enemy) []Projectile
 }
 
 func NewBird(id string, birdType string, position Position) (Bird, error) {
@@ -140,11 +140,11 @@ func (b Bird) CanAttack(currentTick int64, ticksPerSecond float64) bool {
 	return currentTick-b.LastFiredAtTick >= cooldownTicks
 }
 
-func (b Bird) TargetInRange(target Smog) bool {
+func (b Bird) TargetInRange(target Enemy) bool {
 	return target.IsAlive() && b.Position.DistanceTo(target.Position) <= b.Stats.Range
 }
 
-func (b *Bird) Attack(target Smog, currentTick int64) []Projectile {
+func (b *Bird) Attack(target Enemy, currentTick int64) []Projectile {
 	if b == nil || b.AttackBehaviour == nil || !b.TargetInRange(target) {
 		return nil
 	}

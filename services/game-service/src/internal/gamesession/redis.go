@@ -52,8 +52,9 @@ type StoredBird struct {
 	LastFiredAtTick int64                `json:"last_fired_at_tick"`
 }
 
-type StoredSmog struct {
+type StoredEnemy struct {
 	ID        string              `json:"id"`
+	Type      string              `json:"type"`
 	Health    int                 `json:"health"`
 	Position  gameobject.Position `json:"position"`
 	Speed     float64             `json:"speed"`
@@ -84,7 +85,7 @@ type RuntimeState struct {
 	WaveSpawned       int
 	NextWaveTick      int64
 	Birds             []StoredBird
-	Smogs             []StoredSmog
+	Enemies           []StoredEnemy
 	Projectiles       []StoredProjectile
 }
 
@@ -152,7 +153,7 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"wave_spawned":         0,
 		"next_wave_tick":       1,
 		"birds":                "[]",
-		"smogs":                "[]",
+		"enemies":              "[]",
 		"projectiles":          "[]",
 		"started_at":           state.StartedAt.Format(time.RFC3339Nano),
 		"updated_at":           state.UpdatedAt.Format(time.RFC3339Nano),
@@ -185,8 +186,8 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 	if err := unmarshalStoredSlice(values["birds"], &birds); err != nil {
 		return RuntimeState{}, err
 	}
-	var smogs []StoredSmog
-	if err := unmarshalStoredSlice(values["smogs"], &smogs); err != nil {
+	var enemies []StoredEnemy
+	if err := unmarshalStoredSlice(values["enemies"], &enemies); err != nil {
 		return RuntimeState{}, err
 	}
 	var projectiles []StoredProjectile
@@ -210,7 +211,7 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 		WaveSpawned:       intValue(values["wave_spawned"], 0),
 		NextWaveTick:      int64Value(values["next_wave_tick"], 0),
 		Birds:             birds,
-		Smogs:             smogs,
+		Enemies:           enemies,
 		Projectiles:       projectiles,
 	}, nil
 }
@@ -235,7 +236,7 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 	if err != nil {
 		return err
 	}
-	smogsBody, err := json.Marshal(runtime.Smogs)
+	enemiesBody, err := json.Marshal(runtime.Enemies)
 	if err != nil {
 		return err
 	}
@@ -270,8 +271,8 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 		strconv.FormatInt(runtime.NextWaveTick, 10),
 		"birds",
 		string(birdsBody),
-		"smogs",
-		string(smogsBody),
+		"enemies",
+		string(enemiesBody),
 		"projectiles",
 		string(projectilesBody),
 		"updated_at",

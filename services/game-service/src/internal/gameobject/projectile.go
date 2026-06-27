@@ -25,7 +25,7 @@ type Projectile struct {
 	HitRadius       float64
 }
 
-func NewLockedProjectile(bird Bird, target Smog, projectileSpeed float64) Projectile {
+func NewLockedProjectile(bird Bird, target Enemy, projectileSpeed float64) Projectile {
 	if projectileSpeed <= 0 {
 		projectileSpeed = LockedProjectileSpeed
 	}
@@ -76,7 +76,7 @@ func (p Projectile) HasArrived() bool {
 	return p.Type == ProjectileTypeLocked && p.RemainingRange <= 0
 }
 
-func (p *Projectile) ApplyLockedDamage(target *Smog) bool {
+func (p *Projectile) ApplyLockedDamage(target *Enemy) bool {
 	if p == nil || p.Type != ProjectileTypeLocked || !p.HasArrived() || target == nil || target.ID != p.TargetID || !target.IsAlive() {
 		return false
 	}
@@ -84,18 +84,18 @@ func (p *Projectile) ApplyLockedDamage(target *Smog) bool {
 	return true
 }
 
-func (p *Projectile) Collide(smogs []*Smog) *Smog {
+func (p *Projectile) Collide(enemies []*Enemy) *Enemy {
 	if p == nil || p.Type != ProjectileTypeDirectional || p.IsExpired() {
 		return nil
 	}
-	for _, smog := range smogs {
-		if smog == nil || !smog.IsAlive() {
+	for _, enemy := range enemies {
+		if enemy == nil || !enemy.IsAlive() {
 			continue
 		}
-		if p.Position.DistanceTo(smog.Position) <= p.HitRadius {
-			smog.TakeDamage(p.Damage)
+		if p.Position.DistanceTo(enemy.Position) <= p.HitRadius {
+			enemy.TakeDamage(p.Damage)
 			p.RemainingRange = 0
-			return smog
+			return enemy
 		}
 	}
 	return nil

@@ -53,7 +53,7 @@ func TestSingleAttackCreatesLockedProjectile(t *testing.T) {
 		},
 		AttackBehaviour: SingleAttack{},
 	}
-	target := Smog{ID: "smog-1", Health: 20, Position: Position{X: 3, Y: 0}}
+	target := Enemy{ID: "enemy-1", Health: 20, Position: Position{X: 3, Y: 0}}
 
 	projectiles := bird.AttackBehaviour.Attack(bird, target)
 	if len(projectiles) != 1 {
@@ -79,7 +79,7 @@ func TestLockedProjectileAppliesDamageOnArrivalWithoutCollision(t *testing.T) {
 		Position: Position{X: 0, Y: 0},
 		Stats:    BirdStats{Damage: 10},
 	}
-	target := Smog{ID: "smog-1", Health: 20, Position: Position{X: 1, Y: 0}}
+	target := Enemy{ID: "enemy-1", Health: 20, Position: Position{X: 1, Y: 0}}
 	projectile := NewLockedProjectile(bird, target, LockedProjectileSpeed)
 
 	projectile.Move(1)
@@ -99,7 +99,7 @@ func TestLockedProjectileExpiresHarmlesslyIfTargetDead(t *testing.T) {
 		Position: Position{X: 0, Y: 0},
 		Stats:    BirdStats{Damage: 10},
 	}
-	target := Smog{ID: "smog-1", Health: 0, Position: Position{X: 1, Y: 0}}
+	target := Enemy{ID: "enemy-1", Health: 0, Position: Position{X: 1, Y: 0}}
 	projectile := NewLockedProjectile(bird, target, LockedProjectileSpeed)
 
 	projectile.Move(1)
@@ -125,7 +125,7 @@ func TestSplashAttackCreatesThreeDirectionalProjectiles(t *testing.T) {
 		},
 		AttackBehaviour: SplashAttack{},
 	}
-	target := Smog{ID: "smog-1", Health: 20, Position: Position{X: 1, Y: 0}}
+	target := Enemy{ID: "enemy-1", Health: 20, Position: Position{X: 1, Y: 0}}
 
 	projectiles := bird.AttackBehaviour.Attack(bird, target)
 	if len(projectiles) != 3 {
@@ -145,7 +145,7 @@ func TestSplashAttackCreatesThreeDirectionalProjectiles(t *testing.T) {
 	assertVector(t, projectiles[2].Direction, Vector{X: math.Cos(SplashSpreadRadians), Y: math.Sin(SplashSpreadRadians)})
 }
 
-func TestDirectionalProjectileHitsFirstSmogWithinRadius(t *testing.T) {
+func TestDirectionalProjectileHitsFirstEnemyWithinRadius(t *testing.T) {
 	projectile := Projectile{
 		Type:            ProjectileTypeDirectional,
 		Damage:          5,
@@ -155,19 +155,19 @@ func TestDirectionalProjectileHitsFirstSmogWithinRadius(t *testing.T) {
 		RemainingRange:  10,
 		HitRadius:       DirectionalHitRadius,
 	}
-	first := &Smog{ID: "first", Health: 10, Position: Position{X: 1.2, Y: 0}}
-	second := &Smog{ID: "second", Health: 10, Position: Position{X: 1.1, Y: 0}}
+	first := &Enemy{ID: "first", Health: 10, Position: Position{X: 1.2, Y: 0}}
+	second := &Enemy{ID: "second", Health: 10, Position: Position{X: 1.1, Y: 0}}
 
 	projectile.Move(1)
-	hit := projectile.Collide([]*Smog{first, second})
+	hit := projectile.Collide([]*Enemy{first, second})
 	if hit == nil || hit.ID != first.ID {
-		t.Fatalf("expected first smog to be hit, got %+v", hit)
+		t.Fatalf("expected first enemy to be hit, got %+v", hit)
 	}
 	if first.Health != 5 {
-		t.Fatalf("expected first smog health 5, got %d", first.Health)
+		t.Fatalf("expected first enemy health 5, got %d", first.Health)
 	}
 	if second.Health != 10 {
-		t.Fatalf("expected second smog health unchanged, got %d", second.Health)
+		t.Fatalf("expected second enemy health unchanged, got %d", second.Health)
 	}
 	if !projectile.IsExpired() {
 		t.Fatal("projectile should expire after hit")
@@ -236,6 +236,38 @@ func TestBirdFactoryReturnsStatsAndBehaviourForEachBirdType(t *testing.T) {
 			}
 			if !tc.splash && !isSingle {
 				t.Fatalf("expected single attack, got %T", bird.AttackBehaviour)
+			}
+		})
+	}
+}
+
+func TestEnemyStatsForTypeReturnsStatsForEachEnemyType(t *testing.T) {
+	cases := []struct {
+		enemyType string
+		stats     EnemyStats
+	}{
+		{
+			enemyType: EnemyTypeSmog,
+			stats:     EnemyStats{Health: 40, Speed: 0.8},
+		},
+		{
+			enemyType: EnemyTypeJunk,
+			stats:     EnemyStats{Health: 300, Speed: 0.3},
+		},
+		{
+			enemyType: EnemyTypeNoise,
+			stats:     EnemyStats{Health: 15, Speed: 1.4},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.enemyType, func(t *testing.T) {
+			stats, err := EnemyStatsForType(tc.enemyType)
+			if err != nil {
+				t.Fatalf("EnemyStatsForType failed: %v", err)
+			}
+			if stats != tc.stats {
+				t.Fatalf("unexpected stats %+v", stats)
 			}
 		})
 	}

@@ -2,11 +2,12 @@ import Phaser from 'phaser';
 import Tower from '../components/Tower';
 import { DAMAGE_TO_BIRD } from '../data/birds';
 
-interface SmogEntry {
+interface EnemyEntry {
   sprite: Phaser.GameObjects.Sprite;
   healthBar: Phaser.GameObjects.Graphics;
   targetX: number; targetY: number;
   health: number; maxHealth: number;
+  type: string;
 }
 
 interface ProjectileEntry {
@@ -16,10 +17,10 @@ interface ProjectileEntry {
 
 export class EntitySync {
   readonly towers: Map<string, Tower> = new Map();
-  activeSmogsList: Array<{ id: string, x: number, y: number, pathIndex: number }> = [];
+  activeEnemiesList: Array<{ id: string, x: number, y: number, pathIndex: number }> = [];
 
-  private smogs: Map<string, SmogEntry> = new Map();
-  private smogMaxHealth: Map<string, number> = new Map();
+  private enemies: Map<string, EnemyEntry> = new Map();
+  private enemyMaxHealth: Map<string, number> = new Map();
   private projectiles: Map<string, ProjectileEntry> = new Map();
 
   constructor(
@@ -27,7 +28,7 @@ export class EntitySync {
     private tileSize: number,
     private offsetX: number,
     private offsetY: number,
-  ) {}
+  ) { }
 
   // ─── Sync from server state ──────────────────────────────────────────────────
 
@@ -40,7 +41,7 @@ export class EntitySync {
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
         if (stats?.range) tower.range = stats.range;
-        tower.setScale(this.tileSize / tower.width * 1.3).setDepth(4);
+        tower.setScale(this.tileSize / tower.width * 1.2).setDepth(4);
         this.towers.set(id, tower);
       } else {
         const tower = this.towers.get(id)!;
@@ -52,31 +53,51 @@ export class EntitySync {
     }
   }
 
-  syncSmogs(smogsList: any[]) {
-    this.activeSmogsList = smogsList.map(s => ({
+  syncEnemies(enemiesList: any[]) {
+    this.activeEnemiesList = enemiesList.map(s => ({
       id: s.id, x: s.position.x, y: s.position.y, pathIndex: s.path_index || 0,
     }));
     const activeIds = new Set<string>();
-    smogsList.forEach(({ id, health, position }) => {
+
+    const getEnemyBaseMultiplier = (enemyType: string) => {
+
+      if (enemyType === "smog") {
+        return { width: 1.0, height: 1.0 };
+      }
+
+      if (enemyType === "noise") {
+        return { width: 1.0, height: 1.0 };
+      }
+
+      if (enemyType === "junk") {
+        return { width: 1.5, height: 1.5 };
+      }
+
+      return { width: 1.0, height: 1.0 };
+    }
+
+
+    enemiesList.forEach(({ id, type, health, position }) => {
       activeIds.add(id);
       const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
       const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
-      if (!this.smogMaxHealth.has(id)) this.smogMaxHealth.set(id, health);
-      const maxHealth = this.smogMaxHealth.get(id) || health || 1;
-      if (!this.smogs.has(id)) {
-        const sprite = this.scene.add.sprite(posX, posY, 'enemy_smog')
-          .setDisplaySize(this.tileSize * 1.4, this.tileSize * 1.4).setDepth(15);
+      if (!this.enemyMaxHealth.has(id)) this.enemyMaxHealth.set(id, health);
+      const maxHealth = this.enemyMaxHealth.get(id) || health || 1;
+      if (!this.enemies.has(id)) {
+        const enemyTexture = `enemy_${type ?? "smog"}`;
+        const sprite = this.scene.add.sprite(posX, posY, enemyTexture)
+          .setDisplaySize(this.tileSize * getEnemyBaseMultiplier(type).width, this.tileSize * getEnemyBaseMultiplier(type).height).setDepth(15);
         const healthBar = this.scene.add.graphics().setDepth(16);
-        this.smogs.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth });
+        this.enemies.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth, type });
       } else {
-        const e = this.smogs.get(id)!;
+        const e = this.enemies.get(id)!;
         e.targetX = posX; e.targetY = posY; e.health = health; e.maxHealth = maxHealth;
       }
     });
-    for (const [id, e] of this.smogs.entries()) {
+    for (const [id, e] of this.enemies.entries()) {
       if (!activeIds.has(id)) {
         e.sprite.destroy(); e.healthBar.destroy();
-        this.smogs.delete(id); this.smogMaxHealth.delete(id);
+        this.enemies.delete(id); this.enemyMaxHealth.delete(id);
       }
     }
   }
@@ -110,12 +131,12 @@ export class EntitySync {
 
   interpolate() {
     this.towers.forEach((tower) => tower.update());
-    this.interpolateSmogs();
+    this.interpolateEnemies();
     this.interpolateProjectiles();
   }
 
-  private interpolateSmogs() {
-    this.smogs.forEach(({ sprite, healthBar, targetX, targetY, health, maxHealth }) => {
+  private interpolateEnemies() {
+    this.enemies.forEach(({ sprite, healthBar, targetX, targetY, health, maxHealth, type  }) => {
       sprite.x = Phaser.Math.Linear(sprite.x, targetX, 0.18);
       sprite.y = Phaser.Math.Linear(sprite.y, targetY, 0.18);
 
@@ -123,7 +144,10 @@ export class EntitySync {
       const pct = Math.max(0, Math.min(1, health / maxHealth));
       const barW = 60, barH = 8;
       const barX = sprite.x - barW / 2;
-      const barY = sprite.y - this.tileSize / 2 - 12;
+      let barY = sprite.y - this.tileSize / 2 - 1;
+      if (type == "junk") {
+        barY = sprite.y - this.tileSize / 2 - 10;
+      }
       healthBar.fillStyle(0x1e293b, 1.0).fillRoundedRect(barX, barY, barW, barH, 3);
       if (pct > 0) {
         const color = pct < 0.3 ? 0xef4444 : pct < 0.6 ? 0xf59e0b : 0x10b981;
@@ -145,9 +169,9 @@ export class EntitySync {
   destroy() {
     this.towers.forEach((t) => t.destroy());
     this.towers.clear();
-    this.smogs.forEach((s) => { s.sprite.destroy(); s.healthBar.destroy(); });
-    this.smogs.clear();
-    this.smogMaxHealth.clear();
+    this.enemies.forEach((s) => { s.sprite.destroy(); s.healthBar.destroy(); });
+    this.enemies.clear();
+    this.enemyMaxHealth.clear();
     this.projectiles.forEach((p) => p.sprite.destroy());
     this.projectiles.clear();
   }
