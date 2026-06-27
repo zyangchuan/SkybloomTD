@@ -29,6 +29,7 @@ export class GameOverlay {
     this.pauseWindowOpen = true;
     this.scene.tweens.pauseAll();
     this.scene.anims.pauseAll();
+    this.scene.sound.pauseAll();
     this.sendWs('game.pause');
 
     const backdrop = this.scene.add.graphics();
@@ -50,6 +51,7 @@ export class GameOverlay {
       this.sendWs('game.resume');
       this.scene.tweens.resumeAll();
       this.scene.anims.resumeAll();
+      this.scene.sound.resumeAll();
       [backdrop, dialog, title, resumeBtn, resumeLabel, exitBtn, exitLabel].forEach(o => o.destroy());
       this.pauseWindowOpen = false;
     });

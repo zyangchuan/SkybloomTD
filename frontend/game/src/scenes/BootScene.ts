@@ -89,6 +89,12 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_woodpecker', '/game/assets/birds/woodpecker_projectile.png');
     this.load.image('projectile_eagle', '/game/assets/birds/eagle_projectile.png');
     this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
+
+    // Preload Audios
+    this.load.audio('audio_wave_1', '/game/assets/audio/Game_Scene_Music_Glorious_Morning.mp3');
+    this.load.audio('audio_wave_2', '/game/assets/audio/Game_Scene_Music_Make_Way_for_No_Nonsense.mp3');
+    this.load.audio('audio_wave_3', '/game/assets/audio/Game_Scene_Music_Skylit_Cave.mp3');
+
   }
 
   create() {

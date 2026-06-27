@@ -6,11 +6,13 @@ import { QuizManager } from '../ui/QuizManager';
 import { GameOverlay } from '../ui/GameOverlay';
 import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
+import { BgmManager } from '../audio/BgmManager';
 
 export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
+  private currentWave = -1;
 
   // Grid params
   private tileSize = 0;
@@ -27,6 +29,7 @@ export default class GameScene extends Phaser.Scene {
   private overlay!: GameOverlay;
   private drag!: DragController;
   private entities!: EntitySync;
+  private audio!: BgmManager;
 
   constructor() { super('GameScene'); }
 
@@ -45,7 +48,10 @@ export default class GameScene extends Phaser.Scene {
     this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
     this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
     this.quiz     = new QuizManager(this, this.ws);
+    this.audio    = new BgmManager(this);
     this.quiz.createHUD();
+
+    this.sound.pauseOnBlur = false;
 
     this.drag = new DragController(
       this,
@@ -91,14 +97,21 @@ export default class GameScene extends Phaser.Scene {
 
   private handleServerMessage(msg: any) {
     switch (msg.type) {
-      case 'game.state':
+       case 'game.state': 
+        const waveIndex: number = msg.data?.wave || 0;
+        if (waveIndex != this.currentWave) {
+          this.audio.updateForWave(waveIndex);
+          this.currentWave = waveIndex;
+        }
       case 'game.session.started':
-        if (!this.overlay.isPaused()) this.updateFromState(msg.data);
+        if (!this.overlay.isPaused()) {
+           this.updateFromState(msg.data);
+        }
         break;
       case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
       case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;
       case 'game.victory':          this.overlay.showMistakesSummaryWindow(true);  break;
-      case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
+      case 'game.quiz.presented':   this.quiz.showWindow(msg.data);  break;
       case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
       case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
       case 'game.exited':           this.overlay.completePendingExit(); break;
