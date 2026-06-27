@@ -582,8 +582,11 @@ function QuizOverlayContent() {
         )}
 
         {result && result.correct && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 animate-essence-float font-concert text-5xl text-emerald-400 font-bold">
-            +30 Essence
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 animate-essence-float">
+            <div className="flex items-center gap-3 font-concert text-5xl text-[#fef08a] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+              <span>+30 Sky Essence</span>
+              <img src="/essence.png" className="w-14 h-14 object-contain" alt="" />
+            </div>
           </div>
         )}
       </div>

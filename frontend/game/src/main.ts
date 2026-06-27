@@ -2,10 +2,11 @@ import Phaser from 'phaser';
 import BootScene from './scenes/BootScene';
 import GameScene from './scenes/GameScene';
 
-const config: Phaser.Types.Core.GameConfig = {
+const config: Phaser.Types.Core.GameConfig & { resolution?: number } = {
   type: Phaser.AUTO,
-  width: 1920,
-  height: 1280,
+  width: 2400,
+  height: 1600,
+  resolution: Math.min(window.devicePixelRatio || 1, 2),
   parent: 'game-container',
   backgroundColor: '#0a0e17',
   scale: {

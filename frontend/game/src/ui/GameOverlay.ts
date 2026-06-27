@@ -35,13 +35,16 @@ export class GameOverlay {
     backdrop.fillStyle(0x000000, 0.65).fillRect(-2000, -2000, 6000, 5000);
     backdrop.setInteractive(new Phaser.Geom.Rectangle(-2000, -2000, 6000, 5000), Phaser.Geom.Rectangle.Contains).setDepth(100);
 
-    const dialog = this.scene.add.nineslice(960, 540, 'box_orange_square', undefined, 500, 420, 64, 64, 64, 64).setDepth(101);
-    const title  = this.scene.add.text(960, 390, 'PAUSED', {
+    const centerX = this.scene.scale.width / 2;
+    const centerY = this.scene.scale.height / 2;
+
+    const dialog = this.scene.add.nineslice(centerX, centerY, 'box_orange_square', undefined, 500, 420, 64, 64, 64, 64).setDepth(101);
+    const title  = this.scene.add.text(centerX, centerY - 150, 'PAUSED', {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '56px', color: '#451a03',
     }).setOrigin(0.5).setDepth(102);
 
-    const resumeBtn   = this.scene.add.sprite(960, 495, 'btn_blue_round').setScale(1.1).setDepth(102).setInteractive({ useHandCursor: true });
-    const resumeLabel = this.scene.add.text(960, 495, 'RESUME', {
+    const resumeBtn   = this.scene.add.sprite(centerX, centerY - 45, 'btn_blue_round').setScale(1.1).setDepth(102).setInteractive({ useHandCursor: true });
+    const resumeLabel = this.scene.add.text(centerX, centerY - 45, 'RESUME', {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '24px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(103);
     resumeBtn.on('pointerover', () => { resumeBtn.setScale(1.18); resumeLabel.setScale(1.08).setColor('#fef3c7'); });
@@ -54,8 +57,8 @@ export class GameOverlay {
       this.pauseWindowOpen = false;
     });
 
-    const exitBtn   = this.scene.add.sprite(960, 620, 'btn_blank_round').setScale(1.1).setDepth(102).setInteractive({ useHandCursor: true });
-    const exitLabel = this.scene.add.text(960, 620, 'EXIT GAME', {
+    const exitBtn   = this.scene.add.sprite(centerX, centerY + 80, 'btn_blank_round').setScale(1.1).setDepth(102).setInteractive({ useHandCursor: true });
+    const exitLabel = this.scene.add.text(centerX, centerY + 80, 'EXIT GAME', {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '24px', color: '#000000',
     }).setOrigin(0.5).setDepth(103);
     exitBtn.on('pointerover', () => { exitBtn.setScale(1.18); exitLabel.setScale(1.08); });

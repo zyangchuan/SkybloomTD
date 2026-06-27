@@ -58,12 +58,13 @@ export default class BootScene extends Phaser.Scene {
 
     // Preload HUD SVG icons
     this.load.svg('icon_heart', '/game/assets/gui/icons/Icon_Small_HeartFull.svg');
-    this.load.svg('icon_essence', '/game/assets/gui/icons/Icon_Small_CoinDollar.svg');
+    this.load.image('icon_essence', '/game/assets/essence.png');
     this.load.svg('icon_pause', '/game/assets/gui/icons/Icon_Small_WhiteOutline_Pause.svg');
 
     // Preload bird item assets
     this.load.svg('box_square', '/game/assets/gui/boxes_banners/Box_Square.svg', { width: 256, height: 256 });
     this.load.svg('box_orange_square', '/game/assets/gui/boxes_banners/Box_Orange_Square.svg', { width: 256, height: 256 });
+    this.load.svg('box_white_outline_square', '/game/assets/gui/boxes_banners/Box_WhiteOutline_Square.svg', { width: 256, height: 256 });
     this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
@@ -83,6 +84,10 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('enemy_smog', '/game/assets/enemies/smog.png');
     this.load.image('enemy_junk', '/game/assets/enemies/junk.png');
     this.load.image('enemy_noise', '/game/assets/enemies/noise.png');
+
+    // Preload Bird of Wisdom
+    this.load.image('bird_wisdom_1', '/game/assets/bird_of_wisdom_01.png');
+    this.load.image('bird_wisdom_2', '/game/assets/bird_of_wisdom_02.png');
 
     // Preload bird projectiles
     this.load.image('projectile_sparrow', '/game/assets/birds/sparrow_projectile.png');

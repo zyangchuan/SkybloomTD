@@ -87,7 +87,7 @@ export class DragController {
     if (!this.activeDragSprite) return;
 
     const { gridX, gridY } = this.toGrid(pointer.x, pointer.y);
-    const inBirdsBar = pointer.y > 1050;
+    const inBirdsBar = pointer.y > (this.scene.scale.height - 245);
 
     if (!inBirdsBar && this.isValidGrassTile(gridX, gridY) && this.activeDragBirdType) {
       this.onPlace(this.activeDragBirdType, gridX, gridY);
@@ -121,8 +121,11 @@ export class DragController {
   }
 
   private updateCancelZones(pointer: Phaser.Input.Pointer) {
-    const hoverLeft  = pointer.y > 1050 && pointer.x < 580;
-    const hoverRight = pointer.y > 1050 && pointer.x > 1340;
+    const inBirdsBar = pointer.y > (this.scene.scale.height - 245);
+    const leftXLimit = (this.scene.scale.width / 2) - 450;
+    const rightXLimit = (this.scene.scale.width / 2) + 450;
+    const hoverLeft  = inBirdsBar && pointer.x < leftXLimit;
+    const hoverRight = inBirdsBar && pointer.x > rightXLimit;
 
     if (this.dragCancelLeftBox && this.dragCancelLeftText) {
       this.dragCancelLeftBox.setAlpha(hoverLeft ? 0.9 : 0.75);
@@ -136,7 +139,7 @@ export class DragController {
 
   private updateCellHighlight(pointer: Phaser.Input.Pointer) {
     const { gridX, gridY } = this.toGrid(pointer.x, pointer.y);
-    const inBirdsBar = pointer.y > 1050;
+    const inBirdsBar = pointer.y > (this.scene.scale.height - 245);
     const { tileSize, offsetX, offsetY, gridWidth, gridHeight } = this.grid;
 
     this.closestCellHighlight.clear();
@@ -157,22 +160,31 @@ export class DragController {
   }
 
   private spawnCancelZones() {
+    const width = this.scene.scale.width;
+    const height = this.scene.scale.height;
+    const centerX = width / 2;
+    const boxY = height - 145;
+    const leftX = (centerX - 450) / 2;
+    const rightX = width - leftX;
+    const zoneWidth = 600;
+    const zoneHeight = 200;
+
     this.dragCancelLeftBox = this.scene.add.graphics().setDepth(30);
     this.dragCancelLeftBox.fillStyle(0xef4444, 0.6);
-    this.dragCancelLeftBox.fillRoundedRect(280 - 270, 1152 - 85, 540, 170, 24);
+    this.dragCancelLeftBox.fillRoundedRect(leftX - zoneWidth / 2, boxY - zoneHeight / 2, zoneWidth, zoneHeight, 24);
     this.dragCancelLeftBox.setAlpha(0.75);
-    this.dragCancelLeftText = this.scene.add.text(280, 1152, 'RELEASE TO CANCEL', {
+    this.dragCancelLeftText = this.scene.add.text(leftX, boxY, 'RELEASE TO CANCEL', {
       fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '26px', color: '#ffffff',
+      fontSize: '30px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(31);
 
     this.dragCancelRightBox = this.scene.add.graphics().setDepth(30);
     this.dragCancelRightBox.fillStyle(0xef4444, 0.6);
-    this.dragCancelRightBox.fillRoundedRect(1640 - 270, 1152 - 85, 540, 170, 24);
+    this.dragCancelRightBox.fillRoundedRect(rightX - zoneWidth / 2, boxY - zoneHeight / 2, zoneWidth, zoneHeight, 24);
     this.dragCancelRightBox.setAlpha(0.75);
-    this.dragCancelRightText = this.scene.add.text(1640, 1152, 'RELEASE TO CANCEL', {
+    this.dragCancelRightText = this.scene.add.text(rightX, boxY, 'RELEASE TO CANCEL', {
       fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '26px', color: '#ffffff',
+      fontSize: '30px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(31);
   }
 
