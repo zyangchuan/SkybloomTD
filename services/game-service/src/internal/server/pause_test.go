@@ -20,30 +20,30 @@ import (
 // Unit tests: advanceRuntimeTick mechanics
 // ---------------------------------------------------------------------------
 
-func TestAdvanceRuntimeTickSmogMovesAlongPathEachTick(t *testing.T) {
+func TestAdvanceRuntimeTickEnemyMovesAlongPathEachTick(t *testing.T) {
 	runtime := runtimeSession{
 		session: gamesession.State{
 			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 			Health:    gamesession.InitialHealth,
 		},
-		economy:     gamesession.NewEconomy(100),
-		loopStarted: true,
+		economy:      gamesession.NewEconomy(100),
+		loopStarted:  true,
 		nextWaveTick: 1,
 		path: []gameobject.Position{
 			{X: 0, Y: 0},
 			{X: 1, Y: 0},
 			{X: 2, Y: 0},
 		},
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 0, Y: 0}, Speed: 1.0},
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 30, Position: gameobject.Position{X: 0, Y: 0}, Speed: 1.0},
 		},
 	}
 
-	startX := runtime.smogs[0].Position.X
+	startX := runtime.enemies[0].Position.X
 	advanceRuntimeTick(&runtime, time.Now())
 
-	if runtime.smogs[0].Position.X <= startX {
-		t.Fatalf("expected smog to move right from x=%f, got x=%f", startX, runtime.smogs[0].Position.X)
+	if runtime.enemies[0].Position.X <= startX {
+		t.Fatalf("expected enemy to move right from x=%f, got x=%f", startX, runtime.enemies[0].Position.X)
 	}
 }
 
@@ -61,8 +61,8 @@ func TestAdvanceRuntimeTickBirdCooldownBlocksAttackUntilReady(t *testing.T) {
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
 		birds:       []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 0.2, Y: 0}},
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 30, Position: gameobject.Position{X: 0.2, Y: 0}},
 		},
 	}
 
@@ -79,7 +79,7 @@ func TestAdvanceRuntimeTickBirdCooldownBlocksAttackUntilReady(t *testing.T) {
 
 	_ = tickAfterFirstAttack
 	_ = projectileCountAfterFirstAttack
-	// 10 ticks in, cooldown is still active (needs 20 ticks). Smog may already be
+	// 10 ticks in, cooldown is still active (needs 20 ticks). Enemy may already be
 	// dead from the first shot; we only need to verify the bird's LastFiredAtTick
 	// was set and CanAttack correctly blocks it.
 	if runtime.birds[0].bird.LastFiredAtTick < 1 {
@@ -105,17 +105,17 @@ func TestAdvanceRuntimeTickWaveDoesNotSpawnBeforeScheduledTick(t *testing.T) {
 		},
 	}
 
-	// Advance several ticks; no smogs should spawn yet.
+	// Advance several ticks; no enemies should spawn yet.
 	for i := 0; i < 10; i++ {
 		advanceRuntimeTick(&runtime, time.Now())
 	}
 
-	if len(runtime.smogs) != 0 {
-		t.Fatalf("expected no smogs before scheduled wave tick, got %d", len(runtime.smogs))
+	if len(runtime.enemies) != 0 {
+		t.Fatalf("expected no enemies before scheduled wave tick, got %d", len(runtime.enemies))
 	}
 }
 
-func TestAdvanceRuntimeTickEnemyHealthDropsToZeroAndSmogIsRemoved(t *testing.T) {
+func TestAdvanceRuntimeTickEnemyHealthDropsToZeroAndEnemyIsRemoved(t *testing.T) {
 	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypeSparrow, gameobject.Position{X: 0, Y: 0})
 	if err != nil {
 		t.Fatalf("NewBird failed: %v", err)
@@ -129,17 +129,17 @@ func TestAdvanceRuntimeTickEnemyHealthDropsToZeroAndSmogIsRemoved(t *testing.T) 
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
 		birds:       []placedBird{{birdType: gameobject.BirdTypeSparrow, bird: bird}},
-		smogs: []gameobject.Smog{
-			// Sparrow does 10 damage per shot; this smog has exactly 10 HP.
-			{ID: "smog-1", Health: 10, Position: gameobject.Position{X: 0.2, Y: 0}},
+		enemies: []gameobject.Enemy{
+			// Sparrow does 10 damage per shot; this enemy has exactly 10 HP.
+			{ID: "enemy-1", Health: 10, Position: gameobject.Position{X: 0.2, Y: 0}},
 		},
 		path: []gameobject.Position{{X: 0, Y: 0}, {X: 100, Y: 0}},
 	}
 
 	advanceRuntimeTick(&runtime, time.Now())
 
-	if len(runtime.smogs) != 0 {
-		t.Fatalf("expected dead smog to be removed, got %d smogs remaining", len(runtime.smogs))
+	if len(runtime.enemies) != 0 {
+		t.Fatalf("expected dead enemy to be removed, got %d enemies remaining", len(runtime.enemies))
 	}
 }
 
@@ -152,13 +152,13 @@ func TestAdvanceRuntimeTickProjectileMovesTowardTarget(t *testing.T) {
 		},
 		economy:     gamesession.NewEconomy(100),
 		loopStarted: true,
-		smogs: []gameobject.Smog{
-			{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 5, Y: 0}, Speed: 0},
+		enemies: []gameobject.Enemy{
+			{ID: "enemy-1", Health: 30, Position: gameobject.Position{X: 5, Y: 0}, Speed: 0},
 		},
 		projectiles: []gameobject.Projectile{
 			gameobject.NewLockedProjectile(
 				gameobject.Bird{Position: gameobject.Position{X: 0, Y: 0}, Stats: gameobject.BirdStats{Damage: 10}},
-				gameobject.Smog{ID: "smog-1", Health: 30, Position: gameobject.Position{X: 5, Y: 0}},
+				gameobject.Enemy{ID: "enemy-1", Health: 30, Position: gameobject.Position{X: 5, Y: 0}},
 				gameobject.LockedProjectileSpeed,
 			),
 		},

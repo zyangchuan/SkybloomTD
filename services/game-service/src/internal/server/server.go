@@ -38,12 +38,10 @@ const resumeGameAction = "resume_game"
 
 const (
 	waveClearDelayTicks     = int64(60)
-	smogSpawnIntervalTicks  = int64(40)
+	enemySpawnIntervalTicks = int64(40)
 	groupGapTicks           = int64(160)
 	baseHealthDamage        = 10
 	correctQuizEssenceAward = 30
-	baseSmogHealth          = 60
-	baseSmogSpeed           = 0.8
 )
 
 type LevelRepository interface {
@@ -116,8 +114,9 @@ type GameState struct {
 	Tick        int64             `json:"tick"`
 	ServerTime  time.Time         `json:"server_time"`
 	BirdTypes   []BirdTypeInfo    `json:"bird_types,omitempty"`
+	EnemyTypes  []EnemyTypeInfo   `json:"enemy_types,omitempty"`
 	Birds       []PlacedBirdState `json:"birds"`
-	Smogs       []SmogState       `json:"smogs"`
+	Enemies     []EnemyState      `json:"enemies"`
 	Projectiles []ProjectileState `json:"projectiles"`
 	Events      []GameEvent       `json:"events,omitempty"`
 }
@@ -128,6 +127,11 @@ type BirdTypeInfo struct {
 	Attack string               `json:"attack"`
 }
 
+type EnemyTypeInfo struct {
+	Type  string                `json:"type"`
+	Stats gameobject.EnemyStats `json:"stats"`
+}
+
 type PlacedBirdState struct {
 	ID              string               `json:"id"`
 	Type            string               `json:"type"`
@@ -136,8 +140,9 @@ type PlacedBirdState struct {
 	LastFiredAtTick int64                `json:"last_fired_at_tick"`
 }
 
-type SmogState struct {
+type EnemyState struct {
 	ID        string              `json:"id"`
+	Type      string              `json:"type"`
 	Health    int                 `json:"health"`
 	Position  gameobject.Position `json:"position"`
 	Speed     float64             `json:"speed"`
@@ -159,7 +164,7 @@ type ProjectileState struct {
 type GameEvent struct {
 	Type          string   `json:"type"`
 	BirdID        string   `json:"bird_id,omitempty"`
-	SmogID        string   `json:"smog_id,omitempty"`
+	EnemyID       string   `json:"enemy_id,omitempty"`
 	ProjectileID  string   `json:"projectile_id,omitempty"`
 	ProjectileIDs []string `json:"projectile_ids,omitempty"`
 	Damage        float64  `json:"damage,omitempty"`
@@ -280,7 +285,7 @@ type runtimeSession struct {
 	session     gamesession.State
 	economy     gamesession.Economy
 	birds       []placedBird
-	smogs       []gameobject.Smog
+	enemies     []gameobject.Enemy
 	projectiles []gameobject.Projectile
 	levelMap    mapgen.GeneratedMap
 	path        []gameobject.Position
@@ -727,7 +732,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		session:     session,
 		economy:     gamesession.NewEconomy(session.Essence),
 		birds:       restoredBirds,
-		smogs:       smogsFromStored(storedRuntime.Smogs),
+		enemies:     enemiesFromStored(storedRuntime.Enemies),
 		projectiles: restoredProjectiles,
 		levelMap:    levelMap,
 		path:        gamePath(levelMap),
@@ -737,7 +742,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		waveSpawned:       storedRuntime.WaveSpawned,
 		nextWaveTick:      storedRuntime.NextWaveTick,
 	}
-	state := gameStateFromRuntime(runtime, session.UpdatedAt, birdTypeCatalog(), nil)
+	state := gameStateFromRuntime(runtime, session.UpdatedAt, birdTypeCatalog(), enemyTypeCatalog(), nil)
 	if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.session.started", Data: state}); err != nil {
 		return nil, err
 	}
@@ -814,7 +819,7 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 			if err := s.saveRuntimeState(ctx, runtime); err != nil {
 				log.Printf("game session runtime save failed session_id=%s: %v", runtime.session.SessionID, err)
 			}
-			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, runtime.session.UpdatedAt, nil, events)}); err != nil {
+			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, runtime.session.UpdatedAt, nil, nil, events)}); err != nil {
 				log.Printf("game state write failed session_id=%s: %v", runtime.session.SessionID, err)
 				return
 			}
@@ -1145,12 +1150,12 @@ func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) e
 		WaveSpawned:       runtime.waveSpawned,
 		NextWaveTick:      runtime.nextWaveTick,
 		Birds:             storedBirds(runtime.birds),
-		Smogs:             storedSmogs(runtime.smogs),
+		Enemies:           storedEnemies(runtime.enemies),
 		Projectiles:       storedProjectiles(runtime.projectiles),
 	})
 }
 
-func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdTypes []BirdTypeInfo, events []GameEvent) GameState {
+func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdTypes []BirdTypeInfo, enemyTypes []EnemyTypeInfo, events []GameEvent) GameState {
 	session := runtime.session
 	return GameState{
 		SessionID:   session.SessionID,
@@ -1161,51 +1166,99 @@ func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdType
 		Tick:        session.Tick,
 		ServerTime:  serverTime.UTC(),
 		BirdTypes:   birdTypes,
+		EnemyTypes:  enemyTypes,
 		Birds:       placedBirdStates(runtime.birds),
-		Smogs:       smogStates(runtime.smogs),
+		Enemies:     enemyStates(runtime.enemies),
 		Projectiles: projectileStates(runtime.projectiles),
 		Events:      events,
 	}
 }
 
-type waveDefinition struct {
-	Wave   int
+type spawnGroup struct {
+	Type   string
 	Count  int
 	Health int
 	Speed  float64
 }
 
+type waveDefinition struct {
+	Wave   int
+	Groups []spawnGroup
+}
+
+// count how many groups (all waves)
+func (w waveDefinition) Count() int {
+	total := 0
+	for _, g := range w.Groups {
+		total += g.Count
+	}
+	return total
+}
+
+// return the particular enemy at what group
+func (w waveDefinition) enemyAt(index int) (spawnGroup, bool) {
+	for _, g := range w.Groups {
+		if index < g.Count {
+			return g, true
+		}
+		index -= g.Count
+	}
+	return spawnGroup{}, false
+}
+
 func waveDefinitions() []waveDefinition {
 	return []waveDefinition{
-		scaledWaveDefinition(1, 15),
-		scaledWaveDefinition(2, 24),
-		scaledWaveDefinition(3, 36),
+		{Wave: 1, Groups: []spawnGroup{
+			scaledGroup(1, gameobject.EnemyTypeSmog, 10),
+		}},
+		{Wave: 2, Groups: []spawnGroup{
+			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+		}},
+		{Wave: 3, Groups: []spawnGroup{
+			scaledGroup(3, gameobject.EnemyTypeJunk, 1),
+			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(3, gameobject.EnemyTypeJunk, 1),
+			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(3, gameobject.EnemyTypeJunk, 1),
+			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+		}},
 	}
 }
 
-func scaledWaveDefinition(wave int, count int) waveDefinition {
-	return waveDefinition{
-		Wave:   wave,
+func scaledGroup(wave int, enemyType string, count int) spawnGroup {
+	return spawnGroup{
+		Type:   enemyType,
 		Count:  count,
-		Health: scaledSmogHealth(wave),
-		Speed:  scaledSmogSpeed(wave),
+		Health: scaledEnemyHealth(wave, enemyType),
+		Speed:  scaledEnemySpeed(wave, enemyType),
 	}
 }
 
-func scaledSmogHealth(wave int) int {
+func scaledEnemyHealth(wave int, enemyType string) int {
 	waveOffset := wave - 1
-	if waveOffset < 0 {
-		waveOffset = 0
+	waveOffset = max(0, waveOffset)
+	stats, err := gameobject.EnemyStatsForType(enemyType)
+	if err != nil {
+		return 0
 	}
-	return baseSmogHealth + (waveOffset * 40) + (waveOffset * waveOffset * 5)
+	return stats.Health + (waveOffset * 15) + (waveOffset * waveOffset * 2)
 }
 
-func scaledSmogSpeed(wave int) float64 {
+func scaledEnemySpeed(wave int, enemyType string) float64 {
 	waveOffset := float64(wave - 1)
-	if waveOffset < 0 {
-		waveOffset = 0
+	waveOffset = max(0, waveOffset)
+	stats, err := gameobject.EnemyStatsForType(enemyType)
+	if err != nil {
+		return 0
 	}
-	return baseSmogSpeed + (waveOffset * 0.3) + (waveOffset * waveOffset * 0.03)
+
+	return stats.Speed + (waveOffset * 0.1) + (waveOffset * waveOffset * 0.01)
 }
 
 func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
@@ -1220,24 +1273,24 @@ func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
 	runtime.session.UpdatedAt = now.UTC()
 
 	events := make([]GameEvent, 0)
-	events = append(events, moveSmogs(runtime, gameTickInterval.Seconds())...)
+	events = append(events, moveEnemies(runtime, gameTickInterval.Seconds())...)
 	if runtime.session.Health <= 0 {
 		return events
 	}
-	events = append(events, spawnSmogs(runtime)...)
+	events = append(events, spawnEnemies(runtime)...)
 	events = append(events, fireBirds(runtime)...)
 	events = append(events, resolveProjectiles(runtime, gameTickInterval.Seconds())...)
-	runtime.smogs = aliveSmogs(runtime.smogs)
+	runtime.enemies = aliveEnemies(runtime.enemies)
 	events = append(events, scheduleNextWaveIfCleared(runtime)...)
 	return events
 }
 
-func spawnSmogs(runtime *runtimeSession) []GameEvent {
+func spawnEnemies(runtime *runtimeSession) []GameEvent {
 	if len(runtime.path) == 0 || runtime.nextWaveTick <= 0 || runtime.session.Tick < runtime.nextWaveTick {
 		return nil
 	}
 	wave, ok := activeWaveDefinition(runtime)
-	if !ok || runtime.waveSpawned >= wave.Count {
+	if !ok || runtime.waveSpawned >= wave.Count() {
 		return nil
 	}
 
@@ -1249,32 +1302,43 @@ func spawnSmogs(runtime *runtimeSession) []GameEvent {
 	}
 
 	// Calculate subwave/group spawn ticks dynamically
-	groupSize := wave.Count / 3
+	groupSize := wave.Count()
+
+	// first wave easy
+	if wave.Wave == 1 {
+		groupSize = wave.Count() / 2
+	}
 	if groupSize < 1 {
 		groupSize = 1
 	}
+
 	groupIndex := int64(runtime.waveSpawned / groupSize)
 	indexInGroup := int64(runtime.waveSpawned % groupSize)
 
-	groupDurationTicks := int64(groupSize) * smogSpawnIntervalTicks
+	groupDurationTicks := int64(groupSize) * enemySpawnIntervalTicks
 	groupStartIntervalTicks := groupDurationTicks + groupGapTicks
 
-	nextSpawnTick := runtime.waveStartedAtTick + (groupIndex * groupStartIntervalTicks) + (indexInGroup * smogSpawnIntervalTicks)
+	nextSpawnTick := runtime.waveStartedAtTick + (groupIndex * groupStartIntervalTicks) + (indexInGroup * enemySpawnIntervalTicks)
 
 	if runtime.session.Tick < nextSpawnTick {
 		return events
 	}
 
-	smog := gameobject.Smog{
+	group, found := wave.enemyAt(runtime.waveSpawned)
+	if !found {
+		return events
+	}
+	enemy := gameobject.Enemy{
 		ID:        uuid.NewString(),
-		Health:    wave.Health,
+		Type:      group.Type,
+		Health:    group.Health,
 		Position:  runtime.path[0],
-		Speed:     wave.Speed,
+		Speed:     group.Speed,
 		PathIndex: 0,
 	}
 	runtime.waveSpawned++
-	runtime.smogs = append(runtime.smogs, smog)
-	events = append(events, GameEvent{Type: "smog.spawned", SmogID: smog.ID, Wave: wave.Wave, Health: smog.Health})
+	runtime.enemies = append(runtime.enemies, enemy)
+	events = append(events, GameEvent{Type: "enemy.spawned", EnemyID: enemy.ID, Wave: wave.Wave, Health: enemy.Health})
 	return events
 }
 
@@ -1305,11 +1369,11 @@ func currentWaveDefinition(waveNumber int) (waveDefinition, bool) {
 }
 
 func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
-	if runtime.session.Wave <= 0 || len(runtime.smogs) > 0 {
+	if runtime.session.Wave <= 0 || len(runtime.enemies) > 0 {
 		return nil
 	}
 	currentWave, ok := currentWaveDefinition(runtime.session.Wave)
-	if !ok || runtime.waveSpawned < currentWave.Count {
+	if !ok || runtime.waveSpawned < currentWave.Count() {
 		return nil
 	}
 	if runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
@@ -1329,38 +1393,38 @@ func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
 }
 
 func gameWon(runtime runtimeSession) bool {
-	if runtime.session.Health <= 0 || runtime.session.Wave < len(waveDefinitions()) || len(runtime.smogs) > 0 {
+	if runtime.session.Health <= 0 || runtime.session.Wave < len(waveDefinitions()) || len(runtime.enemies) > 0 {
 		return false
 	}
 	finalWave, ok := currentWaveDefinition(runtime.session.Wave)
-	return ok && runtime.waveSpawned >= finalWave.Count && runtime.nextWaveTick == 0
+	return ok && runtime.waveSpawned >= finalWave.Count() && runtime.nextWaveTick == 0
 }
 
-func moveSmogs(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
+func moveEnemies(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
 	if runtime.session.Health <= 0 {
 		return nil
 	}
 	events := make([]GameEvent, 0)
-	nextSmogs := make([]gameobject.Smog, 0, len(runtime.smogs))
-	for i := range runtime.smogs {
-		smog := runtime.smogs[i]
-		smog.Move(deltaSeconds, runtime.path)
-		if smogReachedEnd(smog, runtime.path) {
+	nextEnemies := make([]gameobject.Enemy, 0, len(runtime.enemies))
+	for i := range runtime.enemies {
+		enemy := runtime.enemies[i]
+		enemy.Move(deltaSeconds, runtime.path)
+		if enemyReachedEnd(enemy, runtime.path) {
 			runtime.session.Health -= baseHealthDamage
 			if runtime.session.Health < 0 {
 				runtime.session.Health = 0
 			}
 			events = append(events, GameEvent{
-				Type:   "smog.escaped",
-				SmogID: smog.ID,
-				Damage: float64(baseHealthDamage),
-				Health: runtime.session.Health,
+				Type:    "enemy.escaped",
+				EnemyID: enemy.ID,
+				Damage:  float64(baseHealthDamage),
+				Health:  runtime.session.Health,
 			})
 			continue
 		}
-		nextSmogs = append(nextSmogs, smog)
+		nextEnemies = append(nextEnemies, enemy)
 	}
-	runtime.smogs = nextSmogs
+	runtime.enemies = nextEnemies
 	return events
 }
 
@@ -1374,11 +1438,11 @@ func fireBirds(runtime *runtimeSession) []GameEvent {
 		if !bird.CanAttack(runtime.session.Tick, gameTicksPerSecond) {
 			continue
 		}
-		targetIndex := targetSmogIndex(*bird, runtime.smogs)
+		targetIndex := targetEnemyIndex(*bird, runtime.enemies)
 		if targetIndex < 0 {
 			continue
 		}
-		target := runtime.smogs[targetIndex]
+		target := runtime.enemies[targetIndex]
 		projectiles := bird.Attack(target, runtime.session.Tick)
 		if len(projectiles) == 0 {
 			continue
@@ -1387,7 +1451,7 @@ func fireBirds(runtime *runtimeSession) []GameEvent {
 		events = append(events, GameEvent{
 			Type:          "bird.attack",
 			BirdID:        bird.ID,
-			SmogID:        target.ID,
+			EnemyID:       target.ID,
 			ProjectileIDs: projectileIDs(projectiles),
 		})
 	}
@@ -1406,26 +1470,26 @@ func resolveProjectiles(runtime *runtimeSession, deltaSeconds float64) []GameEve
 				active = append(active, projectile)
 				continue
 			}
-			target := findSmogByID(runtime.smogs, projectile.TargetID)
+			target := findEnemyByID(runtime.enemies, projectile.TargetID)
 			if target == nil {
 				continue
 			}
 			beforeHealth := target.Health
 			if projectile.ApplyLockedDamage(target) {
 				events = append(events, GameEvent{
-					Type:         "smog.damage",
-					SmogID:       target.ID,
+					Type:         "enemy.damage",
+					EnemyID:      target.ID,
 					ProjectileID: projectile.ID,
 					Damage:       float64(beforeHealth - target.Health),
 					Health:       target.Health,
 				})
 			}
 		case gameobject.ProjectileTypeDirectional:
-			hit, damage := collideDirectionalProjectile(&projectile, runtime.smogs)
+			hit, damage := collideDirectionalProjectile(&projectile, runtime.enemies)
 			if hit != nil {
 				events = append(events, GameEvent{
-					Type:         "smog.damage",
-					SmogID:       hit.ID,
+					Type:         "enemy.damage",
+					EnemyID:      hit.ID,
 					ProjectileID: projectile.ID,
 					Damage:       damage,
 					Health:       hit.Health,
@@ -1444,52 +1508,52 @@ func resolveProjectiles(runtime *runtimeSession, deltaSeconds float64) []GameEve
 	return events
 }
 
-func collideDirectionalProjectile(projectile *gameobject.Projectile, smogs []gameobject.Smog) (*gameobject.Smog, float64) {
+func collideDirectionalProjectile(projectile *gameobject.Projectile, enemies []gameobject.Enemy) (*gameobject.Enemy, float64) {
 	if projectile == nil || projectile.Type != gameobject.ProjectileTypeDirectional || projectile.IsExpired() {
 		return nil, 0
 	}
-	for i := range smogs {
-		if !smogs[i].IsAlive() {
+	for i := range enemies {
+		if !enemies[i].IsAlive() {
 			continue
 		}
-		if projectile.Position.DistanceTo(smogs[i].Position) > projectile.HitRadius {
+		if projectile.Position.DistanceTo(enemies[i].Position) > projectile.HitRadius {
 			continue
 		}
-		beforeHealth := smogs[i].Health
-		smogs[i].TakeDamage(projectile.Damage)
+		beforeHealth := enemies[i].Health
+		enemies[i].TakeDamage(projectile.Damage)
 		projectile.RemainingRange = 0
-		return &smogs[i], float64(beforeHealth - smogs[i].Health)
+		return &enemies[i], float64(beforeHealth - enemies[i].Health)
 	}
 	return nil, 0
 }
 
-func targetSmogIndex(bird gameobject.Bird, smogs []gameobject.Smog) int {
+func targetEnemyIndex(bird gameobject.Bird, enemies []gameobject.Enemy) int {
 	bestIndex := -1
-	for i := range smogs {
-		if !bird.TargetInRange(smogs[i]) {
+	for i := range enemies {
+		if !bird.TargetInRange(enemies[i]) {
 			continue
 		}
-		if bestIndex < 0 || smogs[i].PathIndex > smogs[bestIndex].PathIndex {
+		if bestIndex < 0 || enemies[i].PathIndex > enemies[bestIndex].PathIndex {
 			bestIndex = i
 		}
 	}
 	return bestIndex
 }
 
-func aliveSmogs(smogs []gameobject.Smog) []gameobject.Smog {
-	active := make([]gameobject.Smog, 0, len(smogs))
-	for _, smog := range smogs {
-		if smog.IsAlive() {
-			active = append(active, smog)
+func aliveEnemies(enemies []gameobject.Enemy) []gameobject.Enemy {
+	active := make([]gameobject.Enemy, 0, len(enemies))
+	for _, enemy := range enemies {
+		if enemy.IsAlive() {
+			active = append(active, enemy)
 		}
 	}
 	return active
 }
 
-func findSmogByID(smogs []gameobject.Smog, id string) *gameobject.Smog {
-	for i := range smogs {
-		if smogs[i].ID == id {
-			return &smogs[i]
+func findEnemyByID(enemies []gameobject.Enemy, id string) *gameobject.Enemy {
+	for i := range enemies {
+		if enemies[i].ID == id {
+			return &enemies[i]
 		}
 	}
 	return nil
@@ -1503,11 +1567,11 @@ func projectileIDs(projectiles []gameobject.Projectile) []string {
 	return ids
 }
 
-func smogReachedEnd(smog gameobject.Smog, path []gameobject.Position) bool {
+func enemyReachedEnd(enemy gameobject.Enemy, path []gameobject.Position) bool {
 	if len(path) == 0 {
 		return false
 	}
-	return smog.PathIndex >= len(path)-1 && smog.Position.DistanceTo(path[len(path)-1]) < 0.000001
+	return enemy.PathIndex >= len(path)-1 && enemy.Position.DistanceTo(path[len(path)-1]) < 0.000001
 }
 
 func gamePath(levelMap mapgen.GeneratedMap) []gameobject.Position {
@@ -1524,7 +1588,7 @@ func normalizeRuntimeState(runtime gamesession.RuntimeState) gamesession.Runtime
 	}
 	if runtime.NextWaveTick == 0 && runtime.Wave > 0 && runtime.WaveSpawned == 0 {
 		if wave, ok := currentWaveDefinition(runtime.Wave); ok {
-			runtime.WaveSpawned = wave.Count
+			runtime.WaveSpawned = wave.Count()
 		}
 	}
 	if runtime.WaveStartedAtTick == 0 && runtime.Wave > 0 && runtime.WaveSpawned > 0 {
@@ -1598,6 +1662,22 @@ func birdTypeCatalog() []BirdTypeInfo {
 	return catalog
 }
 
+func enemyTypeCatalog() []EnemyTypeInfo {
+	enemyTypes := gameobject.EnemyTypes()
+	catalog := make([]EnemyTypeInfo, 0, len(enemyTypes))
+	for _, enemyType := range enemyTypes {
+		stats, err := gameobject.EnemyStatsForType(enemyType)
+		if err != nil {
+			continue
+		}
+		catalog = append(catalog, EnemyTypeInfo{
+			Type:  enemyType,
+			Stats: stats,
+		})
+	}
+	return catalog
+}
+
 func isInsideMap(levelMap mapgen.GeneratedMap, x int, y int) bool {
 	return x >= 0 && y >= 0 && x < levelMap.Width && y < levelMap.Height
 }
@@ -1634,15 +1714,16 @@ func placedBirdStates(birds []placedBird) []PlacedBirdState {
 	return states
 }
 
-func smogStates(smogs []gameobject.Smog) []SmogState {
-	states := make([]SmogState, 0, len(smogs))
-	for _, smog := range smogs {
-		states = append(states, SmogState{
-			ID:        smog.ID,
-			Health:    smog.Health,
-			Position:  smog.Position,
-			Speed:     smog.Speed,
-			PathIndex: smog.PathIndex,
+func enemyStates(enemies []gameobject.Enemy) []EnemyState {
+	states := make([]EnemyState, 0, len(enemies))
+	for _, enemy := range enemies {
+		states = append(states, EnemyState{
+			ID:        enemy.ID,
+			Type:      enemy.Type,
+			Health:    enemy.Health,
+			Position:  enemy.Position,
+			Speed:     enemy.Speed,
+			PathIndex: enemy.PathIndex,
 		})
 	}
 	return states
@@ -1690,32 +1771,34 @@ func storedBirds(birds []placedBird) []gamesession.StoredBird {
 	return stored
 }
 
-func storedSmogs(smogs []gameobject.Smog) []gamesession.StoredSmog {
-	stored := make([]gamesession.StoredSmog, 0, len(smogs))
-	for _, smog := range smogs {
-		stored = append(stored, gamesession.StoredSmog{
-			ID:        smog.ID,
-			Health:    smog.Health,
-			Position:  smog.Position,
-			Speed:     smog.Speed,
-			PathIndex: smog.PathIndex,
+func storedEnemies(enemies []gameobject.Enemy) []gamesession.StoredEnemy {
+	stored := make([]gamesession.StoredEnemy, 0, len(enemies))
+	for _, enemy := range enemies {
+		stored = append(stored, gamesession.StoredEnemy{
+			ID:        enemy.ID,
+			Type:      enemy.Type,
+			Health:    enemy.Health,
+			Position:  enemy.Position,
+			Speed:     enemy.Speed,
+			PathIndex: enemy.PathIndex,
 		})
 	}
 	return stored
 }
 
-func smogsFromStored(stored []gamesession.StoredSmog) []gameobject.Smog {
-	smogs := make([]gameobject.Smog, 0, len(stored))
+func enemiesFromStored(stored []gamesession.StoredEnemy) []gameobject.Enemy {
+	enemies := make([]gameobject.Enemy, 0, len(stored))
 	for _, item := range stored {
-		smogs = append(smogs, gameobject.Smog{
+		enemies = append(enemies, gameobject.Enemy{
 			ID:        item.ID,
+			Type:      item.Type,
 			Health:    item.Health,
 			Position:  item.Position,
 			Speed:     item.Speed,
 			PathIndex: item.PathIndex,
 		})
 	}
-	return smogs
+	return enemies
 }
 
 func storedProjectiles(projectiles []gameobject.Projectile) []gamesession.StoredProjectile {

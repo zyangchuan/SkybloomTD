@@ -33,30 +33,31 @@ export default class Tower extends Phaser.GameObjects.Sprite {
    */
   public update() {
     const gameScene = this.scene as any;
-    if (!gameScene || !gameScene.activeSmogsList || gameScene.activeSmogsList.length === 0) {
-      // Return slowly to default rotation of 0 when no smogs exist
+    const enemies = gameScene?.entities?.activeEnemiesList ?? [];
+    if (enemies.length === 0) {
+      // Return slowly to default rotation of 0 when no enemies exist
       this.rotation = Phaser.Math.Angle.RotateTo(this.rotation, 0, 0.04);
       return;
     }
 
-    let bestSmog: any = null;
+    let bestEnemy: any = null;
 
     // Standard high-performance target selection mirroring the Go server
-    for (const smog of gameScene.activeSmogsList) {
-      const dx = smog.x - this.gridX;
-      const dy = smog.y - this.gridY;
+    for (const enemy of enemies) {
+      const dx = enemy.x - this.gridX;
+      const dy = enemy.y - this.gridY;
       const distance = Math.sqrt(dx * dx + dy * dy);
 
       if (distance <= this.range) {
-        if (!bestSmog || smog.pathIndex > bestSmog.pathIndex) {
-          bestSmog = smog;
+        if (!bestEnemy || enemy.pathIndex > bestEnemy.pathIndex) {
+          bestEnemy = enemy;
         }
       }
     }
 
-    if (bestSmog) {
+    if (bestEnemy) {
       // Calculate rotation target angle directly using grid coordinates
-      const targetAngle = Math.atan2(bestSmog.y - this.gridY, bestSmog.x - this.gridX) + Math.PI;
+      const targetAngle = Math.atan2(bestEnemy.y - this.gridY, bestEnemy.x - this.gridX) + Math.PI;
 
       // Interpolate smoothly towards the target angle
       this.rotation = Phaser.Math.Angle.RotateTo(this.rotation, targetAngle, 0.08);

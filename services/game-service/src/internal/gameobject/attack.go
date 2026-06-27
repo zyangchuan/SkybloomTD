@@ -12,7 +12,7 @@ type SingleAttack struct {
 	ProjectileSpeed float64
 }
 
-func (a SingleAttack) Attack(bird Bird, target Smog) []Projectile {
+func (a SingleAttack) Attack(bird Bird, target Enemy) []Projectile {
 	projectileSpeed := a.ProjectileSpeed
 	if projectileSpeed <= 0 {
 		projectileSpeed = LockedProjectileSpeed
@@ -24,7 +24,7 @@ func (a SingleAttack) Attack(bird Bird, target Smog) []Projectile {
 
 type SplashAttack struct{}
 
-func (a SplashAttack) Attack(bird Bird, target Smog) []Projectile {
+func (a SplashAttack) Attack(bird Bird, target Enemy) []Projectile {
 	direction := bird.Position.DirectionTo(target.Position)
 	return []Projectile{
 		NewDirectionalProjectile(bird, direction),
