@@ -27,6 +27,9 @@ export default class GameScene extends Phaser.Scene {
   private overlay!: GameOverlay;
   private drag!: DragController;
   private entities!: EntitySync;
+  private startBtn: Phaser.GameObjects.Sprite | null = null;
+  private startLabel: Phaser.GameObjects.Text | null = null;
+  private startArrow: Phaser.GameObjects.Sprite | null = null;
 
   constructor() { super('GameScene'); }
 
@@ -50,6 +53,8 @@ export default class GameScene extends Phaser.Scene {
     this.drag = new DragController(
       this,
       (birdType, x, y) => this.sendWs('game.action.place_tower', { bird_type: birdType, x, y }),
+      (sourceId, targetId) => this.sendWs('game.action.merge_tower', { source_bird_id: sourceId, target_bird_id: targetId }),
+      (sourceBirdType, targetId) => this.sendWs('game.action.merge_tower', { source_bird_type: sourceBirdType, target_bird_id: targetId }),
       { tileSize: this.tileSize, offsetX: this.offsetX, offsetY: this.offsetY, gridWidth: this.gridWidth, gridHeight: this.gridHeight },
       this.enemyPath, this.obstacles, this.entities.towers,
     );
@@ -60,9 +65,9 @@ export default class GameScene extends Phaser.Scene {
     this.setupShutdown();
   }
 
-  update() {
+  update(_time: number, delta: number) {
     if (this.overlay.isPaused()) return;
-    this.entities.interpolate();
+    this.entities.interpolate(delta);
   }
 
   // ─── Grid ────────────────────────────────────────────────────────────────────
@@ -99,7 +104,15 @@ export default class GameScene extends Phaser.Scene {
       case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;
       case 'game.victory':          this.overlay.showMistakesSummaryWindow(true);  break;
       case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
-      case 'game.quiz.unavailable': this.quiz.clear(); this.showRejectMessage('NO QUIZZES REMAINING'); break;
+      case 'game.quiz.unavailable':
+        this.quiz.clear();
+        if (msg.data && msg.data.reason === 'quiz_cooldown') {
+          this.quiz.setCooldownActive();
+          this.showRejectMessage('QUIZ ON COOLDOWN');
+        } else {
+          this.showRejectMessage('NO QUIZZES REMAINING');
+        }
+        break;
       case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
       case 'game.exited':           this.overlay.completePendingExit(); break;
     }
@@ -121,8 +134,20 @@ export default class GameScene extends Phaser.Scene {
     if (state.session_id !== undefined) this.sessionId = state.session_id;
     this.hud.update({ health: state.health, essence: state.essence, wave: state.wave });
     if (state.birds       !== undefined) this.entities.syncTowers(state.birds);
-    if (state.enemies     !== undefined) this.entities.syncEnemies(state.enemies);
     if (state.projectiles !== undefined) this.entities.syncProjectiles(state.projectiles);
+    if (state.events      !== undefined) this.entities.processEvents(state.events);
+    if (state.enemies     !== undefined) this.entities.syncEnemies(state.enemies);
+    if (state.loop_started !== undefined) {
+      this.quiz.setGameStarted(state.loop_started);
+      if (state.loop_started) {
+        this.destroyStartButton();
+      } else {
+        this.showStartButton();
+      }
+    }
+    if (state.quiz_cooldown_remaining_seconds !== undefined) {
+      this.quiz.updateCooldown(state.quiz_cooldown_remaining_seconds);
+    }
   }
 
   // ─── UI feedback ─────────────────────────────────────────────────────────────
@@ -140,6 +165,66 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ─── Utility ─────────────────────────────────────────────────────────────────
+
+  private showStartButton() {
+    if (this.startBtn) return;
+
+    const leftX = 250;
+    const centerY = this.scale.height / 2;
+    const btnY = centerY - 30;
+
+    this.startBtn = this.add.sprite(leftX, btnY, 'btn_large_blue_round')
+      .setScale(0.8)
+      .setDepth(30)
+      .setInteractive({ useHandCursor: true });
+
+    this.startLabel = this.add.text(leftX, btnY - 2, 'Start Game', {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '40px',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(31);
+
+    this.startArrow = this.add.sprite(leftX + 250, btnY, 'icon_arrow')
+      .setScale(1.8)
+      .setDepth(30);
+
+    this.startBtn.on('pointerover', () => {
+      this.startBtn?.setScale(0.85);
+      this.startLabel?.setScale(1.05).setColor('#fef3c7');
+    });
+    this.startBtn.on('pointerout', () => {
+      this.startBtn?.setScale(0.8);
+      this.startLabel?.setScale(1.0).setColor('#ffffff');
+    });
+    this.startBtn.on('pointerdown', () => {
+      this.sendWs('game.session.run', {});
+      this.startBtn?.disableInteractive();
+    });
+
+    this.tweens.add({
+      targets: this.startArrow,
+      x: leftX + 210,
+      duration: 600,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+
+  private destroyStartButton() {
+    if (this.startBtn) {
+      this.startBtn.destroy();
+      this.startBtn = null;
+    }
+    if (this.startLabel) {
+      this.startLabel.destroy();
+      this.startLabel = null;
+    }
+    if (this.startArrow) {
+      this.startArrow.destroy();
+      this.startArrow = null;
+    }
+  }
 
   private sendWs(type: string, data?: object) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {

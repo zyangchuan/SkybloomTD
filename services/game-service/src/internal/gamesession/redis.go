@@ -19,7 +19,7 @@ var ErrSessionNotFound = errors.New("game session not found")
 
 const (
 	InitialHealth  = 100
-	InitialEssence = 30
+	InitialEssence = 100
 	InitialWave    = 0
 )
 
@@ -84,6 +84,7 @@ type RuntimeState struct {
 	WaveStartedAtTick int64
 	WaveSpawned       int
 	NextWaveTick      int64
+	LastQuizStartedAt time.Time
 	Birds             []StoredBird
 	Enemies           []StoredEnemy
 	Projectiles       []StoredProjectile
@@ -210,6 +211,7 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 		WaveStartedAtTick: int64Value(values["wave_started_at_tick"], 0),
 		WaveSpawned:       intValue(values["wave_spawned"], 0),
 		NextWaveTick:      int64Value(values["next_wave_tick"], 0),
+		LastQuizStartedAt: timeValue(values["last_quiz_started_at"]),
 		Birds:             birds,
 		Enemies:           enemies,
 		Projectiles:       projectiles,
@@ -269,6 +271,8 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 		strconv.Itoa(runtime.WaveSpawned),
 		"next_wave_tick",
 		strconv.FormatInt(runtime.NextWaveTick, 10),
+		"last_quiz_started_at",
+		formatOptionalTime(runtime.LastQuizStartedAt),
 		"birds",
 		string(birdsBody),
 		"enemies",
@@ -476,6 +480,24 @@ func boolValue(value string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func timeValue(value string) time.Time {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed.UTC()
+}
+
+func formatOptionalTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func asString(value any) string {

@@ -68,17 +68,28 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_green_round', '/game/assets/gui/buttons_text/ButtonText_Small_Green_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_large_blue_round', '/game/assets/gui/buttons_text/ButtonText_Large_Blue_Round.svg', { width: 400, height: 160 });
+    this.load.svg('icon_arrow', '/game/assets/gui/icons/Icon_Small_Blank_Arrow.svg', { width: 48, height: 48 });
     this.load.svg('textbox_blank_side', '/game/assets/gui/boxes_banners/TextBox_Blank_Side.svg', { width: 450, height: 160 });
     this.load.image('head_sparrow', '/game/assets/birds/sparrow_head.png');
     this.load.image('head_woodpecker', '/game/assets/birds/woodpecker_head.png');
     this.load.image('head_eagle', '/game/assets/birds/eagle_head.png');
     this.load.image('head_peacock', '/game/assets/birds/peacock_head.png');
+    this.load.image('head_falcon', '/game/assets/birds/falcon_head.png');
+    this.load.image('head_kingfisher', '/game/assets/birds/kingfisher_head.png');
+    this.load.image('head_phoenix', '/game/assets/birds/pheonix_head.png');
+    this.load.image('head_sun_god', '/game/assets/birds/sun_god_head.png');
 
     // Preload bird tower sprites
     this.load.image('tower_sparrow', '/game/assets/birds/sparrow_tower.png');
     this.load.image('tower_woodpecker', '/game/assets/birds/woodpecker_tower.png');
     this.load.image('tower_eagle', '/game/assets/birds/eagle_tower.png');
     this.load.image('tower_peacock', '/game/assets/birds/peacock_tower.png');
+    this.load.image('tower_falcon', '/game/assets/birds/falcon_tower.png');
+    this.load.image('tower_kingfisher', '/game/assets/birds/kingfisher_tower.png');
+    this.load.image('tower_phoenix', '/game/assets/birds/pheonix_tower.png');
+    this.load.image('tower_sun_god', '/game/assets/birds/sun_god_tower.png');
 
     // Preload enemies
     this.load.image('enemy_smog', '/game/assets/enemies/smog.png');
@@ -94,6 +105,10 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_woodpecker', '/game/assets/birds/woodpecker_projectile.png');
     this.load.image('projectile_eagle', '/game/assets/birds/eagle_projectile.png');
     this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
+    this.load.image('projectile_falcon', '/game/assets/birds/falcon_projectile.png');
+    this.load.image('projectile_kingfisher', '/game/assets/birds/kingfisher_projectile.png');
+    this.load.image('projectile_phoenix', '/game/assets/birds/pheonix_projectile.png');
+    this.load.image('projectile_sun_god', '/game/assets/birds/sun_god_projectile.png');
   }
 
   create() {
