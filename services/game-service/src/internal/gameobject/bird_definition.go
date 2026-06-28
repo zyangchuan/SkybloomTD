@@ -40,7 +40,7 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypeSparrow: {
 		Type: BirdTypeSparrow,
 		Stats: BirdStats{
-			Damage:          10,
+			Damage:          20,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        1.0,
 			Range:           2.1,
@@ -51,7 +51,7 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypeWoodpecker: {
 		Type: BirdTypeWoodpecker,
 		Stats: BirdStats{
-			Damage:          6,
+			Damage:          10,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        2.0,
 			Range:           2.1,
@@ -62,9 +62,9 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypeEagle: {
 		Type: BirdTypeEagle,
 		Stats: BirdStats{
-			Damage:          30,
+			Damage:          50,
 			ProjectileSpeed: StandardProjectileSpeed,
-			FireRate:        0.4,
+			FireRate:        0.5,
 			Range:           3.2,
 			Cost:            130,
 		},
@@ -73,7 +73,7 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypePeacock: {
 		Type: BirdTypePeacock,
 		Stats: BirdStats{
-			Damage:          7,
+			Damage:          20,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        1.0,
 			Range:           2.1,
@@ -84,11 +84,11 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypeFalcon: {
 		Type: BirdTypeFalcon,
 		Stats: BirdStats{
-			Damage:          24,
+			Damage:          50,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        0.9,
 			Range:           3.6,
-			Cost:            0,
+			Cost:            50,
 		},
 		AttackType: AttackTypeSingle,
 		Hybrid:     true,
@@ -96,11 +96,11 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypeKingfisher: {
 		Type: BirdTypeKingfisher,
 		Stats: BirdStats{
-			Damage:          9,
+			Damage:          20,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        3.0,
 			Range:           2.4,
-			Cost:            0,
+			Cost:            50,
 		},
 		AttackType: AttackTypeSplash,
 		Hybrid:     true,
@@ -108,11 +108,11 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypePhoenix: {
 		Type: BirdTypePhoenix,
 		Stats: BirdStats{
-			Damage:          28,
+			Damage:          25,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        0.8,
 			Range:           3.0,
-			Cost:            0,
+			Cost:            50,
 		},
 		AttackType: AttackTypeSplash,
 		Hybrid:     true,
@@ -120,11 +120,11 @@ var birdDefinitions = map[string]BirdDefinition{
 	BirdTypeSunGod: {
 		Type: BirdTypeSunGod,
 		Stats: BirdStats{
-			Damage:          32,
+			Damage:          35,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        1.6,
 			Range:           3.6,
-			Cost:            0,
+			Cost:            150,
 		},
 		AttackType: AttackTypeSplash,
 		Hybrid:     true,

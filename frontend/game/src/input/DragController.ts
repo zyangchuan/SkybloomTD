@@ -95,7 +95,14 @@ export class DragController {
     this.dragRangeGraphics = this.scene.add.graphics().setDepth(39);
     this.activeDragSprite = this.scene.add.sprite(pointer.x, pointer.y, `tower_${birdType}`)
       .setAlpha(0.8).setDepth(40);
-    const dragScaleMultiplier = birdType === 'sun_god' ? 2.5 : 1.5;
+    let dragScaleMultiplier = 1.5;
+    if (birdType === 'sun_god') {
+      dragScaleMultiplier = 2.5;
+    } else if (birdType === 'phoenix') {
+      dragScaleMultiplier = 2.2;
+    } else if (birdType === 'kingfisher' || birdType === 'falcon') {
+      dragScaleMultiplier = 2.0;
+    }
     this.activeDragSprite.setScale(this.grid.tileSize / this.activeDragSprite.width * dragScaleMultiplier);
 
     this.spawnCancelZones();
@@ -408,10 +415,11 @@ export class DragController {
       { label: 'RANGE',     value: String(stats.range),   color: '#60a5fa' },
       { label: 'FIRE RATE', value: stats.fireRate,        color: '#34d399' },
       { label: 'ATTACK',    value: stats.attack,          color: '#e9d5ff' },
+      { label: 'COST',      value: String(stats.cost),    color: '#fbbf24' },
     ];
 
     rows.forEach((row, i) => {
-      const rowY = -30 + i * 30;
+      const rowY = -40 + i * 25;
       tooltip.add(this.scene.add.text(-10, rowY, row.label, {
         fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '20px', color: '#94a3b8',
       }).setOrigin(0, 0.5));

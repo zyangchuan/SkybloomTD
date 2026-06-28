@@ -9,8 +9,9 @@ const (
 )
 
 type EnemyDefinition struct {
-	Type  string
-	Stats EnemyStats
+	Type          string
+	Stats         EnemyStats
+	EssenceReward int
 }
 
 var enemyDefinitionOrder = []string{
@@ -23,23 +24,26 @@ var enemyDefinitions = map[string]EnemyDefinition{
 	EnemyTypeSmog: {
 		Type: EnemyTypeSmog,
 		Stats: EnemyStats{
-			Health: 40,
+			Health: 20,
 			Speed:  0.8,
 		},
+		EssenceReward: 5,
 	},
 	EnemyTypeJunk: {
 		Type: EnemyTypeJunk,
 		Stats: EnemyStats{
-			Health: 300,
+			Health: 500,
 			Speed:  0.3,
 		},
+		EssenceReward: 30,
 	},
 	EnemyTypeNoise: {
 		Type: EnemyTypeNoise,
 		Stats: EnemyStats{
-			Health: 15,
+			Health: 10,
 			Speed:  1.4,
 		},
+		EssenceReward: 2,
 	},
 }
 
@@ -57,6 +61,14 @@ func EnemyStatsForType(enemyType string) (EnemyStats, error) {
 		return EnemyStats{}, err
 	}
 	return definition.Stats, nil
+}
+
+func EnemyEssenceRewardForType(enemyType string) (int, error) {
+	definition, err := EnemyDefinitionForType(enemyType)
+	if err != nil {
+		return 0, err
+	}
+	return definition.EssenceReward, nil
 }
 
 func EnemyTypes() []string {

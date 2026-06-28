@@ -129,38 +129,38 @@ func TestBirdFactoryReturnsStatsAndBehaviourForEachBirdType(t *testing.T) {
 	}{
 		{
 			birdType: BirdTypeSparrow,
-			stats:    BirdStats{Damage: 10, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.0, Range: 2.1, Cost: 50},
+			stats:    BirdStats{Damage: 20, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.0, Range: 2.1, Cost: 50},
 		},
 		{
 			birdType: BirdTypeWoodpecker,
-			stats:    BirdStats{Damage: 6, ProjectileSpeed: StandardProjectileSpeed, FireRate: 2.0, Range: 2.1, Cost: 65},
+			stats:    BirdStats{Damage: 10, ProjectileSpeed: StandardProjectileSpeed, FireRate: 2.0, Range: 2.1, Cost: 65},
 		},
 		{
 			birdType: BirdTypeEagle,
-			stats:    BirdStats{Damage: 30, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.4, Range: 3.2, Cost: 130},
+			stats:    BirdStats{Damage: 50, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.5, Range: 3.2, Cost: 130},
 		},
 		{
 			birdType: BirdTypePeacock,
-			stats:    BirdStats{Damage: 7, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.0, Range: 2.1, Cost: 90},
+			stats:    BirdStats{Damage: 20, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.0, Range: 2.1, Cost: 90},
 			splash:   true,
 		},
 		{
 			birdType: BirdTypeFalcon,
-			stats:    BirdStats{Damage: 24, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.9, Range: 3.6, Cost: 0},
+			stats:    BirdStats{Damage: 50, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.9, Range: 3.6, Cost: 50},
 		},
 		{
 			birdType: BirdTypeKingfisher,
-			stats:    BirdStats{Damage: 9, ProjectileSpeed: StandardProjectileSpeed, FireRate: 3.0, Range: 2.4, Cost: 0},
+			stats:    BirdStats{Damage: 20, ProjectileSpeed: StandardProjectileSpeed, FireRate: 3.0, Range: 2.4, Cost: 50},
 			splash:   true,
 		},
 		{
 			birdType: BirdTypePhoenix,
-			stats:    BirdStats{Damage: 28, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.8, Range: 3.0, Cost: 0},
+			stats:    BirdStats{Damage: 25, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.8, Range: 3.0, Cost: 50},
 			splash:   true,
 		},
 		{
 			birdType: BirdTypeSunGod,
-			stats:    BirdStats{Damage: 32, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.6, Range: 3.6, Cost: 0},
+			stats:    BirdStats{Damage: 35, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.6, Range: 3.6, Cost: 150},
 			splash:   true,
 		},
 	}
@@ -215,15 +215,15 @@ func TestEnemyStatsForTypeReturnsStatsForEachEnemyType(t *testing.T) {
 	}{
 		{
 			enemyType: EnemyTypeSmog,
-			stats:     EnemyStats{Health: 40, Speed: 0.8},
+			stats:     EnemyStats{Health: 20, Speed: 0.8},
 		},
 		{
 			enemyType: EnemyTypeJunk,
-			stats:     EnemyStats{Health: 300, Speed: 0.3},
+			stats:     EnemyStats{Health: 500, Speed: 0.3},
 		},
 		{
 			enemyType: EnemyTypeNoise,
-			stats:     EnemyStats{Health: 15, Speed: 1.4},
+			stats:     EnemyStats{Health: 10, Speed: 1.4},
 		},
 	}
 
@@ -259,6 +259,32 @@ func TestEnemyDefinitionsBackEnemyTypeCatalog(t *testing.T) {
 		if definition.Stats.Speed <= 0 {
 			t.Fatalf("expected positive speed for %q, got %f", enemyType, definition.Stats.Speed)
 		}
+		if definition.EssenceReward <= 0 {
+			t.Fatalf("expected positive essence reward for %q, got %d", enemyType, definition.EssenceReward)
+		}
+	}
+}
+
+func TestEnemyEssenceRewardForType(t *testing.T) {
+	cases := []struct {
+		enemyType string
+		reward    int
+	}{
+		{enemyType: EnemyTypeSmog, reward: 5},
+		{enemyType: EnemyTypeNoise, reward: 2},
+		{enemyType: EnemyTypeJunk, reward: 30},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.enemyType, func(t *testing.T) {
+			reward, err := EnemyEssenceRewardForType(tc.enemyType)
+			if err != nil {
+				t.Fatalf("EnemyEssenceRewardForType(%q) failed: %v", tc.enemyType, err)
+			}
+			if reward != tc.reward {
+				t.Fatalf("expected reward %d, got %d", tc.reward, reward)
+			}
+		})
 	}
 }
 

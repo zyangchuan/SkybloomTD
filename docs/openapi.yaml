@@ -662,13 +662,13 @@ paths:
         is complete, then send `game.load` with the returned `level_id` to
         receive `game.initial_state`. The initial state exposes only map data;
         quiz answer data stays server-side in the dedicated game Redis cache.
-        To begin authoritative gameplay, send `game.session.start` with the
+        To create the gameplay session, send `game.session.start` with the
         completed `level_id`. The server initializes a Redis-backed session
-        with `health=100`, `essence=1000`, `wave=0`, and
+        with `health=100`, `essence=100`, `wave=0`, and
         `loop_started=false` and `loop_paused=false`, then returns
-        `game.session.started` with the available bird type stats. The 20 Hz
-        gameplay ticker starts only after the player answers a quiz correctly;
-        `game.quiz.result` includes `loop_started=true` when that happens.
+        `game.session.started` with the available bird type stats. To begin
+        authoritative gameplay, send `game.session.run`; the 20 Hz gameplay
+        ticker starts after that message.
         During the session, clients can send `game.action.place_tower` with a
         base `bird_type` and grid `x`/`y`, send `game.action.merge_tower` with
         compatible source and target bird ids to create hybrid birds, or send
@@ -678,15 +678,15 @@ paths:
         Reconnecting with the same `level_id` reuses the existing Redis session
         for that user and level, including placed birds, active smogs, health,
         wave, tick, current essence, loop start state, and pause state, until
-        the session expires. The gameplay loop runs three
-        smog waves, each split into three subwaves of grouped spawns. The first
+        the session expires. The gameplay loop runs five
+        enemy waves, each split into grouped spawns. The first
         wave starts
-        on the first gameplay tick after the loop is unlocked, and each later
+        on the first gameplay tick after the session starts, and each later
         wave starts three seconds after the previous wave has been cleared. Map
         generation keeps the enemy path out of the top two and bottom two
         rows so UI overlays do not cover it. Each smog that reaches the path
         end removes 10 health. When health reaches 0, the server stops the loop
-        and sends `game.over`. When all three waves are cleared with health
+        and sends `game.over`. When all five waves are cleared with health
         remaining, the server stops the loop and sends `game.victory`. Clients
         can send `game.exit` to stop the running loop
         and delete the Redis gameplay session and level quiz cache; cached
@@ -694,9 +694,12 @@ paths:
         full quiz set from PostgreSQL. During a running session, clients can
         send `game.quiz.request` to receive one quiz prompt without answer
         data, then send `game.quiz.answer` with the selected option index.
-        Correct answers award 30 essence and unlock the gameplay loop if it has
-        not started yet; incorrect answers are saved for a later mistakes
-        summary. Answered quizzes are removed from Redis.
+        Starting a fresh quiz has a 20 second cooldown. Re-requesting the
+        currently pending unanswered quiz is allowed immediately.
+        Quiz requests before `game.session.run` return `game.quiz.unavailable`
+        with `reason=game_not_started`. Correct answers award 50 essence;
+        incorrect answers are saved for a later mistakes summary. Answered
+        quizzes are removed from Redis.
 
         If the database already has quizzes for the authenticated user's
         sub-chapter, the service reuses the saved level instead of generating
@@ -710,6 +713,7 @@ paths:
         - $ref: "#/components/schemas/GameStartWebSocketMessage"
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
+        - $ref: "#/components/schemas/GameSessionRunWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
         - $ref: "#/components/schemas/GameMergeTowerActionMessage"
         - $ref: "#/components/schemas/GamePauseWebSocketMessage"
@@ -1166,6 +1170,14 @@ components:
               format: uuid
               description: Completed level id to start an authoritative gameplay session for.
 
+    GameSessionRunWebSocketMessage:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          const: game.session.run
+
     GamePlaceTowerActionMessage:
       type: object
       description: Place a base bird tower on an empty grid tile. Hybrid birds must be created with `game.action.merge_tower` instead.
@@ -1203,11 +1215,11 @@ components:
           properties:
             source_bird_id:
               type: string
-              description: Existing bird id to consume as one merge parent. Mutually exclusive with `source_bird_type`; no essence is consumed.
+              description: Existing bird id to consume as one merge parent. Mutually exclusive with `source_bird_type`; consumes the resulting hybrid's upgrade essence cost.
             source_bird_type:
               type: string
               enum: [sparrow, woodpecker, eagle, peacock]
-              description: Base bird type to buy and merge into the target tower. Mutually exclusive with `source_bird_id`; consumes this bird type's normal essence cost.
+              description: Base bird type to buy and merge into the target tower. Mutually exclusive with `source_bird_id`; consumes this bird type's normal essence cost plus the resulting hybrid's upgrade essence cost.
             target_bird_id:
               type: string
               description: Existing bird id to consume as the target merge parent; the hybrid appears at this bird's position.
@@ -1219,6 +1231,8 @@ components:
             - `woodpecker` + `peacock` -> `kingfisher`
             - `peacock` + `eagle` -> `phoenix`
             - `kingfisher` + `eagle` -> `sun_god`
+
+            Hybrid upgrade costs: `falcon`, `kingfisher`, and `phoenix` cost 50 essence; `sun_god` costs 200 essence.
 
     GamePauseWebSocketMessage:
       type: object
@@ -1547,8 +1561,8 @@ components:
 
     GameState:
       type: object
-      description: Authoritative gameplay snapshot. After the first correct quiz answer starts the loop, `game.state` messages are sent 20 times per second.
-      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, birds, smogs, projectiles]
+      description: Authoritative gameplay snapshot. After `game.session.run`, `game.state` messages are sent 20 times per second.
+      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, quiz_cooldown_remaining_seconds, birds, smogs, projectiles]
       properties:
         session_id:
           type: string
@@ -1561,7 +1575,7 @@ components:
           example: 100
         essence:
           type: integer
-          example: 1000
+          example: 100
         wave:
           type: integer
           example: 0
@@ -1571,13 +1585,18 @@ components:
           example: 0
         loop_started:
           type: boolean
-          description: False until the player answers a quiz correctly and unlocks the gameplay ticker.
+          description: True once `game.session.run` has started the gameplay ticker.
         loop_paused:
           type: boolean
           description: True when the server has paused the gameplay ticker and is no longer advancing ticks, enemies, combat, or wave spawning.
         server_time:
           type: string
           format: date-time
+        quiz_cooldown_remaining_seconds:
+          type: integer
+          minimum: 0
+          description: Seconds remaining before the next fresh quiz can be started. Re-requesting the current unanswered quiz is not blocked by this cooldown.
+          example: 12
         bird_types:
           type: array
           description: Present on `game.session.started`; lists available tower/bird types.
@@ -1706,7 +1725,7 @@ components:
 
     QuizResult:
       type: object
-      required: [quiz_id, correct, selected_index, essence_awarded, remaining, loop_started]
+      required: [quiz_id, correct, selected_index, essence_awarded, remaining]
       properties:
         quiz_id:
           type: string
@@ -1717,25 +1736,27 @@ components:
           type: integer
         essence_awarded:
           type: integer
-          example: 30
+          example: 50
         essence:
           type: integer
           description: Present when essence was awarded.
-          example: 1030
+          example: 150
         remaining:
           type: integer
           description: Number of quizzes left after deleting the answered quiz.
-        loop_started:
-          type: boolean
-          description: True after a correct answer unlocks or confirms the gameplay loop.
-
     QuizUnavailable:
       type: object
       required: [reason]
       properties:
         reason:
           type: string
+          enum: [game_not_started, no_quizzes_remaining, quiz_cooldown]
           example: no_quizzes_remaining
+        retry_after_seconds:
+          type: integer
+          minimum: 1
+          description: Present when `reason` is `quiz_cooldown`; seconds until a fresh quiz request can succeed.
+          example: 20
 
     QuizMistakeSummary:
       type: object

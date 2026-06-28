@@ -209,9 +209,8 @@ The server responds with `game.quiz.presented` containing only `quiz_id`,
 `quiz_type`, `question_markdown`, and `options_markdown`. Submit the selected
 zero-based option index with `game.quiz.answer`. The server validates the
 answer, deletes that quiz from Redis, and responds with `game.quiz.result`.
-Correct answers award 30 essence and unlock the gameplay loop if it has not
-started yet. Incorrect answers are saved with the selected wrong option for a
-later mistakes summary.
+Correct answers award 50 essence. Incorrect answers are saved with the selected
+wrong option for a later mistakes summary.
 
 To retrieve the saved mistake summary for a completed or in-progress level, the
 frontend can call the game-service HTTP API:

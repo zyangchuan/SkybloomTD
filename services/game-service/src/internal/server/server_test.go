@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -207,6 +208,12 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if startedState.Tick != 0 {
 		t.Fatalf("expected tick 0, got %d", startedState.Tick)
 	}
+	if startedState.LoopStarted {
+		t.Fatal("expected game loop to wait for game.session.run")
+	}
+	if sessions.loopStarted {
+		t.Fatal("expected loop_started to remain false until game.session.run")
+	}
 	if len(startedState.BirdTypes) != 8 {
 		t.Fatalf("expected 8 bird type infos, got %d", len(startedState.BirdTypes))
 	}
@@ -229,16 +236,21 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 		t.Fatalf("unexpected session level_id %q", sessions.options.LevelID)
 	}
 
-	var tick Message
-	if err := conn.ReadJSON(&tick); err != nil {
-		t.Fatalf("ReadJSON tick failed: %v", err)
+	runGameSession(t, conn)
+
+	var tickState GameState
+	for i := 0; i < 10; i++ {
+		tick := readMessageOfType(t, conn, "game.state")
+		tickState = decodeGameState(t, tick.Data)
+		if tickState.Tick > 0 {
+			break
+		}
 	}
-	if tick.Type != "game.state" {
-		t.Fatalf("expected game.state message, got %q", tick.Type)
-	}
-	tickState := decodeGameState(t, tick.Data)
 	if tickState.Tick != 1 {
 		t.Fatalf("expected first tick to be 1, got %d", tickState.Tick)
+	}
+	if !tickState.LoopStarted || !sessions.loopStarted {
+		t.Fatalf("expected loop_started after game.session.run, state=%t persisted=%t", tickState.LoopStarted, sessions.loopStarted)
 	}
 	if tickState.Health != gamesession.InitialHealth || tickState.Essence != gamesession.InitialEssence || tickState.Wave != 1 {
 		t.Fatalf("unexpected tick state %+v", tickState)
@@ -285,6 +297,7 @@ func TestWebsocketSessionStartAllowsEmptyQuizList(t *testing.T) {
 		t.Fatalf("WriteJSON session start failed: %v", err)
 	}
 	readMessageOfType(t, conn, "game.session.started")
+	runGameSession(t, conn)
 
 	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
 		t.Fatalf("WriteJSON quiz request failed: %v", err)
@@ -300,6 +313,68 @@ func TestWebsocketSessionStartAllowsEmptyQuizList(t *testing.T) {
 	}
 	if state.Reason != "no_quizzes_remaining" {
 		t.Fatalf("unexpected unavailable reason %q", state.Reason)
+	}
+}
+
+func TestWebsocketQuizRequestBeforeRunReturnsGameNotStarted(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "66666666-6666-6666-6666-666666666666",
+					QuizIndex:        0,
+					QuizType:         "true_false",
+					QuestionMarkdown: "Sky is blue?",
+					OptionsMarkdown:  []string{"True", "False"},
+					AnswerIndex:      0,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON quiz request failed: %v", err)
+	}
+	unavailable := readMessageOfType(t, conn, "game.quiz.unavailable")
+	body, err := json.Marshal(unavailable.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz unavailable failed: %v", err)
+	}
+	var state QuizUnavailableState
+	if err := json.Unmarshal(body, &state); err != nil {
+		t.Fatalf("Unmarshal quiz unavailable failed: %v", err)
+	}
+	if state.Reason != "game_not_started" {
+		t.Fatalf("expected game_not_started, got %+v", state)
 	}
 }
 
@@ -427,6 +502,7 @@ func TestWebsocketQuizRequestAndCorrectAnswerAwardsEssence(t *testing.T) {
 		t.Fatalf("WriteJSON session start failed: %v", err)
 	}
 	readMessageOfType(t, conn, "game.session.started")
+	runGameSession(t, conn)
 
 	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
 		t.Fatalf("WriteJSON quiz request failed: %v", err)
@@ -538,6 +614,7 @@ func TestWebsocketQuizRequestServesRandomRemainingQuiz(t *testing.T) {
 		t.Fatalf("WriteJSON session start failed: %v", err)
 	}
 	readMessageOfType(t, conn, "game.session.started")
+	runGameSession(t, conn)
 
 	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
 		t.Fatalf("WriteJSON quiz request failed: %v", err)
@@ -631,6 +708,7 @@ func TestWebsocketQuizRequestKeepsUnansweredQuizPending(t *testing.T) {
 		t.Fatalf("WriteJSON session start failed: %v", err)
 	}
 	readMessageOfType(t, conn, "game.session.started")
+	runGameSession(t, conn)
 
 	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
 		t.Fatalf("WriteJSON first quiz request failed: %v", err)
@@ -658,6 +736,104 @@ func TestWebsocketQuizRequestKeepsUnansweredQuizPending(t *testing.T) {
 	readMessageOfType(t, conn, "game.quiz.result")
 	if quizzes.quizzes.CurrentQuizID != "" {
 		t.Fatalf("expected current quiz to clear after answer, got %q", quizzes.quizzes.CurrentQuizID)
+	}
+}
+
+func TestWebsocketQuizRequestCooldownRejectsFreshQuizAfterAnswer(t *testing.T) {
+	levels := &fakeLevelRepository{
+		bootstrap: repository.LevelBootstrap{
+			LevelID:             "11111111-1111-1111-1111-111111111111",
+			UserID:              "22222222-2222-2222-2222-222222222222",
+			SubChapterID:        "55555555-5555-5555-5555-555555555555",
+			GenerationID:        "generation-1",
+			MapSeed:             12345,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	}
+	sessions := &fakeGameSessionStore{}
+	quizzes := &fakeQuizCache{
+		quizzes: quizcache.LevelQuizzes{
+			GenerationID: "generation-1",
+			LevelID:      "11111111-1111-1111-1111-111111111111",
+			UserID:       "22222222-2222-2222-2222-222222222222",
+			SubChapterID: "55555555-5555-5555-5555-555555555555",
+			Quizzes: []quizcache.CachedQuiz{
+				{
+					ID:               "66666666-6666-6666-6666-666666666666",
+					QuizIndex:        0,
+					QuizType:         "true_false",
+					QuestionMarkdown: "First quiz?",
+					OptionsMarkdown:  []string{"True", "False"},
+					AnswerIndex:      0,
+				},
+				{
+					ID:               "77777777-7777-7777-7777-777777777777",
+					QuizIndex:        1,
+					QuizType:         "mcq",
+					QuestionMarkdown: "Second quiz?",
+					OptionsMarkdown:  []string{"A", "B", "C"},
+					AnswerIndex:      2,
+				},
+			},
+		},
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, quizzes, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.session.start",
+		Data: map[string]string{"level_id": "11111111-1111-1111-1111-111111111111"},
+	}); err != nil {
+		t.Fatalf("WriteJSON session start failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.session.started")
+	runGameSession(t, conn)
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON quiz request failed: %v", err)
+	}
+	prompt := decodeQuizPrompt(t, readMessageOfType(t, conn, "game.quiz.presented").Data)
+	if sessions.lastQuizStartedAt.IsZero() {
+		t.Fatal("expected quiz start timestamp to be persisted")
+	}
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.quiz.answer",
+		Data: map[string]any{"quiz_id": prompt.QuizID, "selected_index": 0},
+	}); err != nil {
+		t.Fatalf("WriteJSON quiz answer failed: %v", err)
+	}
+	readMessageOfType(t, conn, "game.quiz.result")
+
+	if err := conn.WriteJSON(Message{Type: "game.quiz.request"}); err != nil {
+		t.Fatalf("WriteJSON second quiz request failed: %v", err)
+	}
+	unavailable := readMessageOfType(t, conn, "game.quiz.unavailable")
+	body, err := json.Marshal(unavailable.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz unavailable failed: %v", err)
+	}
+	var state QuizUnavailableState
+	if err := json.Unmarshal(body, &state); err != nil {
+		t.Fatalf("Unmarshal quiz unavailable failed: %v", err)
+	}
+	if state.Reason != "quiz_cooldown" {
+		t.Fatalf("expected quiz_cooldown, got %+v", state)
+	}
+	if state.RetryAfterSeconds <= 0 || state.RetryAfterSeconds > int(quizRequestCooldown.Seconds()) {
+		t.Fatalf("unexpected retry_after_seconds %+v", state)
+	}
+	if quizzes.quizzes.CurrentQuizID != "" {
+		t.Fatalf("cooldown rejection should not start another quiz, got current %q", quizzes.quizzes.CurrentQuizID)
+	}
+
+	gameState := decodeGameState(t, readMessageOfType(t, conn, "game.state").Data)
+	if gameState.QuizCooldownRemainingSeconds <= 0 || gameState.QuizCooldownRemainingSeconds > int(quizRequestCooldown.Seconds()) {
+		t.Fatalf("expected game.state cooldown remaining, got %+v", gameState)
 	}
 }
 
@@ -1087,7 +1263,7 @@ func TestAdvanceRuntimeTickWaitsThreeSecondsAfterWaveCleared(t *testing.T) {
 		economy:           gamesession.NewEconomy(100),
 		loopStarted:       true,
 		waveStartedAtTick: 1,
-		waveSpawned:       15,
+		waveSpawned:       currentWaveCountForTest(t, 1),
 		nextWaveTick:      1,
 		path: []gameobject.Position{
 			{X: 0, Y: 0},
@@ -1131,6 +1307,15 @@ func TestAdvanceRuntimeTickWaitsThreeSecondsAfterWaveCleared(t *testing.T) {
 	}
 }
 
+func currentWaveCountForTest(t *testing.T, waveNumber int) int {
+	t.Helper()
+	wave, ok := currentWaveDefinition(waveNumber)
+	if !ok {
+		t.Fatalf("wave %d not found", waveNumber)
+	}
+	return wave.Count()
+}
+
 func TestAdvanceRuntimeTickSpawnsEnemiesEverySecond(t *testing.T) {
 	runtime := runtimeSession{
 		session: gamesession.State{
@@ -1152,44 +1337,129 @@ func TestAdvanceRuntimeTickSpawnsEnemiesEverySecond(t *testing.T) {
 		t.Fatalf("expected first tick to spawn one enemy, got %d", len(runtime.enemies))
 	}
 
-	for i := 0; i < 39; i++ {
+	for i := 0; i < 21; i++ {
 		advanceRuntimeTick(&runtime, time.Now().UTC())
 	}
 	if len(runtime.enemies) != 1 {
-		t.Fatalf("expected no second enemy before two seconds, got %d", len(runtime.enemies))
+		t.Fatalf("expected no second enemy before 22 ticks, got %d", len(runtime.enemies))
 	}
 
 	advanceRuntimeTick(&runtime, time.Now().UTC())
 	if len(runtime.enemies) != 2 {
-		t.Fatalf("expected second enemy after two seconds, got %d", len(runtime.enemies))
+		t.Fatalf("expected second enemy after 22 ticks, got %d", len(runtime.enemies))
+	}
+}
+
+func TestEnemySpawnIntervalTicksForWaveReducesByWave(t *testing.T) {
+	cases := []struct {
+		wave     int
+		interval int64
+	}{
+		{wave: 1, interval: 22},
+		{wave: 2, interval: 19},
+		{wave: 3, interval: 16},
+		{wave: 4, interval: 13},
+		{wave: 5, interval: 10},
+		{wave: 6, interval: 8},
+	}
+
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("wave_%d", tc.wave), func(t *testing.T) {
+			if got := enemySpawnIntervalTicksForWave(tc.wave); got != tc.interval {
+				t.Fatalf("expected interval %d, got %d", tc.interval, got)
+			}
+		})
+	}
+}
+
+func TestAdvanceRuntimeTickSpawnsLaterWavesFaster(t *testing.T) {
+	runtime := runtimeSession{
+		session: gamesession.State{
+			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			LevelID:   "11111111-1111-1111-1111-111111111111",
+			Health:    gamesession.InitialHealth,
+			Wave:      1,
+		},
+		economy:      gamesession.NewEconomy(100),
+		loopStarted:  true,
+		nextWaveTick: 1,
+		path: []gameobject.Position{
+			{X: 0, Y: 0},
+			{X: 100, Y: 0},
+		},
+	}
+
+	advanceRuntimeTick(&runtime, time.Now().UTC())
+	if runtime.session.Wave != 2 || len(runtime.enemies) != 1 {
+		t.Fatalf("expected wave 2 first spawn, wave=%d enemies=%d", runtime.session.Wave, len(runtime.enemies))
+	}
+
+	for i := 0; i < 18; i++ {
+		advanceRuntimeTick(&runtime, time.Now().UTC())
+	}
+	if len(runtime.enemies) != 1 {
+		t.Fatalf("expected no second wave 2 enemy before 19 ticks, got %d", len(runtime.enemies))
+	}
+
+	advanceRuntimeTick(&runtime, time.Now().UTC())
+	if len(runtime.enemies) != 2 {
+		t.Fatalf("expected second wave 2 enemy after 19 ticks, got %d", len(runtime.enemies))
 	}
 }
 
 func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 	waves := waveDefinitions()
-	expectedTypes := map[int][]string{
-		1: {gameobject.EnemyTypeSmog},
+	type expectedGroup struct {
+		enemyType string
+		count     int
+	}
+	expectedGroups := map[int][]expectedGroup{
+		1: {
+			{enemyType: gameobject.EnemyTypeSmog, count: 20},
+		},
 		2: {
-			gameobject.EnemyTypeSmog,
-			gameobject.EnemyTypeNoise,
-			gameobject.EnemyTypeSmog,
-			gameobject.EnemyTypeNoise,
+			{enemyType: gameobject.EnemyTypeSmog, count: 10},
+			{enemyType: gameobject.EnemyTypeNoise, count: 10},
+			{enemyType: gameobject.EnemyTypeSmog, count: 10},
+			{enemyType: gameobject.EnemyTypeNoise, count: 10},
 		},
 		3: {
-			gameobject.EnemyTypeJunk,
-			gameobject.EnemyTypeSmog,
-			gameobject.EnemyTypeNoise,
-			gameobject.EnemyTypeJunk,
-			gameobject.EnemyTypeSmog,
-			gameobject.EnemyTypeNoise,
-			gameobject.EnemyTypeJunk,
-			gameobject.EnemyTypeSmog,
-			gameobject.EnemyTypeNoise,
+			{enemyType: gameobject.EnemyTypeJunk, count: 1},
+			{enemyType: gameobject.EnemyTypeSmog, count: 10},
+			{enemyType: gameobject.EnemyTypeNoise, count: 10},
+			{enemyType: gameobject.EnemyTypeJunk, count: 1},
+			{enemyType: gameobject.EnemyTypeSmog, count: 10},
+			{enemyType: gameobject.EnemyTypeNoise, count: 10},
+			{enemyType: gameobject.EnemyTypeJunk, count: 1},
+			{enemyType: gameobject.EnemyTypeSmog, count: 10},
+			{enemyType: gameobject.EnemyTypeNoise, count: 10},
+		},
+		4: {
+			{enemyType: gameobject.EnemyTypeJunk, count: 1},
+			{enemyType: gameobject.EnemyTypeSmog, count: 15},
+			{enemyType: gameobject.EnemyTypeNoise, count: 20},
+			{enemyType: gameobject.EnemyTypeJunk, count: 2},
+			{enemyType: gameobject.EnemyTypeSmog, count: 15},
+			{enemyType: gameobject.EnemyTypeNoise, count: 20},
+			{enemyType: gameobject.EnemyTypeJunk, count: 2},
+			{enemyType: gameobject.EnemyTypeSmog, count: 15},
+			{enemyType: gameobject.EnemyTypeNoise, count: 20},
+		},
+		5: {
+			{enemyType: gameobject.EnemyTypeJunk, count: 3},
+			{enemyType: gameobject.EnemyTypeSmog, count: 20},
+			{enemyType: gameobject.EnemyTypeNoise, count: 20},
+			{enemyType: gameobject.EnemyTypeJunk, count: 3},
+			{enemyType: gameobject.EnemyTypeSmog, count: 20},
+			{enemyType: gameobject.EnemyTypeNoise, count: 20},
+			{enemyType: gameobject.EnemyTypeJunk, count: 3},
+			{enemyType: gameobject.EnemyTypeSmog, count: 20},
+			{enemyType: gameobject.EnemyTypeNoise, count: 20},
 		},
 	}
 
-	if len(waves) != len(expectedTypes) {
-		t.Fatalf("expected %d waves, got %d", len(expectedTypes), len(waves))
+	if len(waves) != len(expectedGroups) {
+		t.Fatalf("expected %d waves, got %d", len(expectedGroups), len(waves))
 	}
 	for i, wave := range waves {
 		if wave.Wave != i+1 {
@@ -1198,13 +1468,16 @@ func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 		if wave.Count() <= 0 {
 			t.Fatalf("wave %d: expected at least one enemy, got %d", wave.Wave, wave.Count())
 		}
-		want := expectedTypes[wave.Wave]
+		want := expectedGroups[wave.Wave]
 		if len(wave.Groups) != len(want) {
 			t.Fatalf("wave %d: expected %d groups, got %d", wave.Wave, len(want), len(wave.Groups))
 		}
 		for j, g := range wave.Groups {
-			if g.Type != want[j] {
-				t.Fatalf("wave %d group %d: expected type %q, got %q", wave.Wave, j, want[j], g.Type)
+			if g.Type != want[j].enemyType {
+				t.Fatalf("wave %d group %d: expected type %q, got %q", wave.Wave, j, want[j].enemyType, g.Type)
+			}
+			if g.Count != want[j].count {
+				t.Fatalf("wave %d group %d: expected count %d, got %d", wave.Wave, j, want[j].count, g.Count)
 			}
 			if g.Health <= 0 {
 				t.Fatalf("wave %d %s: expected positive health, got %d", wave.Wave, g.Type, g.Health)
@@ -1227,6 +1500,8 @@ func TestWaveDefinitionsMixEnemyTypesByWave(t *testing.T) {
 }
 
 func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
+	waves := waveDefinitions()
+	finalWave := waves[len(waves)-1]
 	levels := &fakeLevelRepository{
 		bootstrap: repository.LevelBootstrap{
 			LevelID:             "11111111-1111-1111-1111-111111111111",
@@ -1246,13 +1521,13 @@ func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
 			SubChapterID: "55555555-5555-5555-5555-555555555555",
 			Health:       gamesession.InitialHealth,
 			Essence:      gamesession.InitialEssence,
-			Wave:         3,
+			Wave:         finalWave.Wave,
 			Tick:         200,
 			StartedAt:    time.Now().UTC(),
 			UpdatedAt:    time.Now().UTC(),
 		},
 		waveStartedAtTick: 120,
-		waveSpawned:       36,
+		waveSpawned:       finalWave.Count(),
 		nextWaveTick:      120,
 	}
 	handler := NewWithGenerationCachesAndSessions(config.Config{}, levels, nil, nil, nil, nil, nil, sessions).Router()
@@ -1277,6 +1552,7 @@ func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
 		t.Fatalf("WriteJSON session start failed: %v", err)
 	}
 	readMessageOfType(t, conn, "game.session.started")
+	runGameSession(t, conn)
 
 	victory := readMessageOfType(t, conn, "game.victory")
 	body, err := json.Marshal(victory.Data)
@@ -1290,8 +1566,8 @@ func TestWebsocketSendsVictoryWhenFinalWaveClears(t *testing.T) {
 	if victoryState.Reason != "all_waves_cleared" {
 		t.Fatalf("unexpected victory reason %q", victoryState.Reason)
 	}
-	if victoryState.Wave != 3 {
-		t.Fatalf("expected victory on wave 3, got %d", victoryState.Wave)
+	if victoryState.Wave != finalWave.Wave {
+		t.Fatalf("expected victory on wave %d, got %d", finalWave.Wave, victoryState.Wave)
 	}
 }
 
@@ -1320,15 +1596,15 @@ func TestAdvanceRuntimeTickReportsBirdAttackAndEnemyDamage(t *testing.T) {
 	if len(runtime.projectiles) != 0 {
 		t.Fatalf("expected immediate attack to create no active projectiles, got %d active projectiles", len(runtime.projectiles))
 	}
-	if len(runtime.enemies) != 1 || runtime.enemies[0].Health != 20 {
-		t.Fatalf("expected enemy health 20, got %+v", runtime.enemies)
+	if len(runtime.enemies) != 1 || runtime.enemies[0].Health != 10 {
+		t.Fatalf("expected enemy health 10, got %+v", runtime.enemies)
 	}
 	var sawAttack, sawDamage bool
 	for _, event := range events {
 		if event.Type == "bird.attack" && event.BirdID == "bird-1" && event.EnemyID == "enemy-1" {
 			sawAttack = true
 		}
-		if event.Type == "enemy.damage" && event.EnemyID == "enemy-1" && event.Health == 20 {
+		if event.Type == "enemy.damage" && event.EnemyID == "enemy-1" && event.Health == 10 {
 			sawDamage = true
 		}
 	}
@@ -1364,7 +1640,7 @@ func TestAdvanceRuntimeTickSplashAttackDamagesEnemiesInFeatherFan(t *testing.T) 
 	if len(runtime.projectiles) != 0 {
 		t.Fatalf("expected splash attack to create no active projectiles, got %d", len(runtime.projectiles))
 	}
-	if runtime.enemies[0].Health != 23 || runtime.enemies[1].Health != 23 || runtime.enemies[2].Health != 30 {
+	if runtime.enemies[0].Health != 10 || runtime.enemies[1].Health != 10 || runtime.enemies[2].Health != 30 {
 		t.Fatalf("unexpected enemy health after splash: %+v", runtime.enemies)
 	}
 	damageEvents := 0
@@ -1375,6 +1651,39 @@ func TestAdvanceRuntimeTickSplashAttackDamagesEnemiesInFeatherFan(t *testing.T) 
 	}
 	if damageEvents != 2 {
 		t.Fatalf("expected two splash damage events, got %+v", events)
+	}
+}
+
+func TestApplyAttackHitsAwardsEssenceForKilledEnemies(t *testing.T) {
+	runtime := runtimeSession{
+		session: gamesession.State{
+			Essence: 100,
+		},
+		economy: gamesession.NewEconomy(100),
+		enemies: []gameobject.Enemy{
+			{ID: "smog", Type: gameobject.EnemyTypeSmog, Health: 5},
+			{ID: "noise", Type: gameobject.EnemyTypeNoise, Health: 2},
+			{ID: "junk", Type: gameobject.EnemyTypeJunk, Health: 15},
+			{ID: "survivor", Type: gameobject.EnemyTypeSmog, Health: 20},
+		},
+	}
+
+	events := applyAttackHits(&runtime, []gameobject.AttackHit{
+		{EnemyID: "smog", Damage: 5},
+		{EnemyID: "smog", Damage: 5},
+		{EnemyID: "noise", Damage: 2},
+		{EnemyID: "junk", Damage: 15},
+		{EnemyID: "survivor", Damage: 10},
+	})
+
+	if runtime.economy.Essence != 137 || runtime.session.Essence != 137 {
+		t.Fatalf("expected essence 137 after kill rewards, got economy=%d session=%d", runtime.economy.Essence, runtime.session.Essence)
+	}
+	if runtime.enemies[3].Health != 10 {
+		t.Fatalf("expected survivor to remain at 10 health, got %+v", runtime.enemies[3])
+	}
+	if len(events) != 4 {
+		t.Fatalf("expected four damage events, got %+v", events)
 	}
 }
 
@@ -1733,6 +2042,15 @@ func dialGameWebsocket(t *testing.T, serverURL string) *websocket.Conn {
 	return conn
 }
 
+func runGameSession(t *testing.T, conn interface {
+	WriteJSON(any) error
+}) {
+	t.Helper()
+	if err := conn.WriteJSON(Message{Type: "game.session.run"}); err != nil {
+		t.Fatalf("WriteJSON game session run failed: %v", err)
+	}
+}
+
 type fakeStarter struct {
 	result       generation.StartResult
 	userID       string
@@ -1755,6 +2073,9 @@ type fakeGameSessionStore struct {
 	waveStartedAtTick int64
 	waveSpawned       int
 	nextWaveTick      int64
+	lastQuizStartedAt time.Time
+	loopStarted       bool
+	loopPaused        bool
 	deletedSessionID  string
 }
 
@@ -1788,10 +2109,12 @@ func (s *fakeGameSessionStore) LoadRuntimeState(_ context.Context, _ string) (ga
 		Essence:           s.state.Essence,
 		Wave:              s.state.Wave,
 		Tick:              s.state.Tick,
-		LoopStarted:       true,
+		LoopStarted:       s.loopStarted,
+		LoopPaused:        s.loopPaused,
 		WaveStartedAtTick: s.waveStartedAtTick,
 		WaveSpawned:       s.waveSpawned,
 		NextWaveTick:      s.nextWaveTick,
+		LastQuizStartedAt: s.lastQuizStartedAt,
 		Birds:             append([]gamesession.StoredBird{}, s.birds...),
 		Enemies:           append([]gamesession.StoredEnemy{}, s.enemies...),
 		Projectiles:       append([]gamesession.StoredProjectile{}, s.projectiles...),
@@ -1807,9 +2130,12 @@ func (s *fakeGameSessionStore) SaveRuntimeState(_ context.Context, _ string, run
 	s.state.Essence = runtime.Essence
 	s.state.Wave = runtime.Wave
 	s.state.Tick = runtime.Tick
+	s.loopStarted = runtime.LoopStarted
+	s.loopPaused = runtime.LoopPaused
 	s.waveStartedAtTick = runtime.WaveStartedAtTick
 	s.waveSpawned = runtime.WaveSpawned
 	s.nextWaveTick = runtime.NextWaveTick
+	s.lastQuizStartedAt = runtime.LastQuizStartedAt
 	return nil
 }
 
