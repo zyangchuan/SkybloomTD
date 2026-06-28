@@ -32,6 +32,7 @@ const gameTickInterval = 50 * time.Millisecond
 const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
+const mergeTowerAction = "merge_tower"
 const awardQuizEssenceAction = "award_quiz_essence"
 const pauseGameAction = "pause_game"
 const resumeGameAction = "resume_game"
@@ -226,6 +227,11 @@ type placeTowerRequest struct {
 	Y        int    `json:"y"`
 }
 
+type mergeTowerRequest struct {
+	SourceBirdID string `json:"source_bird_id"`
+	TargetBirdID string `json:"target_bird_id"`
+}
+
 type gameExitRequest struct {
 	SessionID string `json:"session_id"`
 }
@@ -238,6 +244,7 @@ type quizAnswerRequest struct {
 type clientAction struct {
 	Type          string
 	PlaceTower    placeTowerRequest
+	MergeTower    mergeTowerRequest
 	EssenceReward int
 	Result        chan actionResult
 }
@@ -568,6 +575,31 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 					return
 				}
 			}
+		case "game.action.merge_tower":
+			action, err := decodeMergeTowerAction(message.Data)
+			if err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, mergeTowerAction, err.Error()); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if gameLoop == nil || gameLoop.stopped() {
+				gameLoop = nil
+				if writeErr := writeActionRejected(conn, writeMu, mergeTowerAction, "game session is not running"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			select {
+			case gameLoop.actions <- clientAction{Type: mergeTowerAction, MergeTower: action}:
+			default:
+				if writeErr := writeActionRejected(conn, writeMu, mergeTowerAction, "action queue is full"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+			}
 		case "ping":
 			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "pong"}); err != nil {
 				log.Printf("websocket pong write failed: %v", err)
@@ -784,7 +816,7 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 			return
 		case action := <-actions:
 			switch action.Type {
-			case placeTowerAction:
+			case placeTowerAction, mergeTowerAction:
 				if err := s.processClientAction(ctx, &runtime, action); err != nil {
 					if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
 						log.Printf("websocket action rejection write failed: %v", writeErr)
@@ -792,7 +824,11 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 					}
 					continue
 				}
-				if err := writeActionAccepted(conn, writeMu, action.Type, runtime.birds[len(runtime.birds)-1]); err != nil {
+				removedBirdIDs := []string(nil)
+				if action.Type == mergeTowerAction {
+					removedBirdIDs = []string{action.MergeTower.SourceBirdID, action.MergeTower.TargetBirdID}
+				}
+				if err := writeActionAccepted(conn, writeMu, action.Type, runtime.birds[len(runtime.birds)-1], removedBirdIDs); err != nil {
 					log.Printf("websocket action accepted write failed: %v", err)
 					return
 				}
@@ -1071,6 +1107,8 @@ func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSessio
 	switch action.Type {
 	case placeTowerAction:
 		return s.placeTower(ctx, runtime, action.PlaceTower)
+	case mergeTowerAction:
+		return s.mergeTower(ctx, runtime, action.MergeTower)
 	default:
 		return errors.New("unsupported action")
 	}
@@ -1084,6 +1122,9 @@ func (s *Server) placeTower(ctx context.Context, runtime *runtimeSession, reques
 	stats, err := gameobject.BirdStatsForType(birdType)
 	if err != nil {
 		return errors.New("unknown bird type")
+	}
+	if gameobject.IsHybridBirdType(birdType) {
+		return errors.New("hybrid birds must be created by merging")
 	}
 	if !isInsideMap(runtime.levelMap, request.X, request.Y) {
 		return errors.New("tower position is outside the map")
@@ -1115,6 +1156,63 @@ func (s *Server) placeTower(ctx context.Context, runtime *runtimeSession, reques
 		runtime.birds = previousBirds
 		log.Printf("game session placement save failed session_id=%s: %v", runtime.session.SessionID, err)
 		return errors.New("failed to save tower placement")
+	}
+
+	return nil
+}
+
+func (s *Server) mergeTower(ctx context.Context, runtime *runtimeSession, request mergeTowerRequest) error {
+	if runtime == nil {
+		return errors.New("game session is not running")
+	}
+	sourceID := strings.TrimSpace(request.SourceBirdID)
+	targetID := strings.TrimSpace(request.TargetBirdID)
+	if sourceID == "" {
+		return errors.New("source_bird_id is required")
+	}
+	if targetID == "" {
+		return errors.New("target_bird_id is required")
+	}
+	if sourceID == targetID {
+		return errors.New("source and target birds must be different")
+	}
+
+	sourceIndex := findPlacedBirdIndexByID(runtime.birds, sourceID)
+	if sourceIndex < 0 {
+		return errors.New("source bird not found")
+	}
+	targetIndex := findPlacedBirdIndexByID(runtime.birds, targetID)
+	if targetIndex < 0 {
+		return errors.New("target bird not found")
+	}
+
+	source := runtime.birds[sourceIndex]
+	target := runtime.birds[targetIndex]
+	hybridType, ok := hybridBirdTypeForPair(source.birdType, target.birdType)
+	if !ok {
+		return errors.New("bird types cannot be merged")
+	}
+
+	hybrid, err := gameobject.NewBird(uuid.NewString(), hybridType, target.bird.Position)
+	if err != nil {
+		return errors.New("failed to create hybrid bird")
+	}
+
+	previousBirds := runtime.birds
+	nextBirds := make([]placedBird, 0, len(runtime.birds)-1)
+	for i, placed := range runtime.birds {
+		if i == sourceIndex || i == targetIndex {
+			continue
+		}
+		nextBirds = append(nextBirds, placed)
+	}
+	nextBirds = append(nextBirds, placedBird{birdType: hybridType, bird: hybrid})
+	runtime.birds = nextBirds
+
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.birds = previousBirds
+		log.Printf("game session merge save failed session_id=%s: %v", runtime.session.SessionID, err)
+		return errors.New("failed to save tower merge")
 	}
 
 	return nil
@@ -1608,6 +1706,22 @@ func decodePlaceTowerAction(data any) (placeTowerRequest, error) {
 	return request, nil
 }
 
+func decodeMergeTowerAction(data any) (mergeTowerRequest, error) {
+	var request mergeTowerRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return mergeTowerRequest{}, errors.New("merge tower action data must include source_bird_id and target_bird_id")
+	}
+	request.SourceBirdID = strings.TrimSpace(request.SourceBirdID)
+	request.TargetBirdID = strings.TrimSpace(request.TargetBirdID)
+	if request.SourceBirdID == "" {
+		return mergeTowerRequest{}, errors.New("source_bird_id is required")
+	}
+	if request.TargetBirdID == "" {
+		return mergeTowerRequest{}, errors.New("target_bird_id is required")
+	}
+	return request, nil
+}
+
 func decodeGameExit(data any) (gameExitRequest, error) {
 	var request gameExitRequest
 	if data == nil {
@@ -1698,6 +1812,33 @@ func isOccupied(birds []placedBird, x int, y int) bool {
 		}
 	}
 	return false
+}
+
+func findPlacedBirdIndexByID(birds []placedBird, id string) int {
+	for i := range birds {
+		if birds[i].bird.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func hybridBirdTypeForPair(first string, second string) (string, bool) {
+	if first > second {
+		first, second = second, first
+	}
+	switch first + "+" + second {
+	case gameobject.BirdTypeEagle + "+" + gameobject.BirdTypeSparrow:
+		return gameobject.BirdTypeFalcon, true
+	case gameobject.BirdTypePeacock + "+" + gameobject.BirdTypeWoodpecker:
+		return gameobject.BirdTypeKingfisher, true
+	case gameobject.BirdTypeEagle + "+" + gameobject.BirdTypePeacock:
+		return gameobject.BirdTypePhoenix, true
+	case gameobject.BirdTypeEagle + "+" + gameobject.BirdTypeKingfisher:
+		return gameobject.BirdTypeSunGod, true
+	default:
+		return "", false
+	}
 }
 
 func placedBirdStates(birds []placedBird) []PlacedBirdState {
@@ -1858,20 +1999,24 @@ func placedBirdsFromStored(stored []gamesession.StoredBird) ([]placedBird, error
 	return birds, nil
 }
 
-func writeActionAccepted(conn *websocket.Conn, writeMu *sync.Mutex, action string, bird placedBird) error {
+func writeActionAccepted(conn *websocket.Conn, writeMu *sync.Mutex, action string, bird placedBird, removedBirdIDs []string) error {
+	data := map[string]any{
+		"action":  action,
+		"bird_id": bird.bird.ID,
+		"bird": PlacedBirdState{
+			ID:              bird.bird.ID,
+			Type:            bird.birdType,
+			Position:        bird.bird.Position,
+			Stats:           bird.bird.Stats,
+			LastFiredAtTick: bird.bird.LastFiredAtTick,
+		},
+	}
+	if len(removedBirdIDs) > 0 {
+		data["removed_bird_ids"] = removedBirdIDs
+	}
 	return writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.action.accepted",
-		Data: map[string]any{
-			"action":  action,
-			"bird_id": bird.bird.ID,
-			"bird": PlacedBirdState{
-				ID:              bird.bird.ID,
-				Type:            bird.birdType,
-				Position:        bird.bird.Position,
-				Stats:           bird.bird.Stats,
-				LastFiredAtTick: bird.bird.LastFiredAtTick,
-			},
-		},
+		Data: data,
 	})
 }
 

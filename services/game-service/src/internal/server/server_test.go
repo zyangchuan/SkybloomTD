@@ -207,8 +207,8 @@ func TestWebsocketSessionStartInitializesStateAndTicks(t *testing.T) {
 	if startedState.Tick != 0 {
 		t.Fatalf("expected tick 0, got %d", startedState.Tick)
 	}
-	if len(startedState.BirdTypes) != 4 {
-		t.Fatalf("expected 4 bird type infos, got %d", len(startedState.BirdTypes))
+	if len(startedState.BirdTypes) != 8 {
+		t.Fatalf("expected 8 bird type infos, got %d", len(startedState.BirdTypes))
 	}
 	if len(startedState.EnemyTypes) != 3 {
 		t.Fatalf("expected 3 enemy type infos, got %d", len(startedState.EnemyTypes))

@@ -215,6 +215,25 @@ func TestBirdFactoryReturnsStatsAndBehaviourForEachBirdType(t *testing.T) {
 			stats:    BirdStats{Damage: 7, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.0, Range: 3.5, Cost: 90},
 			splash:   true,
 		},
+		{
+			birdType: BirdTypeFalcon,
+			stats:    BirdStats{Damage: 24, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.9, Range: 6.0, Cost: 0},
+		},
+		{
+			birdType: BirdTypeKingfisher,
+			stats:    BirdStats{Damage: 9, ProjectileSpeed: StandardProjectileSpeed, FireRate: 3.0, Range: 4.0, Cost: 0},
+			splash:   true,
+		},
+		{
+			birdType: BirdTypePhoenix,
+			stats:    BirdStats{Damage: 28, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.8, Range: 6.5, Cost: 0},
+			splash:   true,
+		},
+		{
+			birdType: BirdTypeSunGod,
+			stats:    BirdStats{Damage: 32, ProjectileSpeed: StandardProjectileSpeed, FireRate: 1.6, Range: 7.0, Cost: 0},
+			splash:   true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -238,6 +257,25 @@ func TestBirdFactoryReturnsStatsAndBehaviourForEachBirdType(t *testing.T) {
 				t.Fatalf("expected single attack, got %T", bird.AttackBehaviour)
 			}
 		})
+	}
+}
+
+func TestBirdDefinitionsBackBirdTypeCatalog(t *testing.T) {
+	types := BirdTypes()
+	if len(types) != len(birdDefinitions) {
+		t.Fatalf("expected catalog length %d, got %d", len(birdDefinitions), len(types))
+	}
+	for _, birdType := range types {
+		definition, err := BirdDefinitionForType(birdType)
+		if err != nil {
+			t.Fatalf("BirdDefinitionForType(%q) failed: %v", birdType, err)
+		}
+		if definition.Type != birdType {
+			t.Fatalf("expected definition type %q, got %q", birdType, definition.Type)
+		}
+		if definition.AttackType != AttackTypeSingle && definition.AttackType != AttackTypeSplash {
+			t.Fatalf("unexpected attack type %q for %q", definition.AttackType, birdType)
+		}
 	}
 }
 
@@ -270,6 +308,28 @@ func TestEnemyStatsForTypeReturnsStatsForEachEnemyType(t *testing.T) {
 				t.Fatalf("unexpected stats %+v", stats)
 			}
 		})
+	}
+}
+
+func TestEnemyDefinitionsBackEnemyTypeCatalog(t *testing.T) {
+	types := EnemyTypes()
+	if len(types) != len(enemyDefinitions) {
+		t.Fatalf("expected catalog length %d, got %d", len(enemyDefinitions), len(types))
+	}
+	for _, enemyType := range types {
+		definition, err := EnemyDefinitionForType(enemyType)
+		if err != nil {
+			t.Fatalf("EnemyDefinitionForType(%q) failed: %v", enemyType, err)
+		}
+		if definition.Type != enemyType {
+			t.Fatalf("expected definition type %q, got %q", enemyType, definition.Type)
+		}
+		if definition.Stats.Health <= 0 {
+			t.Fatalf("expected positive health for %q, got %d", enemyType, definition.Stats.Health)
+		}
+		if definition.Stats.Speed <= 0 {
+			t.Fatalf("expected positive speed for %q, got %f", enemyType, definition.Stats.Speed)
+		}
 	}
 }
 

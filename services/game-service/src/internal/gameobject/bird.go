@@ -1,20 +1,7 @@
 package gameobject
 
 import (
-	"errors"
 	"math"
-)
-
-const (
-	BirdTypeSparrow    = "sparrow"
-	BirdTypeWoodpecker = "woodpecker"
-	BirdTypeEagle      = "eagle"
-	BirdTypePeacock    = "peacock"
-
-	AttackTypeSingle = "single"
-	AttackTypeSplash = "splash"
-
-	StandardProjectileSpeed = 8.0
 )
 
 type Bird struct {
@@ -38,91 +25,21 @@ type AttackBehaviour interface {
 }
 
 func NewBird(id string, birdType string, position Position) (Bird, error) {
-	stats, err := BirdStatsForType(birdType)
+	definition, err := BirdDefinitionForType(birdType)
 	if err != nil {
 		return Bird{}, err
 	}
-	behaviour, err := AttackBehaviourForType(birdType)
+	behaviour, err := AttackBehaviourForAttackType(definition.AttackType)
 	if err != nil {
 		return Bird{}, err
 	}
 	return Bird{
 		ID:              id,
 		Position:        position,
-		Stats:           stats,
+		Stats:           definition.Stats,
 		AttackBehaviour: behaviour,
 		LastFiredAtTick: -1,
 	}, nil
-}
-
-func BirdStatsForType(birdType string) (BirdStats, error) {
-	switch birdType {
-	case BirdTypeSparrow:
-		return BirdStats{
-			Damage:          10,
-			ProjectileSpeed: StandardProjectileSpeed,
-			FireRate:        1.0,
-			Range:           3.5,
-			Cost:            50,
-		}, nil
-	case BirdTypeWoodpecker:
-		return BirdStats{
-			Damage:          6,
-			ProjectileSpeed: StandardProjectileSpeed,
-			FireRate:        2.0,
-			Range:           3.5,
-			Cost:            65,
-		}, nil
-	case BirdTypeEagle:
-		return BirdStats{
-			Damage:          30,
-			ProjectileSpeed: StandardProjectileSpeed,
-			FireRate:        0.4,
-			Range:           6.0,
-			Cost:            130,
-		}, nil
-	case BirdTypePeacock:
-		return BirdStats{
-			Damage:          7,
-			ProjectileSpeed: StandardProjectileSpeed,
-			FireRate:        1.0,
-			Range:           3.5,
-			Cost:            90,
-		}, nil
-	default:
-		return BirdStats{}, errors.New("unknown bird type")
-	}
-}
-
-func AttackBehaviourForType(birdType string) (AttackBehaviour, error) {
-	switch birdType {
-	case BirdTypeSparrow, BirdTypeWoodpecker, BirdTypeEagle:
-		return SingleAttack{}, nil
-	case BirdTypePeacock:
-		return SplashAttack{}, nil
-	default:
-		return nil, errors.New("unknown bird type")
-	}
-}
-
-func AttackTypeForBirdType(birdType string) (string, error) {
-	switch birdType {
-	case BirdTypeSparrow, BirdTypeWoodpecker, BirdTypeEagle:
-		return AttackTypeSingle, nil
-	case BirdTypePeacock:
-		return AttackTypeSplash, nil
-	default:
-		return "", errors.New("unknown bird type")
-	}
-}
-
-func BirdTypes() []string {
-	return []string{
-		BirdTypeSparrow,
-		BirdTypeWoodpecker,
-		BirdTypeEagle,
-		BirdTypePeacock,
-	}
 }
 
 func (b Bird) GetPosition() Position {
