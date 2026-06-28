@@ -51,6 +51,7 @@ export default class GameScene extends Phaser.Scene {
       this,
       (birdType, x, y) => this.sendWs('game.action.place_tower', { bird_type: birdType, x, y }),
       (sourceId, targetId) => this.sendWs('game.action.merge_tower', { source_bird_id: sourceId, target_bird_id: targetId }),
+      (sourceBirdType, targetId) => this.sendWs('game.action.merge_tower', { source_bird_type: sourceBirdType, target_bird_id: targetId }),
       { tileSize: this.tileSize, offsetX: this.offsetX, offsetY: this.offsetY, gridWidth: this.gridWidth, gridHeight: this.gridHeight },
       this.enemyPath, this.obstacles, this.entities.towers,
     );
@@ -61,9 +62,9 @@ export default class GameScene extends Phaser.Scene {
     this.setupShutdown();
   }
 
-  update() {
+  update(_time: number, delta: number) {
     if (this.overlay.isPaused()) return;
-    this.entities.interpolate();
+    this.entities.interpolate(delta);
   }
 
   // ─── Grid ────────────────────────────────────────────────────────────────────
@@ -122,8 +123,9 @@ export default class GameScene extends Phaser.Scene {
     if (state.session_id !== undefined) this.sessionId = state.session_id;
     this.hud.update({ health: state.health, essence: state.essence, wave: state.wave });
     if (state.birds       !== undefined) this.entities.syncTowers(state.birds);
-    if (state.enemies     !== undefined) this.entities.syncEnemies(state.enemies);
     if (state.projectiles !== undefined) this.entities.syncProjectiles(state.projectiles);
+    if (state.events      !== undefined) this.entities.processEvents(state.events);
+    if (state.enemies     !== undefined) this.entities.syncEnemies(state.enemies);
   }
 
   // ─── UI feedback ─────────────────────────────────────────────────────────────

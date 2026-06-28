@@ -247,7 +247,7 @@ func TestWebsocketPlaceTowerOccupiedCellReturnsRejection(t *testing.T) {
 					Damage:          10,
 					ProjectileSpeed: gameobject.StandardProjectileSpeed,
 					FireRate:        1,
-					Range:           3.5,
+					Range:           2.1,
 					Cost:            50,
 				},
 			},
@@ -447,26 +447,72 @@ func TestWebsocketMergeTowerRecipesSucceedInEitherOrder(t *testing.T) {
 	}
 }
 
+func TestWebsocketMergeTowerBoughtSourceConsumesEssenceAndRemovesTarget(t *testing.T) {
+	stats, err := gameobject.BirdStatsForType(gameobject.BirdTypeEagle)
+	if err != nil {
+		t.Fatalf("load eagle stats: %v", err)
+	}
+	sessions := quietSession()
+	sessions.state.Essence = stats.Cost + 20
+	sessions.birds = []gamesession.StoredBird{
+		storedBirdForTest("target-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 2, Y: 2}),
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, standardLevels(), smallMap(), nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	startSession(t, conn)
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.action.merge_tower",
+		Data: map[string]any{"source_bird_type": gameobject.BirdTypeEagle, "target_bird_id": "target-bird"},
+	}); err != nil {
+		t.Fatalf("WriteJSON failed: %v", err)
+	}
+
+	accepted := readMessageOfType(t, conn, "game.action.accepted")
+	acceptedData := decodeAcceptedAction(t, accepted.Data)
+	if acceptedData.Action != mergeTowerAction {
+		t.Fatalf("unexpected accepted action %q", acceptedData.Action)
+	}
+	if acceptedData.Bird.Type != gameobject.BirdTypeFalcon {
+		t.Fatalf("expected falcon, got %q", acceptedData.Bird.Type)
+	}
+	if len(acceptedData.RemovedBirdIDs) != 1 || acceptedData.RemovedBirdIDs[0] != "target-bird" {
+		t.Fatalf("expected target bird removal, got %v", acceptedData.RemovedBirdIDs)
+	}
+	if sessions.economy.Essence != 20 {
+		t.Fatalf("expected essence 20 after buying source bird, got %d", sessions.economy.Essence)
+	}
+	if len(sessions.birds) != 1 || sessions.birds[0].Type != gameobject.BirdTypeFalcon {
+		t.Fatalf("expected one persisted falcon, got %+v", sessions.birds)
+	}
+	if sessions.birds[0].Position.X != 2 || sessions.birds[0].Position.Y != 2 {
+		t.Fatalf("expected hybrid at target position, got %+v", sessions.birds[0].Position)
+	}
+}
+
 func TestWebsocketMergeTowerRejections(t *testing.T) {
 	cases := []struct {
 		name      string
 		birds     []gamesession.StoredBird
-		sourceID  string
-		targetID  string
+		data      map[string]any
 		wantError string
 	}{
 		{
 			name:      "unknown source",
 			birds:     []gamesession.StoredBird{storedBirdForTest("target-bird", gameobject.BirdTypeEagle, gameobject.Position{X: 2, Y: 2})},
-			sourceID:  "missing-bird",
-			targetID:  "target-bird",
+			data:      map[string]any{"source_bird_id": "missing-bird", "target_bird_id": "target-bird"},
 			wantError: "source bird not found",
 		},
 		{
 			name:      "unknown target",
 			birds:     []gamesession.StoredBird{storedBirdForTest("source-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 1, Y: 1})},
-			sourceID:  "source-bird",
-			targetID:  "missing-bird",
+			data:      map[string]any{"source_bird_id": "source-bird", "target_bird_id": "missing-bird"},
 			wantError: "target bird not found",
 		},
 		{
@@ -474,8 +520,7 @@ func TestWebsocketMergeTowerRejections(t *testing.T) {
 			birds: []gamesession.StoredBird{
 				storedBirdForTest("same-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 1, Y: 1}),
 			},
-			sourceID:  "same-bird",
-			targetID:  "same-bird",
+			data:      map[string]any{"source_bird_id": "same-bird", "target_bird_id": "same-bird"},
 			wantError: "source and target birds must be different",
 		},
 		{
@@ -484,9 +529,33 @@ func TestWebsocketMergeTowerRejections(t *testing.T) {
 				storedBirdForTest("source-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 1, Y: 1}),
 				storedBirdForTest("target-bird", gameobject.BirdTypeWoodpecker, gameobject.Position{X: 2, Y: 2}),
 			},
-			sourceID:  "source-bird",
-			targetID:  "target-bird",
+			data:      map[string]any{"source_bird_id": "source-bird", "target_bird_id": "target-bird"},
 			wantError: "bird types cannot be merged",
+		},
+		{
+			name: "bought source insufficient essence",
+			birds: []gamesession.StoredBird{
+				storedBirdForTest("target-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 2, Y: 2}),
+			},
+			data:      map[string]any{"source_bird_type": gameobject.BirdTypeEagle, "target_bird_id": "target-bird"},
+			wantError: "insufficient essence",
+		},
+		{
+			name: "bought source hybrid rejected",
+			birds: []gamesession.StoredBird{
+				storedBirdForTest("target-bird", gameobject.BirdTypeEagle, gameobject.Position{X: 2, Y: 2}),
+			},
+			data:      map[string]any{"source_bird_type": gameobject.BirdTypeKingfisher, "target_bird_id": "target-bird"},
+			wantError: "hybrid birds must be created by merging",
+		},
+		{
+			name: "both source fields rejected",
+			birds: []gamesession.StoredBird{
+				storedBirdForTest("source-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 1, Y: 1}),
+				storedBirdForTest("target-bird", gameobject.BirdTypeEagle, gameobject.Position{X: 2, Y: 2}),
+			},
+			data:      map[string]any{"source_bird_id": "source-bird", "source_bird_type": gameobject.BirdTypeSparrow, "target_bird_id": "target-bird"},
+			wantError: "merge must include exactly one of source_bird_id or source_bird_type",
 		},
 	}
 
@@ -494,6 +563,9 @@ func TestWebsocketMergeTowerRejections(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions := quietSession()
 			sessions.birds = tc.birds
+			if tc.name == "bought source insufficient essence" {
+				sessions.state.Essence = 10
+			}
 			handler := NewWithGenerationCachesAndSessions(config.Config{}, standardLevels(), smallMap(), nil, nil, nil, nil, sessions).Router()
 			httpServer := startHTTPServer(t, handler)
 			defer httpServer.Close()
@@ -506,7 +578,7 @@ func TestWebsocketMergeTowerRejections(t *testing.T) {
 
 			if err := conn.WriteJSON(Message{
 				Type: "game.action.merge_tower",
-				Data: map[string]any{"source_bird_id": tc.sourceID, "target_bird_id": tc.targetID},
+				Data: tc.data,
 			}); err != nil {
 				t.Fatalf("WriteJSON failed: %v", err)
 			}
@@ -750,7 +822,7 @@ func TestFireBirdsReturnsNilWhenHealthIsZero(t *testing.T) {
 }
 
 func TestTargetEnemyIndexPrioritizesHighestPathIndex(t *testing.T) {
-	// Sparrow range=3.5; bird is at origin. All three enemies are within range.
+	// Sparrow range=2.1; bird is at origin. All three enemies are within range.
 	// The one with the highest PathIndex should be selected.
 	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypeSparrow, gameobject.Position{X: 0, Y: 0})
 	if err != nil {
@@ -780,7 +852,7 @@ func TestTargetEnemyIndexReturnsNegativeOneWhenNoEnemiesInRange(t *testing.T) {
 		t.Fatalf("NewBird failed: %v", err)
 	}
 
-	// All enemies are far beyond the Sparrow's 3.5 range.
+	// All enemies are far beyond the Sparrow's 2.1 range.
 	enemies := []gameobject.Enemy{
 		{ID: "too-far", Health: 10, Position: gameobject.Position{X: 10, Y: 0}, PathIndex: 9},
 	}

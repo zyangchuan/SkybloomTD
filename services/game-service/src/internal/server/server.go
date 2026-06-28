@@ -228,8 +228,9 @@ type placeTowerRequest struct {
 }
 
 type mergeTowerRequest struct {
-	SourceBirdID string `json:"source_bird_id"`
-	TargetBirdID string `json:"target_bird_id"`
+	SourceBirdID   string `json:"source_bird_id,omitempty"`
+	SourceBirdType string `json:"source_bird_type,omitempty"`
+	TargetBirdID   string `json:"target_bird_id"`
 }
 
 type gameExitRequest struct {
@@ -754,7 +755,6 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		log.Printf("game session birds restore failed session_id=%s: %v", session.SessionID, err)
 		return nil, errors.New("failed to restore game session")
 	}
-	restoredProjectiles := projectilesFromStored(storedRuntime.Projectiles)
 	session.Health = storedRuntime.Health
 	session.Essence = storedRuntime.Essence
 	session.Wave = storedRuntime.Wave
@@ -765,7 +765,6 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		economy:     gamesession.NewEconomy(session.Essence),
 		birds:       restoredBirds,
 		enemies:     enemiesFromStored(storedRuntime.Enemies),
-		projectiles: restoredProjectiles,
 		levelMap:    levelMap,
 		path:        gamePath(levelMap),
 		loopStarted: storedRuntime.LoopStarted,
@@ -826,7 +825,7 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 				}
 				removedBirdIDs := []string(nil)
 				if action.Type == mergeTowerAction {
-					removedBirdIDs = []string{action.MergeTower.SourceBirdID, action.MergeTower.TargetBirdID}
+					removedBirdIDs = removedBirdIDsForMerge(action.MergeTower)
 				}
 				if err := writeActionAccepted(conn, writeMu, action.Type, runtime.birds[len(runtime.birds)-1], removedBirdIDs); err != nil {
 					log.Printf("websocket action accepted write failed: %v", err)
@@ -1166,17 +1165,24 @@ func (s *Server) mergeTower(ctx context.Context, runtime *runtimeSession, reques
 		return errors.New("game session is not running")
 	}
 	sourceID := strings.TrimSpace(request.SourceBirdID)
+	sourceType := strings.TrimSpace(request.SourceBirdType)
 	targetID := strings.TrimSpace(request.TargetBirdID)
-	if sourceID == "" {
-		return errors.New("source_bird_id is required")
-	}
 	if targetID == "" {
 		return errors.New("target_bird_id is required")
+	}
+	if (sourceID == "") == (sourceType == "") {
+		return errors.New("merge must include exactly one of source_bird_id or source_bird_type")
+	}
+	if sourceType != "" {
+		return s.mergeBoughtBirdWithTower(ctx, runtime, sourceType, targetID)
 	}
 	if sourceID == targetID {
 		return errors.New("source and target birds must be different")
 	}
+	return s.mergeExistingTowers(ctx, runtime, sourceID, targetID)
+}
 
+func (s *Server) mergeExistingTowers(ctx context.Context, runtime *runtimeSession, sourceID string, targetID string) error {
 	sourceIndex := findPlacedBirdIndexByID(runtime.birds, sourceID)
 	if sourceIndex < 0 {
 		return errors.New("source bird not found")
@@ -1212,6 +1218,60 @@ func (s *Server) mergeTower(ctx context.Context, runtime *runtimeSession, reques
 	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
 		runtime.birds = previousBirds
 		log.Printf("game session merge save failed session_id=%s: %v", runtime.session.SessionID, err)
+		return errors.New("failed to save tower merge")
+	}
+
+	return nil
+}
+
+func (s *Server) mergeBoughtBirdWithTower(ctx context.Context, runtime *runtimeSession, sourceType string, targetID string) error {
+	stats, err := gameobject.BirdStatsForType(sourceType)
+	if err != nil {
+		return errors.New("unknown bird type")
+	}
+	if gameobject.IsHybridBirdType(sourceType) {
+		return errors.New("hybrid birds must be created by merging")
+	}
+
+	targetIndex := findPlacedBirdIndexByID(runtime.birds, targetID)
+	if targetIndex < 0 {
+		return errors.New("target bird not found")
+	}
+	target := runtime.birds[targetIndex]
+	hybridType, ok := hybridBirdTypeForPair(sourceType, target.birdType)
+	if !ok {
+		return errors.New("bird types cannot be merged")
+	}
+
+	nextEconomy := runtime.economy
+	if !nextEconomy.Consume(stats.Cost) {
+		return errors.New("insufficient essence")
+	}
+
+	hybrid, err := gameobject.NewBird(uuid.NewString(), hybridType, target.bird.Position)
+	if err != nil {
+		return errors.New("failed to create hybrid bird")
+	}
+
+	previousEconomy := runtime.economy
+	previousBirds := runtime.birds
+	nextBirds := make([]placedBird, 0, len(runtime.birds))
+	for i, placed := range runtime.birds {
+		if i == targetIndex {
+			continue
+		}
+		nextBirds = append(nextBirds, placed)
+	}
+	nextBirds = append(nextBirds, placedBird{birdType: hybridType, bird: hybrid})
+	runtime.economy = nextEconomy
+	runtime.session.Essence = nextEconomy.Essence
+	runtime.birds = nextBirds
+
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.economy = previousEconomy
+		runtime.session.Essence = previousEconomy.Essence
+		runtime.birds = previousBirds
+		log.Printf("game session bought merge save failed session_id=%s: %v", runtime.session.SessionID, err)
 		return errors.New("failed to save tower merge")
 	}
 
@@ -1366,6 +1426,7 @@ func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
 	if !runtime.loopStarted {
 		return nil
 	}
+	runtime.projectiles = nil
 	runtime.session.Tick++
 	runtime.session.Essence = runtime.economy.Essence
 	runtime.session.UpdatedAt = now.UTC()
@@ -1377,7 +1438,6 @@ func advanceRuntimeTick(runtime *runtimeSession, now time.Time) []GameEvent {
 	}
 	events = append(events, spawnEnemies(runtime)...)
 	events = append(events, fireBirds(runtime)...)
-	events = append(events, resolveProjectiles(runtime, gameTickInterval.Seconds())...)
 	runtime.enemies = aliveEnemies(runtime.enemies)
 	events = append(events, scheduleNextWaveIfCleared(runtime)...)
 	return events
@@ -1541,88 +1601,41 @@ func fireBirds(runtime *runtimeSession) []GameEvent {
 			continue
 		}
 		target := runtime.enemies[targetIndex]
-		projectiles := bird.Attack(target, runtime.session.Tick)
-		if len(projectiles) == 0 {
+		hits := bird.Attack(target, runtime.enemies, runtime.session.Tick)
+		if len(hits) == 0 {
 			continue
 		}
-		runtime.projectiles = append(runtime.projectiles, projectiles...)
 		events = append(events, GameEvent{
-			Type:          "bird.attack",
-			BirdID:        bird.ID,
-			EnemyID:       target.ID,
-			ProjectileIDs: projectileIDs(projectiles),
+			Type:    "bird.attack",
+			BirdID:  bird.ID,
+			EnemyID: target.ID,
+		})
+		events = append(events, applyAttackHits(runtime, hits)...)
+	}
+	return events
+}
+
+func applyAttackHits(runtime *runtimeSession, hits []gameobject.AttackHit) []GameEvent {
+	events := make([]GameEvent, 0, len(hits))
+	for _, hit := range hits {
+		target := findEnemyByID(runtime.enemies, hit.EnemyID)
+		if target == nil || !target.IsAlive() {
+			continue
+		}
+		beforeHealth := target.Health
+		target.TakeDamage(hit.Damage)
+		damage := float64(beforeHealth - target.Health)
+		if damage <= 0 {
+			continue
+		}
+		events = append(events, GameEvent{
+			Type:    "enemy.damage",
+			EnemyID: target.ID,
+			Damage:  damage,
+			Health:  target.Health,
 		})
 	}
 	return events
-}
-
-func resolveProjectiles(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
-	events := make([]GameEvent, 0)
-	active := make([]gameobject.Projectile, 0, len(runtime.projectiles))
-	for i := range runtime.projectiles {
-		projectile := runtime.projectiles[i]
-		projectile.Move(deltaSeconds)
-		switch projectile.Type {
-		case gameobject.ProjectileTypeLocked:
-			if !projectile.HasArrived() {
-				active = append(active, projectile)
-				continue
-			}
-			target := findEnemyByID(runtime.enemies, projectile.TargetID)
-			if target == nil {
-				continue
-			}
-			beforeHealth := target.Health
-			if projectile.ApplyLockedDamage(target) {
-				events = append(events, GameEvent{
-					Type:         "enemy.damage",
-					EnemyID:      target.ID,
-					ProjectileID: projectile.ID,
-					Damage:       float64(beforeHealth - target.Health),
-					Health:       target.Health,
-				})
-			}
-		case gameobject.ProjectileTypeDirectional:
-			hit, damage := collideDirectionalProjectile(&projectile, runtime.enemies)
-			if hit != nil {
-				events = append(events, GameEvent{
-					Type:         "enemy.damage",
-					EnemyID:      hit.ID,
-					ProjectileID: projectile.ID,
-					Damage:       damage,
-					Health:       hit.Health,
-				})
-			}
-			if !projectile.IsExpired() {
-				active = append(active, projectile)
-			}
-		default:
-			if !projectile.IsExpired() {
-				active = append(active, projectile)
-			}
-		}
-	}
-	runtime.projectiles = active
-	return events
-}
-
-func collideDirectionalProjectile(projectile *gameobject.Projectile, enemies []gameobject.Enemy) (*gameobject.Enemy, float64) {
-	if projectile == nil || projectile.Type != gameobject.ProjectileTypeDirectional || projectile.IsExpired() {
-		return nil, 0
-	}
-	for i := range enemies {
-		if !enemies[i].IsAlive() {
-			continue
-		}
-		if projectile.Position.DistanceTo(enemies[i].Position) > projectile.HitRadius {
-			continue
-		}
-		beforeHealth := enemies[i].Health
-		enemies[i].TakeDamage(projectile.Damage)
-		projectile.RemainingRange = 0
-		return &enemies[i], float64(beforeHealth - enemies[i].Health)
-	}
-	return nil, 0
 }
 
 func targetEnemyIndex(bird gameobject.Bird, enemies []gameobject.Enemy) int {
@@ -1655,14 +1668,6 @@ func findEnemyByID(enemies []gameobject.Enemy, id string) *gameobject.Enemy {
 		}
 	}
 	return nil
-}
-
-func projectileIDs(projectiles []gameobject.Projectile) []string {
-	ids := make([]string, 0, len(projectiles))
-	for _, projectile := range projectiles {
-		ids = append(ids, projectile.ID)
-	}
-	return ids
 }
 
 func enemyReachedEnd(enemy gameobject.Enemy, path []gameobject.Position) bool {
@@ -1709,15 +1714,16 @@ func decodePlaceTowerAction(data any) (placeTowerRequest, error) {
 func decodeMergeTowerAction(data any) (mergeTowerRequest, error) {
 	var request mergeTowerRequest
 	if err := decodeMessageData(data, &request); err != nil {
-		return mergeTowerRequest{}, errors.New("merge tower action data must include source_bird_id and target_bird_id")
+		return mergeTowerRequest{}, errors.New("merge tower action data must include target_bird_id and one source field")
 	}
 	request.SourceBirdID = strings.TrimSpace(request.SourceBirdID)
+	request.SourceBirdType = strings.TrimSpace(request.SourceBirdType)
 	request.TargetBirdID = strings.TrimSpace(request.TargetBirdID)
-	if request.SourceBirdID == "" {
-		return mergeTowerRequest{}, errors.New("source_bird_id is required")
-	}
 	if request.TargetBirdID == "" {
 		return mergeTowerRequest{}, errors.New("target_bird_id is required")
+	}
+	if (request.SourceBirdID == "") == (request.SourceBirdType == "") {
+		return mergeTowerRequest{}, errors.New("merge must include exactly one of source_bird_id or source_bird_type")
 	}
 	return request, nil
 }
@@ -1839,6 +1845,13 @@ func hybridBirdTypeForPair(first string, second string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func removedBirdIDsForMerge(request mergeTowerRequest) []string {
+	if request.SourceBirdID != "" {
+		return []string{request.SourceBirdID, request.TargetBirdID}
+	}
+	return []string{request.TargetBirdID}
 }
 
 func placedBirdStates(birds []placedBird) []PlacedBirdState {

@@ -3,32 +3,64 @@ package gameobject
 import "math"
 
 const (
-	LockedProjectileSpeed = 16.0
-	DirectionalHitRadius  = 0.35
-	SplashSpreadRadians   = math.Pi / 12
+	FeatherSpreadRadians    = math.Pi / 12
+	FeatherHalfWidthRadians = math.Pi / 36
 )
 
-type SingleAttack struct {
-	ProjectileSpeed float64
-}
+type SingleAttack struct{}
 
-func (a SingleAttack) Attack(bird Bird, target Enemy) []Projectile {
-	projectileSpeed := a.ProjectileSpeed
-	if projectileSpeed <= 0 {
-		projectileSpeed = LockedProjectileSpeed
+func (a SingleAttack) Attack(bird Bird, target Enemy, _ []Enemy) []AttackHit {
+	if !target.IsAlive() {
+		return nil
 	}
-	return []Projectile{
-		NewLockedProjectile(bird, target, projectileSpeed),
-	}
+	return []AttackHit{{
+		EnemyID: target.ID,
+		Damage:  float64(bird.Stats.Damage),
+	}}
 }
 
 type SplashAttack struct{}
 
-func (a SplashAttack) Attack(bird Bird, target Enemy) []Projectile {
-	direction := bird.Position.DirectionTo(target.Position)
-	return []Projectile{
-		NewDirectionalProjectile(bird, direction),
-		NewDirectionalProjectile(bird, direction.Rotate(-SplashSpreadRadians)),
-		NewDirectionalProjectile(bird, direction.Rotate(SplashSpreadRadians)),
+func (a SplashAttack) Attack(bird Bird, target Enemy, enemies []Enemy) []AttackHit {
+	if !target.IsAlive() {
+		return nil
 	}
+	center := bird.Position.DirectionTo(target.Position)
+	if center == (Vector{}) {
+		return nil
+	}
+	featherDirections := []Vector{
+		center,
+		center.Rotate(-FeatherSpreadRadians),
+		center.Rotate(FeatherSpreadRadians),
+	}
+	hits := make([]AttackHit, 0)
+	for _, enemy := range enemies {
+		if !enemy.IsAlive() {
+			continue
+		}
+		if !enemyInFeatherFan(bird.Position, enemy.Position, bird.Stats.Range, featherDirections) {
+			continue
+		}
+		hits = append(hits, AttackHit{
+			EnemyID: enemy.ID,
+			Damage:  float64(bird.Stats.Damage),
+		})
+	}
+	return hits
+}
+
+func enemyInFeatherFan(origin Position, enemy Position, maxRange float64, featherDirections []Vector) bool {
+	distance := origin.DistanceTo(enemy)
+	if distance <= 0 || distance > maxRange {
+		return false
+	}
+	direction := origin.DirectionTo(enemy)
+	minDot := math.Cos(FeatherHalfWidthRadians)
+	for _, featherDirection := range featherDirections {
+		if direction.Dot(featherDirection) >= minDot {
+			return true
+		}
+	}
+	return false
 }

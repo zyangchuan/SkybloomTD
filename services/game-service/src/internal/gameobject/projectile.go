@@ -6,6 +6,11 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	LockedProjectileSpeed = 16.0
+	DirectionalHitRadius  = 0.35
+)
+
 type ProjectileType string
 
 const (

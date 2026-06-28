@@ -20,8 +20,13 @@ type BirdStats struct {
 	Cost            int     `json:"cost"`
 }
 
+type AttackHit struct {
+	EnemyID string
+	Damage  float64
+}
+
 type AttackBehaviour interface {
-	Attack(bird Bird, target Enemy) []Projectile
+	Attack(bird Bird, target Enemy, enemies []Enemy) []AttackHit
 }
 
 func NewBird(id string, birdType string, position Position) (Bird, error) {
@@ -61,13 +66,13 @@ func (b Bird) TargetInRange(target Enemy) bool {
 	return target.IsAlive() && b.Position.DistanceTo(target.Position) <= b.Stats.Range
 }
 
-func (b *Bird) Attack(target Enemy, currentTick int64) []Projectile {
+func (b *Bird) Attack(target Enemy, enemies []Enemy, currentTick int64) []AttackHit {
 	if b == nil || b.AttackBehaviour == nil || !b.TargetInRange(target) {
 		return nil
 	}
-	projectiles := b.AttackBehaviour.Attack(*b, target)
-	if len(projectiles) > 0 {
+	hits := b.AttackBehaviour.Attack(*b, target, enemies)
+	if len(hits) > 0 {
 		b.LastFiredAtTick = currentTick
 	}
-	return projectiles
+	return hits
 }

@@ -676,9 +676,9 @@ paths:
         until a later resume flow is added. Hybrid bird types are returned in
         the catalog and state snapshots, but cannot be placed directly.
         Reconnecting with the same `level_id` reuses the existing Redis session
-        for that user and level, including placed birds, active smogs, active
-        projectiles, health, wave, tick, current essence, loop start state, and
-        pause state, until the session expires. The gameplay loop runs three
+        for that user and level, including placed birds, active smogs, health,
+        wave, tick, current essence, loop start state, and pause state, until
+        the session expires. The gameplay loop runs three
         smog waves, each split into three subwaves of grouped spawns. The first
         wave starts
         on the first gameplay tick after the loop is unlocked, and each later
@@ -1191,7 +1191,7 @@ components:
 
     GameMergeTowerActionMessage:
       type: object
-      description: Merge two compatible existing birds into a hybrid bird at the target bird's position. No essence is consumed.
+      description: Merge an existing target tower with either another existing tower or a newly purchased base bird type. The hybrid appears at the target tower's position.
       required: [type, data]
       properties:
         type:
@@ -1199,15 +1199,21 @@ components:
           const: game.action.merge_tower
         data:
           type: object
-          required: [source_bird_id, target_bird_id]
+          required: [target_bird_id]
           properties:
             source_bird_id:
               type: string
-              description: Existing bird id to consume as one merge parent.
+              description: Existing bird id to consume as one merge parent. Mutually exclusive with `source_bird_type`; no essence is consumed.
+            source_bird_type:
+              type: string
+              enum: [sparrow, woodpecker, eagle, peacock]
+              description: Base bird type to buy and merge into the target tower. Mutually exclusive with `source_bird_id`; consumes this bird type's normal essence cost.
             target_bird_id:
               type: string
-              description: Existing bird id to consume as the other merge parent; the hybrid appears at this bird's position.
+              description: Existing bird id to consume as the target merge parent; the hybrid appears at this bird's position.
           description: |
+            Exactly one of `source_bird_id` or `source_bird_type` is required.
+
             Supported unordered merge recipes:
             - `sparrow` + `eagle` -> `falcon`
             - `woodpecker` + `peacock` -> `kingfisher`
@@ -1395,7 +1401,7 @@ components:
               $ref: "#/components/schemas/PlacedBird"
             removed_bird_ids:
               type: array
-              description: Present for successful `merge_tower`; lists the consumed parent bird ids.
+              description: Present for successful `merge_tower`; lists consumed existing bird ids. Existing-tower merges include source and target ids, while bought-source merges include only the target id.
               items:
                 type: string
 
@@ -1589,7 +1595,7 @@ components:
             $ref: "#/components/schemas/Smog"
         projectiles:
           type: array
-          description: Active projectiles in flight.
+          description: Deprecated combat-visual compatibility field. Authoritative damage is resolved immediately in attack events, so this is normally empty.
           items:
             $ref: "#/components/schemas/Projectile"
         events:
@@ -1811,6 +1817,7 @@ components:
         attack:
           type: string
           enum: [single, splash]
+          description: Splash attacks resolve as three immediate feather fan lanes from the bird tower toward the selected target.
 
     PlacedBird:
       type: object
@@ -1849,6 +1856,8 @@ components:
 
     Projectile:
       type: object
+      deprecated: true
+      description: Legacy projectile snapshot shape. Current authoritative combat no longer simulates projectile position or collision.
       required: [id, type, damage, projectile_speed, position, direction, remaining_range, hit_radius]
       properties:
         id:
@@ -1894,8 +1903,10 @@ components:
         projectile_id:
           type: string
           format: uuid
+          deprecated: true
         projectile_ids:
           type: array
+          deprecated: true
           items:
             type: string
             format: uuid
@@ -1917,6 +1928,8 @@ components:
         projectile_speed:
           type: number
           format: double
+          deprecated: true
+          description: Legacy visual projectile speed. Current backend combat resolves attacks immediately.
         fire_rate:
           type: number
           format: double

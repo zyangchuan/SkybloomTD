@@ -964,7 +964,7 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 				ID:       "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 				Type:     gameobject.BirdTypeSparrow,
 				Position: gameobject.Position{X: 1, Y: 1},
-				Stats:    gameobject.BirdStats{Damage: 10, ProjectileSpeed: gameobject.StandardProjectileSpeed, FireRate: 1, Range: 3.5, Cost: 50},
+				Stats:    gameobject.BirdStats{Damage: 10, ProjectileSpeed: gameobject.StandardProjectileSpeed, FireRate: 1, Range: 2.1, Cost: 50},
 			},
 		},
 		enemies: []gamesession.StoredEnemy{
@@ -1034,11 +1034,8 @@ func TestWebsocketSessionStartRestoresPersistedBirds(t *testing.T) {
 	if state.Enemies[0].ID != "cccccccc-cccc-cccc-cccc-cccccccccccc" || state.Enemies[0].Health != 20 {
 		t.Fatalf("unexpected restored enemy %+v", state.Enemies[0])
 	}
-	if len(state.Projectiles) != 1 {
-		t.Fatalf("expected one restored projectile, got %d", len(state.Projectiles))
-	}
-	if state.Projectiles[0].TargetID != "cccccccc-cccc-cccc-cccc-cccccccccccc" {
-		t.Fatalf("unexpected restored projectile %+v", state.Projectiles[0])
+	if len(state.Projectiles) != 0 {
+		t.Fatalf("expected obsolete stored projectiles to be ignored, got %d", len(state.Projectiles))
 	}
 }
 
@@ -1321,7 +1318,7 @@ func TestAdvanceRuntimeTickReportsBirdAttackAndEnemyDamage(t *testing.T) {
 	events := advanceRuntimeTick(&runtime, time.Now().UTC())
 
 	if len(runtime.projectiles) != 0 {
-		t.Fatalf("expected locked projectile to resolve in one tick, got %d active projectiles", len(runtime.projectiles))
+		t.Fatalf("expected immediate attack to create no active projectiles, got %d active projectiles", len(runtime.projectiles))
 	}
 	if len(runtime.enemies) != 1 || runtime.enemies[0].Health != 20 {
 		t.Fatalf("expected enemy health 20, got %+v", runtime.enemies)
@@ -1337,6 +1334,47 @@ func TestAdvanceRuntimeTickReportsBirdAttackAndEnemyDamage(t *testing.T) {
 	}
 	if !sawAttack || !sawDamage {
 		t.Fatalf("expected attack and damage events, got %+v", events)
+	}
+}
+
+func TestAdvanceRuntimeTickSplashAttackDamagesEnemiesInFeatherFan(t *testing.T) {
+	bird, err := gameobject.NewBird("bird-1", gameobject.BirdTypePeacock, gameobject.Position{X: 0, Y: 0})
+	if err != nil {
+		t.Fatalf("NewBird failed: %v", err)
+	}
+	runtime := runtimeSession{
+		session: gamesession.State{
+			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			LevelID:   "11111111-1111-1111-1111-111111111111",
+			Health:    gamesession.InitialHealth,
+			Tick:      10,
+		},
+		economy:     gamesession.NewEconomy(100),
+		loopStarted: true,
+		birds:       []placedBird{{birdType: gameobject.BirdTypePeacock, bird: bird}},
+		enemies: []gameobject.Enemy{
+			{ID: "target", Health: 30, Position: gameobject.Position{X: 1.0, Y: 0}, PathIndex: 2},
+			{ID: "side-feather", Health: 30, Position: gameobject.Position{X: 1.93, Y: 0.52}, PathIndex: 1},
+			{ID: "gap", Health: 30, Position: gameobject.Position{X: 1.98, Y: 0.26}, PathIndex: 0},
+		},
+	}
+
+	events := advanceRuntimeTick(&runtime, time.Now().UTC())
+
+	if len(runtime.projectiles) != 0 {
+		t.Fatalf("expected splash attack to create no active projectiles, got %d", len(runtime.projectiles))
+	}
+	if runtime.enemies[0].Health != 23 || runtime.enemies[1].Health != 23 || runtime.enemies[2].Health != 30 {
+		t.Fatalf("unexpected enemy health after splash: %+v", runtime.enemies)
+	}
+	damageEvents := 0
+	for _, event := range events {
+		if event.Type == "enemy.damage" {
+			damageEvents++
+		}
+	}
+	if damageEvents != 2 {
+		t.Fatalf("expected two splash damage events, got %+v", events)
 	}
 }
 

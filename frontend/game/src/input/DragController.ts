@@ -44,7 +44,8 @@ export class DragController {
   constructor(
     private scene: Phaser.Scene,
     private onPlace: (birdType: string, x: number, y: number) => void,
-    private onMerge: (sourceId: string, targetId: string) => void,
+    private onMergeExisting: (sourceId: string, targetId: string) => void,
+    private onMergeBought: (sourceBirdType: string, targetId: string) => void,
     private grid: GridParams,
     private enemyPath: any[],
     private obstacles: any[],
@@ -100,7 +101,7 @@ export class DragController {
     if (this.activeDragTowerSourceId) {
       this.drawMergeHighlights();
     } else {
-      this.drawGrassHighlights();
+      this.drawPlacementAndMergeHighlights();
     }
     this.gridHighlightGraphics.setAlpha(0.2);
     this.pulseTween = this.scene.tweens.add({
@@ -143,15 +144,20 @@ export class DragController {
       if (targetTower && this.activeDragBirdType) {
         const resultType = getMergeResult(this.activeDragBirdType, targetTower.birdType);
         if (resultType) {
-          this.onMerge(this.activeDragTowerSourceId, targetTower.id);
+          this.onMergeExisting(this.activeDragTowerSourceId, targetTower.id);
         }
       }
 
       this.activeDragTower = null;
       this.activeDragTowerSourceId = null;
     } else {
-      if (!inBirdsBar && this.isValidGrassTile(gridX, gridY) && this.activeDragBirdType) {
-        this.onPlace(this.activeDragBirdType, gridX, gridY);
+      if (!inBirdsBar && this.activeDragBirdType) {
+        const targetTower = this.findTowerAt(gridX, gridY);
+        if (targetTower && getMergeResult(this.activeDragBirdType, targetTower.birdType)) {
+          this.onMergeBought(this.activeDragBirdType, targetTower.id);
+        } else if (this.isValidGrassTile(gridX, gridY)) {
+          this.onPlace(this.activeDragBirdType, gridX, gridY);
+        }
       }
     }
 
@@ -214,13 +220,7 @@ export class DragController {
     const posY = offsetY + gridY * tileSize;
 
     if (this.activeDragTowerSourceId) {
-      let targetTower: Tower | null = null;
-      for (const t of this.towers.values()) {
-        if (t.gridX === gridX && t.gridY === gridY && t.id !== this.activeDragTowerSourceId) {
-          targetTower = t;
-          break;
-        }
-      }
+      const targetTower = this.findTowerAt(gridX, gridY, this.activeDragTowerSourceId);
       if (targetTower && this.activeDragBirdType) {
         const resultType = getMergeResult(this.activeDragBirdType, targetTower.birdType);
         if (resultType) {
@@ -238,7 +238,19 @@ export class DragController {
         this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
       }
     } else {
-      if (this.isValidGrassTile(gridX, gridY)) {
+      const targetTower = this.findTowerAt(gridX, gridY);
+      if (targetTower && this.activeDragBirdType) {
+        const resultType = getMergeResult(this.activeDragBirdType, targetTower.birdType);
+        if (resultType) {
+          this.closestCellHighlight.fillStyle(0x10b981, 0.5).lineStyle(4, 0x059669, 1);
+          this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
+          this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+        } else {
+          this.closestCellHighlight.fillStyle(0xef4444, 0.45).lineStyle(4, 0xef4444, 1);
+          this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
+          this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+        }
+      } else if (this.isValidGrassTile(gridX, gridY)) {
         this.closestCellHighlight.fillStyle(0x34d399, 0.45).lineStyle(3, 0x10b981, 1);
         this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
         this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
@@ -301,10 +313,17 @@ export class DragController {
     }
   }
 
+  private drawPlacementAndMergeHighlights() {
+    this.drawGrassHighlights();
+    this.drawMergeHighlights();
+  }
+
   private drawMergeHighlights() {
     if (!this.activeDragBirdType) return;
     const { tileSize, offsetX, offsetY } = this.grid;
-    this.gridHighlightGraphics.clear();
+    if (this.activeDragTowerSourceId) {
+      this.gridHighlightGraphics.clear();
+    }
     
     for (const otherTower of this.towers.values()) {
       if (otherTower.id === this.activeDragTowerSourceId) continue;
@@ -318,6 +337,15 @@ export class DragController {
         this.gridHighlightGraphics.strokeRect(posX, posY, tileSize, tileSize);
       }
     }
+  }
+
+  private findTowerAt(gridX: number, gridY: number, excludeId?: string): Tower | null {
+    for (const tower of this.towers.values()) {
+      if (tower.gridX === gridX && tower.gridY === gridY && tower.id !== excludeId) {
+        return tower;
+      }
+    }
+    return null;
   }
 
   isValidGrassTile(x: number, y: number): boolean {
