@@ -670,9 +670,11 @@ paths:
         gameplay ticker starts only after the player answers a quiz correctly;
         `game.quiz.result` includes `loop_started=true` when that happens.
         During the session, clients can send `game.action.place_tower` with a
-        `bird_type` and grid `x`/`y`, or send `game.pause` to persist
-        `loop_paused=true` and stop advancing ticks until a later resume flow is
-        added.
+        base `bird_type` and grid `x`/`y`, send `game.action.merge_tower` with
+        compatible source and target bird ids to create hybrid birds, or send
+        `game.pause` to persist `loop_paused=true` and stop advancing ticks
+        until a later resume flow is added. Hybrid bird types are returned in
+        the catalog and state snapshots, but cannot be placed directly.
         Reconnecting with the same `level_id` reuses the existing Redis session
         for that user and level, including placed birds, active smogs, active
         projectiles, health, wave, tick, current essence, loop start state, and
@@ -709,6 +711,7 @@ paths:
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
+        - $ref: "#/components/schemas/GameMergeTowerActionMessage"
         - $ref: "#/components/schemas/GamePauseWebSocketMessage"
         - $ref: "#/components/schemas/GameExitWebSocketMessage"
         - $ref: "#/components/schemas/GameQuizRequestMessage"
@@ -1165,6 +1168,7 @@ components:
 
     GamePlaceTowerActionMessage:
       type: object
+      description: Place a base bird tower on an empty grid tile. Hybrid birds must be created with `game.action.merge_tower` instead.
       required: [type, data]
       properties:
         type:
@@ -1177,12 +1181,38 @@ components:
             bird_type:
               type: string
               enum: [sparrow, woodpecker, eagle, peacock]
+              description: Base bird type to place. Hybrid bird types are rejected for direct placement.
             x:
               type: integer
               description: Grid column.
             y:
               type: integer
               description: Grid row.
+
+    GameMergeTowerActionMessage:
+      type: object
+      description: Merge two compatible existing birds into a hybrid bird at the target bird's position. No essence is consumed.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.merge_tower
+        data:
+          type: object
+          required: [source_bird_id, target_bird_id]
+          properties:
+            source_bird_id:
+              type: string
+              description: Existing bird id to consume as one merge parent.
+            target_bird_id:
+              type: string
+              description: Existing bird id to consume as the other merge parent; the hybrid appears at this bird's position.
+          description: |
+            Supported unordered merge recipes:
+            - `sparrow` + `eagle` -> `falcon`
+            - `woodpecker` + `peacock` -> `kingfisher`
+            - `peacock` + `eagle` -> `phoenix`
+            - `kingfisher` + `eagle` -> `sun_god`
 
     GamePauseWebSocketMessage:
       type: object
@@ -1357,12 +1387,17 @@ components:
           properties:
             action:
               type: string
-              example: place_tower
+              enum: [place_tower, merge_tower]
             bird_id:
               type: string
               format: uuid
             bird:
               $ref: "#/components/schemas/PlacedBird"
+            removed_bird_ids:
+              type: array
+              description: Present for successful `merge_tower`; lists the consumed parent bird ids.
+              items:
+                type: string
 
     GameActionRejectedMessage:
       type: object
@@ -1377,7 +1412,7 @@ components:
           properties:
             action:
               type: string
-              example: place_tower
+              enum: [place_tower, merge_tower]
             error:
               type: string
               example: insufficient essence
@@ -1770,7 +1805,7 @@ components:
       properties:
         type:
           type: string
-          enum: [sparrow, woodpecker, eagle, peacock]
+          enum: [sparrow, woodpecker, eagle, peacock, falcon, kingfisher, phoenix, sun_god]
         stats:
           $ref: "#/components/schemas/BirdStats"
         attack:
@@ -1786,7 +1821,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [sparrow, woodpecker, eagle, peacock]
+          enum: [sparrow, woodpecker, eagle, peacock, falcon, kingfisher, phoenix, sun_god]
         position:
           $ref: "#/components/schemas/GridPosition"
         stats:

@@ -50,6 +50,7 @@ export default class GameScene extends Phaser.Scene {
     this.drag = new DragController(
       this,
       (birdType, x, y) => this.sendWs('game.action.place_tower', { bird_type: birdType, x, y }),
+      (sourceId, targetId) => this.sendWs('game.action.merge_tower', { source_bird_id: sourceId, target_bird_id: targetId }),
       { tileSize: this.tileSize, offsetX: this.offsetX, offsetY: this.offsetY, gridWidth: this.gridWidth, gridHeight: this.gridHeight },
       this.enemyPath, this.obstacles, this.entities.towers,
     );

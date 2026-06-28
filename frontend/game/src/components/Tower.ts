@@ -18,6 +18,8 @@ export default class Tower extends Phaser.GameObjects.Sprite {
     this.setOrigin(0.5, 0.5);
 
     scene.add.existing(this);
+    this.setInteractive({ useHandCursor: true, draggable: true });
+    scene.input.setDraggable(this);
   }
 
   /**

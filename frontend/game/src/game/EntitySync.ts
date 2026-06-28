@@ -41,7 +41,8 @@ export class EntitySync {
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
         if (stats?.range) tower.range = stats.range;
-        tower.setScale(this.tileSize / tower.width * 1.2).setDepth(4);
+        const scaleMultiplier = type === 'sun_god' ? 2.0 : 1.2;
+        tower.setScale(this.tileSize / tower.width * scaleMultiplier).setDepth(4);
         this.towers.set(id, tower);
       } else {
         const tower = this.towers.get(id)!;
@@ -108,14 +109,16 @@ export class EntitySync {
       activeIds.add(id);
       const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
       const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
-      const textureKey = `projectile_${DAMAGE_TO_BIRD[damage] ?? 'sparrow'}`;
+      const birdType = DAMAGE_TO_BIRD[damage] ?? 'sparrow';
+      const textureKey = `projectile_${birdType}`;
+      const projectileScale = birdType === 'sun_god' ? 1.0 : 0.5;
       let targetRotation = 0;
       if (direction && (direction.x !== 0 || direction.y !== 0)) {
         targetRotation = Math.atan2(direction.y, direction.x) + Math.PI / 2;
       }
       if (!this.projectiles.has(id)) {
         const sprite = this.scene.add.sprite(posX, posY, textureKey);
-        sprite.setScale(this.tileSize / sprite.width * 0.5).setDepth(20).setRotation(targetRotation);
+        sprite.setScale(this.tileSize / sprite.width * projectileScale).setDepth(20).setRotation(targetRotation);
         this.projectiles.set(id, { sprite, targetX: posX, targetY: posY, targetRotation });
       } else {
         const e = this.projectiles.get(id)!;
