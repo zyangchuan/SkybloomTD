@@ -29,6 +29,7 @@ export class DragController {
   private activeDragSprite: Phaser.GameObjects.Sprite | null = null;
   private activeDragBirdType: string | null = null;
   private activeDragTooltip: Phaser.GameObjects.Container | null = null;
+  private mergeTooltip: Phaser.GameObjects.Container | null = null;
   private gridHighlightGraphics: Phaser.GameObjects.Graphics;
   private closestCellHighlight: Phaser.GameObjects.Graphics;
   private dragRangeGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -163,6 +164,7 @@ export class DragController {
 
     this.activeDragTooltip?.setVisible(false).setDepth(35);
     this.activeDragTooltip = null;
+    this.hideMergeTooltip();
     this.activeDragSprite.destroy();
     this.activeDragSprite = null;
     this.activeDragBirdType = null;
@@ -213,6 +215,7 @@ export class DragController {
     this.closestCellHighlight.clear();
 
     if (inBirdsBar || gridX < 0 || gridX >= gridWidth || gridY < 0 || gridY >= gridHeight) {
+      this.hideMergeTooltip();
       return;
     }
 
@@ -227,15 +230,18 @@ export class DragController {
           this.closestCellHighlight.fillStyle(0x10b981, 0.5).lineStyle(4, 0x059669, 1);
           this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
           this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+          this.showMergeTooltip(targetTower, resultType);
         } else {
           this.closestCellHighlight.fillStyle(0xef4444, 0.45).lineStyle(4, 0xef4444, 1);
           this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
           this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+          this.hideMergeTooltip();
         }
       } else {
         this.closestCellHighlight.fillStyle(0xef4444, 0.35).lineStyle(3, 0xef4444, 1);
         this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
         this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+        this.hideMergeTooltip();
       }
     } else {
       const targetTower = this.findTowerAt(gridX, gridY);
@@ -245,19 +251,23 @@ export class DragController {
           this.closestCellHighlight.fillStyle(0x10b981, 0.5).lineStyle(4, 0x059669, 1);
           this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
           this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+          this.showMergeTooltip(targetTower, resultType);
         } else {
           this.closestCellHighlight.fillStyle(0xef4444, 0.45).lineStyle(4, 0xef4444, 1);
           this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
           this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+          this.hideMergeTooltip();
         }
       } else if (this.isValidGrassTile(gridX, gridY)) {
         this.closestCellHighlight.fillStyle(0x34d399, 0.45).lineStyle(3, 0x10b981, 1);
         this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
         this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+        this.hideMergeTooltip();
       } else {
         this.closestCellHighlight.fillStyle(0xf87171, 0.35).lineStyle(3, 0xef4444, 1);
         this.closestCellHighlight.fillRect(posX, posY, tileSize, tileSize);
         this.closestCellHighlight.strokeRect(posX, posY, tileSize, tileSize);
+        this.hideMergeTooltip();
       }
     }
   }
@@ -364,5 +374,65 @@ export class DragController {
       gridX: Math.floor((px - this.grid.offsetX) / this.grid.tileSize),
       gridY: Math.floor((py - this.grid.offsetY) / this.grid.tileSize),
     };
+  }
+
+  private showMergeTooltip(targetTower: Tower, resultType: string) {
+    if (this.mergeTooltip) {
+      if (this.mergeTooltip.getData('targetId') === targetTower.id && this.mergeTooltip.getData('resultType') === resultType) {
+        return;
+      }
+      this.mergeTooltip.destroy();
+    }
+
+    const x = targetTower.x;
+    const y = targetTower.y;
+    const stats = BIRD_STATS[resultType];
+    if (!stats) return;
+
+    const tooltip = this.scene.add.container(x, y - 180).setDepth(45);
+    tooltip.setData('targetId', targetTower.id);
+    tooltip.setData('resultType', resultType);
+
+    tooltip.add(this.scene.add.nineslice(0, 0, 'box_square', undefined, 350, 220, 32, 32, 32, 32));
+    const formattedName = resultType.replace(/_/g, ' ').toUpperCase();
+    tooltip.add(this.scene.add.text(0, -80, `UPGRADE: ${formattedName}`, {
+      fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '34px', color: stats.color,
+    }).setOrigin(0.5));
+
+    // Add respective bird head image next to stats
+    const headImage = this.scene.add.image(-90, 15, `head_${resultType}`).setDisplaySize(95, 95);
+    tooltip.add(headImage);
+
+    const rows = [
+      { label: 'DAMAGE',    value: String(stats.damage),  color: '#f87171' },
+      { label: 'RANGE',     value: String(stats.range),   color: '#60a5fa' },
+      { label: 'FIRE RATE', value: stats.fireRate,        color: '#34d399' },
+      { label: 'ATTACK',    value: stats.attack,          color: '#e9d5ff' },
+    ];
+
+    rows.forEach((row, i) => {
+      const rowY = -30 + i * 30;
+      tooltip.add(this.scene.add.text(-10, rowY, row.label, {
+        fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '20px', color: '#94a3b8',
+      }).setOrigin(0, 0.5));
+      tooltip.add(this.scene.add.text(140, rowY, row.value, {
+        fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '20px', color: row.color,
+      }).setOrigin(1, 0.5));
+    });
+
+    if (this.activeDragTooltip) {
+      this.activeDragTooltip.setVisible(false);
+    }
+    this.mergeTooltip = tooltip;
+  }
+
+  private hideMergeTooltip() {
+    if (this.mergeTooltip) {
+      this.mergeTooltip.destroy();
+      this.mergeTooltip = null;
+    }
+    if (this.activeDragTooltip) {
+      this.activeDragTooltip.setVisible(true);
+    }
   }
 }

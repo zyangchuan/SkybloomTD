@@ -156,7 +156,7 @@ export class EntitySync {
         targetId: enemyId,
         lastTargetX: lastX,
         lastTargetY: lastY,
-        speed: 15 * this.tileSize,
+        speed: 28 * this.tileSize,
         birdType,
         towerX: sourceTower.x,
         towerY: sourceTower.y,
