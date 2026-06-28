@@ -54,7 +54,14 @@ export class EntitySync {
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
         if (stats?.range) tower.range = stats.range;
-        const scaleMultiplier = type === 'sun_god' ? 2.0 : 1.2;
+        let scaleMultiplier = 1.2;
+        if (type === 'sun_god') {
+          scaleMultiplier = 2.0;
+        } else if (type === 'phoenix') {
+          scaleMultiplier = 1.8;
+        } else if (type === 'kingfisher' || type === 'falcon') {
+          scaleMultiplier = 1.6;
+        }
         tower.setScale(this.tileSize / tower.width * scaleMultiplier).setDepth(4);
         this.towers.set(id, tower);
       } else {
@@ -86,6 +93,8 @@ export class EntitySync {
       return { width: 1.0, height: 1.0 };
     }
 
+    const getEnemyDepth = (enemyType: string) => enemyType === "junk" ? 17 : 15;
+
     enemiesList.forEach(({ id, type, health, position }) => {
       activeIds.add(id);
       const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
@@ -94,9 +103,10 @@ export class EntitySync {
       const maxHealth = this.enemyMaxHealth.get(id) || health || 1;
       if (!this.enemies.has(id)) {
         const enemyTexture = `enemy_${type ?? "smog"}`;
+        const enemyDepth = getEnemyDepth(type);
         const sprite = this.scene.add.sprite(posX, posY, enemyTexture)
-          .setDisplaySize(this.tileSize * getEnemyBaseMultiplier(type).width, this.tileSize * getEnemyBaseMultiplier(type).height).setDepth(15);
-        const healthBar = this.scene.add.graphics().setDepth(16);
+          .setDisplaySize(this.tileSize * getEnemyBaseMultiplier(type).width, this.tileSize * getEnemyBaseMultiplier(type).height).setDepth(enemyDepth);
+        const healthBar = this.scene.add.graphics().setDepth(enemyDepth + 1);
         this.enemies.set(id, { sprite, healthBar, targetX: posX, targetY: posY, health, maxHealth, type });
       } else {
         const e = this.enemies.get(id)!;

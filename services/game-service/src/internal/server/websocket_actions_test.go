@@ -428,8 +428,12 @@ func TestWebsocketMergeTowerRecipesSucceedInEitherOrder(t *testing.T) {
 			if len(acceptedData.RemovedBirdIDs) != 2 {
 				t.Fatalf("expected two removed bird ids, got %v", acceptedData.RemovedBirdIDs)
 			}
-			if sessions.economy.Essence != 500 {
-				t.Fatalf("merge should not consume essence, got %d", sessions.economy.Essence)
+			hybridStats, err := gameobject.BirdStatsForType(tc.wantType)
+			if err != nil {
+				t.Fatalf("load hybrid stats: %v", err)
+			}
+			if sessions.economy.Essence != 500-hybridStats.Cost {
+				t.Fatalf("expected merge to consume %d essence, got %d", hybridStats.Cost, sessions.economy.Essence)
 			}
 			if len(sessions.birds) != 1 {
 				t.Fatalf("expected one persisted bird after merge, got %d", len(sessions.birds))
@@ -447,13 +451,17 @@ func TestWebsocketMergeTowerRecipesSucceedInEitherOrder(t *testing.T) {
 	}
 }
 
-func TestWebsocketMergeTowerBoughtSourceConsumesEssenceAndRemovesTarget(t *testing.T) {
-	stats, err := gameobject.BirdStatsForType(gameobject.BirdTypeEagle)
+func TestWebsocketMergeTowerBoughtSourceConsumesBaseAndUpgradeEssenceAndRemovesTarget(t *testing.T) {
+	sourceStats, err := gameobject.BirdStatsForType(gameobject.BirdTypeEagle)
 	if err != nil {
 		t.Fatalf("load eagle stats: %v", err)
 	}
+	hybridStats, err := gameobject.BirdStatsForType(gameobject.BirdTypeFalcon)
+	if err != nil {
+		t.Fatalf("load falcon stats: %v", err)
+	}
 	sessions := quietSession()
-	sessions.state.Essence = stats.Cost + 20
+	sessions.state.Essence = sourceStats.Cost + hybridStats.Cost + 20
 	sessions.birds = []gamesession.StoredBird{
 		storedBirdForTest("target-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 2, Y: 2}),
 	}
@@ -486,7 +494,7 @@ func TestWebsocketMergeTowerBoughtSourceConsumesEssenceAndRemovesTarget(t *testi
 		t.Fatalf("expected target bird removal, got %v", acceptedData.RemovedBirdIDs)
 	}
 	if sessions.economy.Essence != 20 {
-		t.Fatalf("expected essence 20 after buying source bird, got %d", sessions.economy.Essence)
+		t.Fatalf("expected essence 20 after buying source bird and upgrade, got %d", sessions.economy.Essence)
 	}
 	if len(sessions.birds) != 1 || sessions.birds[0].Type != gameobject.BirdTypeFalcon {
 		t.Fatalf("expected one persisted falcon, got %+v", sessions.birds)
@@ -494,6 +502,37 @@ func TestWebsocketMergeTowerBoughtSourceConsumesEssenceAndRemovesTarget(t *testi
 	if sessions.birds[0].Position.X != 2 || sessions.birds[0].Position.Y != 2 {
 		t.Fatalf("expected hybrid at target position, got %+v", sessions.birds[0].Position)
 	}
+}
+
+func TestWebsocketMergeTowerBoughtSourceRejectsWithOnlyUpgradeEssence(t *testing.T) {
+	hybridStats, err := gameobject.BirdStatsForType(gameobject.BirdTypeFalcon)
+	if err != nil {
+		t.Fatalf("load falcon stats: %v", err)
+	}
+	sessions := quietSession()
+	sessions.state.Essence = hybridStats.Cost
+	sessions.birds = []gamesession.StoredBird{
+		storedBirdForTest("target-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 2, Y: 2}),
+	}
+	handler := NewWithGenerationCachesAndSessions(config.Config{}, standardLevels(), smallMap(), nil, nil, nil, nil, sessions).Router()
+	httpServer := startHTTPServer(t, handler)
+	defer httpServer.Close()
+
+	conn := dialGameWebsocket(t, httpServer.URL)
+	defer conn.Close()
+
+	startSession(t, conn)
+	readMessageOfType(t, conn, "game.session.started")
+
+	if err := conn.WriteJSON(Message{
+		Type: "game.action.merge_tower",
+		Data: map[string]any{"source_bird_type": gameobject.BirdTypeEagle, "target_bird_id": "target-bird"},
+	}); err != nil {
+		t.Fatalf("WriteJSON failed: %v", err)
+	}
+
+	rejected := readMessageOfType(t, conn, "game.action.rejected")
+	assertRejection(t, rejected, mergeTowerAction, "insufficient essence")
 }
 
 func TestWebsocketMergeTowerRejections(t *testing.T) {
@@ -533,6 +572,15 @@ func TestWebsocketMergeTowerRejections(t *testing.T) {
 			wantError: "bird types cannot be merged",
 		},
 		{
+			name: "existing towers insufficient essence",
+			birds: []gamesession.StoredBird{
+				storedBirdForTest("source-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 1, Y: 1}),
+				storedBirdForTest("target-bird", gameobject.BirdTypeEagle, gameobject.Position{X: 2, Y: 2}),
+			},
+			data:      map[string]any{"source_bird_id": "source-bird", "target_bird_id": "target-bird"},
+			wantError: "insufficient essence",
+		},
+		{
 			name: "bought source insufficient essence",
 			birds: []gamesession.StoredBird{
 				storedBirdForTest("target-bird", gameobject.BirdTypeSparrow, gameobject.Position{X: 2, Y: 2}),
@@ -563,6 +611,9 @@ func TestWebsocketMergeTowerRejections(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sessions := quietSession()
 			sessions.birds = tc.birds
+			if tc.name == "existing towers insufficient essence" {
+				sessions.state.Essence = 49
+			}
 			if tc.name == "bought source insufficient essence" {
 				sessions.state.Essence = 10
 			}
@@ -612,7 +663,7 @@ func TestPlacedBirdsFromStoredRestoresHybridAttackBehaviour(t *testing.T) {
 // Quiz edge cases
 // ---------------------------------------------------------------------------
 
-func TestWebsocketQuizRequestWithoutSessionReturnsError(t *testing.T) {
+func TestWebsocketQuizRequestWithoutSessionReturnsUnavailable(t *testing.T) {
 	handler := New(config.Config{}, standardLevels(), &fakeMapCache{}).Router()
 	httpServer := startHTTPServer(t, handler)
 	defer httpServer.Close()
@@ -624,10 +675,17 @@ func TestWebsocketQuizRequestWithoutSessionReturnsError(t *testing.T) {
 		t.Fatalf("WriteJSON failed: %v", err)
 	}
 
-	errMsg := readMessageOfType(t, conn, "error")
-	body, _ := json.Marshal(errMsg.Data)
-	if !jsonContains(body, "game session is not running") {
-		t.Fatalf("expected 'game session is not running' error, got: %s", body)
+	unavailable := readMessageOfType(t, conn, "game.quiz.unavailable")
+	body, err := json.Marshal(unavailable.Data)
+	if err != nil {
+		t.Fatalf("Marshal quiz unavailable failed: %v", err)
+	}
+	var state QuizUnavailableState
+	if err := json.Unmarshal(body, &state); err != nil {
+		t.Fatalf("Unmarshal quiz unavailable failed: %v", err)
+	}
+	if state.Reason != "game_not_started" {
+		t.Fatalf("expected game_not_started, got %+v", state)
 	}
 }
 

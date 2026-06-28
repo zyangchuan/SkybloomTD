@@ -68,6 +68,9 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('btn_blue_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blue_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_blank_round', '/game/assets/gui/buttons_text/ButtonText_Small_Blank_Round.svg', { width: 200, height: 80 });
     this.load.svg('btn_orange_round', '/game/assets/gui/buttons_text/ButtonText_Small_Orange_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_green_round', '/game/assets/gui/buttons_text/ButtonText_Small_Green_Round.svg', { width: 200, height: 80 });
+    this.load.svg('btn_large_blue_round', '/game/assets/gui/buttons_text/ButtonText_Large_Blue_Round.svg', { width: 400, height: 160 });
+    this.load.svg('icon_arrow', '/game/assets/gui/icons/Icon_Small_Blank_Arrow.svg', { width: 48, height: 48 });
     this.load.svg('textbox_blank_side', '/game/assets/gui/boxes_banners/TextBox_Blank_Side.svg', { width: 450, height: 160 });
     this.load.image('head_sparrow', '/game/assets/birds/sparrow_head.png');
     this.load.image('head_woodpecker', '/game/assets/birds/woodpecker_head.png');

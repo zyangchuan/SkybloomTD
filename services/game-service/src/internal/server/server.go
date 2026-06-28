@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -34,15 +35,19 @@ const gameTicksPerSecond = 20.0
 const placeTowerAction = "place_tower"
 const mergeTowerAction = "merge_tower"
 const awardQuizEssenceAction = "award_quiz_essence"
+const markQuizStartedAction = "mark_quiz_started"
 const pauseGameAction = "pause_game"
 const resumeGameAction = "resume_game"
+const startGameAction = "start_game"
 
 const (
-	waveClearDelayTicks     = int64(60)
-	enemySpawnIntervalTicks = int64(40)
-	groupGapTicks           = int64(160)
-	baseHealthDamage        = 10
-	correctQuizEssenceAward = 30
+	waveClearDelayTicks        = int64(60)
+	enemySpawnIntervalTicks    = int64(22)
+	minEnemySpawnIntervalTicks = int64(8)
+	groupGapTicks              = int64(160)
+	baseHealthDamage           = 10
+	correctQuizEssenceAward    = 50
+	quizRequestCooldown        = 20 * time.Second
 )
 
 type LevelRepository interface {
@@ -107,19 +112,22 @@ type InitialState struct {
 }
 
 type GameState struct {
-	SessionID   string            `json:"session_id"`
-	LevelID     string            `json:"level_id"`
-	Health      int               `json:"health"`
-	Essence     int               `json:"essence"`
-	Wave        int               `json:"wave"`
-	Tick        int64             `json:"tick"`
-	ServerTime  time.Time         `json:"server_time"`
-	BirdTypes   []BirdTypeInfo    `json:"bird_types,omitempty"`
-	EnemyTypes  []EnemyTypeInfo   `json:"enemy_types,omitempty"`
-	Birds       []PlacedBirdState `json:"birds"`
-	Enemies     []EnemyState      `json:"enemies"`
-	Projectiles []ProjectileState `json:"projectiles"`
-	Events      []GameEvent       `json:"events,omitempty"`
+	SessionID                    string            `json:"session_id"`
+	LevelID                      string            `json:"level_id"`
+	Health                       int               `json:"health"`
+	Essence                      int               `json:"essence"`
+	Wave                         int               `json:"wave"`
+	Tick                         int64             `json:"tick"`
+	ServerTime                   time.Time         `json:"server_time"`
+	LoopStarted                  bool              `json:"loop_started"`
+	LoopPaused                   bool              `json:"loop_paused"`
+	QuizCooldownRemainingSeconds int               `json:"quiz_cooldown_remaining_seconds"`
+	BirdTypes                    []BirdTypeInfo    `json:"bird_types,omitempty"`
+	EnemyTypes                   []EnemyTypeInfo   `json:"enemy_types,omitempty"`
+	Birds                        []PlacedBirdState `json:"birds"`
+	Enemies                      []EnemyState      `json:"enemies"`
+	Projectiles                  []ProjectileState `json:"projectiles"`
+	Events                       []GameEvent       `json:"events,omitempty"`
 }
 
 type BirdTypeInfo struct {
@@ -206,7 +214,8 @@ type QuizPromptState struct {
 }
 
 type QuizUnavailableState struct {
-	Reason string `json:"reason"`
+	Reason            string `json:"reason"`
+	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
 }
 
 type QuizResultState struct {
@@ -247,6 +256,7 @@ type clientAction struct {
 	PlaceTower    placeTowerRequest
 	MergeTower    mergeTowerRequest
 	EssenceReward int
+	QuizStartedAt time.Time
 	Result        chan actionResult
 }
 
@@ -256,14 +266,16 @@ type actionResult struct {
 }
 
 type runningGameLoop struct {
-	sessionID     string
-	levelID       string
-	generationID  string
-	userID        string
-	currentQuizID string
-	stop          context.CancelFunc
-	actions       chan clientAction
-	done          chan struct{}
+	sessionID         string
+	levelID           string
+	generationID      string
+	userID            string
+	currentQuizID     string
+	lastQuizStartedAt time.Time
+	loopStarted       bool
+	stop              context.CancelFunc
+	actions           chan clientAction
+	done              chan struct{}
 }
 
 func (l *runningGameLoop) stopped() bool {
@@ -290,15 +302,16 @@ func stopGameLoop(loop *runningGameLoop) {
 }
 
 type runtimeSession struct {
-	session     gamesession.State
-	economy     gamesession.Economy
-	birds       []placedBird
-	enemies     []gameobject.Enemy
-	projectiles []gameobject.Projectile
-	levelMap    mapgen.GeneratedMap
-	path        []gameobject.Position
-	loopStarted bool
-	loopPaused  bool
+	session           gamesession.State
+	economy           gamesession.Economy
+	birds             []placedBird
+	enemies           []gameobject.Enemy
+	projectiles       []gameobject.Projectile
+	levelMap          mapgen.GeneratedMap
+	path              []gameobject.Position
+	loopStarted       bool
+	loopPaused        bool
+	lastQuizStartedAt time.Time
 
 	waveStartedAtTick int64
 	waveSpawned       int
@@ -551,6 +564,14 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				default:
 				}
 			}
+		case "game.session.run":
+			if gameLoop != nil && !gameLoop.stopped() {
+				select {
+				case gameLoop.actions <- clientAction{Type: startGameAction}:
+					gameLoop.loopStarted = true
+				default:
+				}
+			}
 		case "game.action.place_tower":
 			action, err := decodePlaceTowerAction(message.Data)
 			if err != nil {
@@ -768,12 +789,22 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		levelMap:    levelMap,
 		path:        gamePath(levelMap),
 		loopStarted: storedRuntime.LoopStarted,
+		loopPaused:  storedRuntime.LoopPaused,
 
+		lastQuizStartedAt: storedRuntime.LastQuizStartedAt,
 		waveStartedAtTick: storedRuntime.WaveStartedAtTick,
 		waveSpawned:       storedRuntime.WaveSpawned,
 		nextWaveTick:      storedRuntime.NextWaveTick,
 	}
-	state := gameStateFromRuntime(runtime, session.UpdatedAt, birdTypeCatalog(), enemyTypeCatalog(), nil)
+	if runtime.session.Health > 0 && !gameWon(runtime) {
+		runtime.loopStarted = false
+		runtime.loopPaused = false
+		if err := s.saveRuntimeState(callCtx, runtime); err != nil {
+			log.Printf("game session runtime start save failed session_id=%s: %v", runtime.session.SessionID, err)
+			return nil, errors.New("failed to start game session")
+		}
+	}
+	state := gameStateFromRuntime(runtime, nil, session.UpdatedAt, birdTypeCatalog(), enemyTypeCatalog(), nil)
 	if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.session.started", Data: state}); err != nil {
 		return nil, err
 	}
@@ -792,28 +823,30 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 
 	loopCtx, stop := context.WithCancel(ctx)
 	loop := &runningGameLoop{
-		sessionID:    runtime.session.SessionID,
-		levelID:      runtime.session.LevelID,
-		generationID: runtime.session.GenerationID,
-		userID:       runtime.session.UserID,
-		stop:         stop,
-		actions:      make(chan clientAction, 64),
-		done:         make(chan struct{}),
+		sessionID:         runtime.session.SessionID,
+		levelID:           runtime.session.LevelID,
+		generationID:      runtime.session.GenerationID,
+		userID:            runtime.session.UserID,
+		lastQuizStartedAt: runtime.lastQuizStartedAt,
+		loopStarted:       runtime.loopStarted,
+		stop:              stop,
+		actions:           make(chan clientAction, 64),
+		done:              make(chan struct{}),
 	}
-	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop.actions, loop.done)
+	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop)
 	return loop, nil
 }
 
-func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, actions <-chan clientAction, done chan<- struct{}) {
+func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, loop *runningGameLoop) {
 	ticker := time.NewTicker(gameTickInterval)
 	defer ticker.Stop()
-	defer close(done)
+	defer close(loop.done)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case action := <-actions:
+		case action := <-loop.actions:
 			switch action.Type {
 			case placeTowerAction, mergeTowerAction:
 				if err := s.processClientAction(ctx, &runtime, action); err != nil {
@@ -832,15 +865,23 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 					return
 				}
 			case awardQuizEssenceAction:
-				runtime.loopStarted = true
 				essence, err := s.awardEssence(ctx, &runtime, action.EssenceReward)
 				if action.Result != nil {
 					action.Result <- actionResult{Essence: essence, Err: err}
+				}
+			case markQuizStartedAction:
+				runtime.lastQuizStartedAt = action.QuizStartedAt.UTC()
+				err := s.saveRuntimeState(ctx, runtime)
+				if action.Result != nil {
+					action.Result <- actionResult{Err: err}
 				}
 			case pauseGameAction:
 				runtime.loopPaused = true
 			case resumeGameAction:
 				runtime.loopPaused = false
+			case startGameAction:
+				runtime.loopStarted = true
+				s.saveRuntimeState(ctx, runtime)
 			default:
 				if action.Result != nil {
 					action.Result <- actionResult{Err: errors.New("unsupported action")}
@@ -854,7 +895,7 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 			if err := s.saveRuntimeState(ctx, runtime); err != nil {
 				log.Printf("game session runtime save failed session_id=%s: %v", runtime.session.SessionID, err)
 			}
-			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, runtime.session.UpdatedAt, nil, nil, events)}); err != nil {
+			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, loop, runtime.session.UpdatedAt, nil, nil, events)}); err != nil {
 				log.Printf("game state write failed session_id=%s: %v", runtime.session.SessionID, err)
 				return
 			}
@@ -924,13 +965,57 @@ func (s *Server) deleteQuizCache(ctx context.Context, generationID string) error
 
 func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop) error {
 	if loop == nil || loop.stopped() {
-		return errors.New("game session is not running")
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "game_not_started"},
+		})
+	}
+	if !loop.loopStarted {
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "game_not_started"},
+		})
 	}
 	if s.quizzes == nil {
 		return errors.New("quiz cache is not configured")
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+
+	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
+	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		loop.currentQuizID = ""
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
+		})
+	}
+	if err != nil {
+		return errors.New("failed to load quiz")
+	}
+	if len(quizzes.Quizzes) == 0 {
+		loop.currentQuizID = ""
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
+		})
+	}
+
+	if quiz, ok := cachedQuizByID(quizzes.Quizzes, quizzes.CurrentQuizID); ok {
+		loop.currentQuizID = quiz.ID
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.presented",
+			Data: quizPromptState(quiz, len(quizzes.Quizzes)),
+		})
+	}
+
+	if retryAfter := quizCooldownRemainingSeconds(loop.lastQuizStartedAt, time.Now().UTC()); retryAfter > 0 {
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "quiz_cooldown", RetryAfterSeconds: retryAfter},
+		})
+	}
+
 	quiz, remaining, err := s.quizzes.PeekRandom(callCtx, loop.generationID)
 	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
 		loop.currentQuizID = ""
@@ -942,6 +1027,11 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	if err != nil {
 		return errors.New("failed to load quiz")
 	}
+	startedAt := time.Now().UTC()
+	if err := s.markQuizStartedThroughLoop(ctx, loop, startedAt); err != nil {
+		return err
+	}
+	loop.lastQuizStartedAt = startedAt
 	loop.currentQuizID = quiz.ID
 	return writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.presented",
@@ -1072,6 +1162,34 @@ func (s *Server) awardEssenceThroughLoop(ctx context.Context, loop *runningGameL
 	}
 }
 
+func (s *Server) markQuizStartedThroughLoop(ctx context.Context, loop *runningGameLoop, startedAt time.Time) error {
+	if loop == nil || loop.stopped() {
+		return errors.New("game session is not running")
+	}
+	result := make(chan actionResult, 1)
+	action := clientAction{
+		Type:          markQuizStartedAction,
+		QuizStartedAt: startedAt,
+		Result:        result,
+	}
+	select {
+	case loop.actions <- action:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * time.Second):
+		return errors.New("game action queue timed out")
+	}
+
+	select {
+	case response := <-result:
+		return response.Err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * time.Second):
+		return errors.New("game action response timed out")
+	}
+}
+
 func (s *Server) saveQuizMistakeAsync(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) {
 	if s.levels == nil {
 		log.Printf("quiz mistake save skipped quiz_id=%s: level repository is not configured", quiz.ID)
@@ -1198,12 +1316,22 @@ func (s *Server) mergeExistingTowers(ctx context.Context, runtime *runtimeSessio
 	if !ok {
 		return errors.New("bird types cannot be merged")
 	}
+	hybridStats, err := gameobject.BirdStatsForType(hybridType)
+	if err != nil {
+		return errors.New("failed to create hybrid bird")
+	}
+
+	nextEconomy := runtime.economy
+	if !nextEconomy.Consume(hybridStats.Cost) {
+		return errors.New("insufficient essence")
+	}
 
 	hybrid, err := gameobject.NewBird(uuid.NewString(), hybridType, target.bird.Position)
 	if err != nil {
 		return errors.New("failed to create hybrid bird")
 	}
 
+	previousEconomy := runtime.economy
 	previousBirds := runtime.birds
 	nextBirds := make([]placedBird, 0, len(runtime.birds)-1)
 	for i, placed := range runtime.birds {
@@ -1213,9 +1341,13 @@ func (s *Server) mergeExistingTowers(ctx context.Context, runtime *runtimeSessio
 		nextBirds = append(nextBirds, placed)
 	}
 	nextBirds = append(nextBirds, placedBird{birdType: hybridType, bird: hybrid})
+	runtime.economy = nextEconomy
+	runtime.session.Essence = nextEconomy.Essence
 	runtime.birds = nextBirds
 
 	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.economy = previousEconomy
+		runtime.session.Essence = previousEconomy.Essence
 		runtime.birds = previousBirds
 		log.Printf("game session merge save failed session_id=%s: %v", runtime.session.SessionID, err)
 		return errors.New("failed to save tower merge")
@@ -1225,7 +1357,7 @@ func (s *Server) mergeExistingTowers(ctx context.Context, runtime *runtimeSessio
 }
 
 func (s *Server) mergeBoughtBirdWithTower(ctx context.Context, runtime *runtimeSession, sourceType string, targetID string) error {
-	stats, err := gameobject.BirdStatsForType(sourceType)
+	sourceStats, err := gameobject.BirdStatsForType(sourceType)
 	if err != nil {
 		return errors.New("unknown bird type")
 	}
@@ -1242,9 +1374,16 @@ func (s *Server) mergeBoughtBirdWithTower(ctx context.Context, runtime *runtimeS
 	if !ok {
 		return errors.New("bird types cannot be merged")
 	}
+	hybridStats, err := gameobject.BirdStatsForType(hybridType)
+	if err != nil {
+		return errors.New("failed to create hybrid bird")
+	}
 
 	nextEconomy := runtime.economy
-	if !nextEconomy.Consume(stats.Cost) {
+	if !nextEconomy.Consume(sourceStats.Cost) {
+		return errors.New("insufficient essence")
+	}
+	if !nextEconomy.Consume(hybridStats.Cost) {
 		return errors.New("insufficient essence")
 	}
 
@@ -1307,29 +1446,49 @@ func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) e
 		WaveStartedAtTick: runtime.waveStartedAtTick,
 		WaveSpawned:       runtime.waveSpawned,
 		NextWaveTick:      runtime.nextWaveTick,
+		LastQuizStartedAt: runtime.lastQuizStartedAt,
 		Birds:             storedBirds(runtime.birds),
 		Enemies:           storedEnemies(runtime.enemies),
 		Projectiles:       storedProjectiles(runtime.projectiles),
 	})
 }
 
-func gameStateFromRuntime(runtime runtimeSession, serverTime time.Time, birdTypes []BirdTypeInfo, enemyTypes []EnemyTypeInfo, events []GameEvent) GameState {
+func gameStateFromRuntime(runtime runtimeSession, loop *runningGameLoop, serverTime time.Time, birdTypes []BirdTypeInfo, enemyTypes []EnemyTypeInfo, events []GameEvent) GameState {
 	session := runtime.session
-	return GameState{
-		SessionID:   session.SessionID,
-		LevelID:     session.LevelID,
-		Health:      session.Health,
-		Essence:     runtime.economy.Essence,
-		Wave:        session.Wave,
-		Tick:        session.Tick,
-		ServerTime:  serverTime.UTC(),
-		BirdTypes:   birdTypes,
-		EnemyTypes:  enemyTypes,
-		Birds:       placedBirdStates(runtime.birds),
-		Enemies:     enemyStates(runtime.enemies),
-		Projectiles: projectileStates(runtime.projectiles),
-		Events:      events,
+	cooldown := 0
+	if loop != nil && loop.currentQuizID == "" {
+		cooldown = quizCooldownRemainingSeconds(runtime.lastQuizStartedAt, serverTime)
 	}
+
+	return GameState{
+		SessionID:                    session.SessionID,
+		LevelID:                      session.LevelID,
+		Health:                       session.Health,
+		Essence:                      runtime.economy.Essence,
+		Wave:                         session.Wave,
+		Tick:                         session.Tick,
+		ServerTime:                   serverTime.UTC(),
+		LoopStarted:                  runtime.loopStarted,
+		LoopPaused:                   runtime.loopPaused,
+		QuizCooldownRemainingSeconds: cooldown,
+		BirdTypes:                    birdTypes,
+		EnemyTypes:                   enemyTypes,
+		Birds:                        placedBirdStates(runtime.birds),
+		Enemies:                      enemyStates(runtime.enemies),
+		Projectiles:                  projectileStates(runtime.projectiles),
+		Events:                       events,
+	}
+}
+
+func quizCooldownRemainingSeconds(lastQuizStartedAt time.Time, now time.Time) int {
+	if lastQuizStartedAt.IsZero() {
+		return 0
+	}
+	remaining := quizRequestCooldown - now.UTC().Sub(lastQuizStartedAt.UTC())
+	if remaining <= 0 {
+		return 0
+	}
+	return int(math.Ceil(remaining.Seconds()))
 }
 
 type spawnGroup struct {
@@ -1367,24 +1526,46 @@ func (w waveDefinition) enemyAt(index int) (spawnGroup, bool) {
 func waveDefinitions() []waveDefinition {
 	return []waveDefinition{
 		{Wave: 1, Groups: []spawnGroup{
-			scaledGroup(1, gameobject.EnemyTypeSmog, 10),
+			scaledGroup(1, gameobject.EnemyTypeSmog, 20),
 		}},
 		{Wave: 2, Groups: []spawnGroup{
-			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
-			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
-			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
-			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(2, gameobject.EnemyTypeSmog, 10),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 10),
+			scaledGroup(2, gameobject.EnemyTypeSmog, 10),
+			scaledGroup(2, gameobject.EnemyTypeNoise, 10),
 		}},
 		{Wave: 3, Groups: []spawnGroup{
 			scaledGroup(3, gameobject.EnemyTypeJunk, 1),
-			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
-			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(3, gameobject.EnemyTypeSmog, 10),
+			scaledGroup(3, gameobject.EnemyTypeNoise, 10),
 			scaledGroup(3, gameobject.EnemyTypeJunk, 1),
-			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
-			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(3, gameobject.EnemyTypeSmog, 10),
+			scaledGroup(3, gameobject.EnemyTypeNoise, 10),
 			scaledGroup(3, gameobject.EnemyTypeJunk, 1),
-			scaledGroup(2, gameobject.EnemyTypeSmog, 5),
-			scaledGroup(2, gameobject.EnemyTypeNoise, 5),
+			scaledGroup(3, gameobject.EnemyTypeSmog, 10),
+			scaledGroup(3, gameobject.EnemyTypeNoise, 10),
+		}},
+		{Wave: 4, Groups: []spawnGroup{
+			scaledGroup(4, gameobject.EnemyTypeJunk, 1),
+			scaledGroup(4, gameobject.EnemyTypeSmog, 15),
+			scaledGroup(4, gameobject.EnemyTypeNoise, 20),
+			scaledGroup(4, gameobject.EnemyTypeJunk, 2),
+			scaledGroup(4, gameobject.EnemyTypeSmog, 15),
+			scaledGroup(4, gameobject.EnemyTypeNoise, 20),
+			scaledGroup(4, gameobject.EnemyTypeJunk, 2),
+			scaledGroup(4, gameobject.EnemyTypeSmog, 15),
+			scaledGroup(4, gameobject.EnemyTypeNoise, 20),
+		}},
+		{Wave: 5, Groups: []spawnGroup{
+			scaledGroup(5, gameobject.EnemyTypeJunk, 3),
+			scaledGroup(5, gameobject.EnemyTypeSmog, 20),
+			scaledGroup(5, gameobject.EnemyTypeNoise, 20),
+			scaledGroup(5, gameobject.EnemyTypeJunk, 3),
+			scaledGroup(5, gameobject.EnemyTypeSmog, 20),
+			scaledGroup(5, gameobject.EnemyTypeNoise, 20),
+			scaledGroup(5, gameobject.EnemyTypeJunk, 3),
+			scaledGroup(5, gameobject.EnemyTypeSmog, 20),
+			scaledGroup(5, gameobject.EnemyTypeNoise, 20),
 		}},
 	}
 }
@@ -1473,10 +1654,11 @@ func spawnEnemies(runtime *runtimeSession) []GameEvent {
 	groupIndex := int64(runtime.waveSpawned / groupSize)
 	indexInGroup := int64(runtime.waveSpawned % groupSize)
 
-	groupDurationTicks := int64(groupSize) * enemySpawnIntervalTicks
+	spawnIntervalTicks := enemySpawnIntervalTicksForWave(wave.Wave)
+	groupDurationTicks := int64(groupSize) * spawnIntervalTicks
 	groupStartIntervalTicks := groupDurationTicks + groupGapTicks
 
-	nextSpawnTick := runtime.waveStartedAtTick + (groupIndex * groupStartIntervalTicks) + (indexInGroup * enemySpawnIntervalTicks)
+	nextSpawnTick := runtime.waveStartedAtTick + (groupIndex * groupStartIntervalTicks) + (indexInGroup * spawnIntervalTicks)
 
 	if runtime.session.Tick < nextSpawnTick {
 		return events
@@ -1498,6 +1680,18 @@ func spawnEnemies(runtime *runtimeSession) []GameEvent {
 	runtime.enemies = append(runtime.enemies, enemy)
 	events = append(events, GameEvent{Type: "enemy.spawned", EnemyID: enemy.ID, Wave: wave.Wave, Health: enemy.Health})
 	return events
+}
+
+func enemySpawnIntervalTicksForWave(wave int) int64 {
+	waveOffset := int64(wave - 1)
+	if waveOffset < 0 {
+		waveOffset = 0
+	}
+	interval := enemySpawnIntervalTicks - (waveOffset * 3)
+	if interval < minEnemySpawnIntervalTicks {
+		return minEnemySpawnIntervalTicks
+	}
+	return interval
 }
 
 func activeWaveDefinition(runtime *runtimeSession) (waveDefinition, bool) {
@@ -1634,8 +1828,23 @@ func applyAttackHits(runtime *runtimeSession, hits []gameobject.AttackHit) []Gam
 			Damage:  damage,
 			Health:  target.Health,
 		})
+		if !target.IsAlive() {
+			awardEssenceForEnemyKill(runtime, target.Type)
+		}
 	}
 	return events
+}
+
+func awardEssenceForEnemyKill(runtime *runtimeSession, enemyType string) {
+	if runtime == nil {
+		return
+	}
+	reward, err := gameobject.EnemyEssenceRewardForType(enemyType)
+	if err != nil || reward <= 0 {
+		return
+	}
+	runtime.economy.Add(reward)
+	runtime.session.Essence = runtime.economy.Essence
 }
 
 func targetEnemyIndex(bird gameobject.Bird, enemies []gameobject.Enemy) int {

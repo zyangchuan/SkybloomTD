@@ -170,6 +170,16 @@ function QuizOverlayContent() {
     }
   }, [katexReady, currentQuestion, currentOptions]);
 
+  // Auto-close quiz window 1 second after receiving the answer result
+  useEffect(() => {
+    if (result) {
+      const timer = setTimeout(() => {
+        window.parent.postMessage({ type: 'quiz-close' }, '*');
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [result]);
+
   const resultForCurrentQuiz = result && result.quiz_id === currentQuizId ? result : null;
 
   const optionHighlightClass = (index: number) => {
@@ -478,7 +488,7 @@ function QuizOverlayContent() {
           onClick={handleClose}
           className="absolute top-2 right-2 w-12 h-12 border-none bg-transparent cursor-pointer z-50 transition-transform duration-150 hover:scale-[1.15] active:scale-[0.95]"
           style={{
-            backgroundImage: "url('/game/assets/gui/icons/Icon_Small_WhiteOutline_X.svg')",
+            backgroundImage: "url('/gui/icons/Icon_Small_WhiteOutline_X.svg')",
             backgroundSize: 'contain',
             backgroundPosition: 'center',
             backgroundRepeat: 'no-repeat'
@@ -566,25 +576,12 @@ function QuizOverlayContent() {
           </div>
         )}
 
-        {result && (
-          <button 
-            onClick={() => {
-              window.parent.postMessage({ type: 'quiz-next' }, '*');
-            }}
-            className={isMobile 
-              ? "btn-blue-simple mt-1 py-1.5 px-3 bg-transparent font-concert text-sm text-white text-center flex items-center justify-center cursor-pointer transition-transform duration-150 hover:scale-[1.05] active:scale-[0.95] border-none outline-none select-none z-50"
-              : "btn-blue-simple mt-6 py-4 px-4 bg-transparent font-concert text-[20px] text-white text-center flex items-center justify-center cursor-pointer transition-transform duration-150 hover:scale-[1.05] active:scale-[0.95] border-none outline-none select-none z-50"
-            }
-            style={{ boxSizing: 'border-box' }}
-          >
-            <span style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>Next Quiz</span>
-          </button>
-        )}
+
 
         {result && result.correct && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 animate-essence-float">
             <div className="flex items-center gap-3 font-concert text-5xl text-[#fef08a] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-              <span>+30 Sky Essence</span>
+              <span>+50 Sky Essence</span>
               <img src="/essence.png" className="w-14 h-14 object-contain" alt="" />
             </div>
           </div>
