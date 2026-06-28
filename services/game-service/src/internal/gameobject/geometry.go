@@ -41,3 +41,7 @@ func (v Vector) Rotate(radians float64) Vector {
 		Y: v.X*sin + v.Y*cos,
 	}.Normalize()
 }
+
+func (v Vector) Dot(vector Vector) float64 {
+	return v.X*vector.X + v.Y*vector.Y
+}

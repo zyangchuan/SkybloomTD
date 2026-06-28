@@ -67,18 +67,14 @@ func TestAdvanceRuntimeTickBirdCooldownBlocksAttackUntilReady(t *testing.T) {
 	}
 
 	advanceRuntimeTick(&runtime, time.Now())
-	tickAfterFirstAttack := runtime.session.Tick
 
 	// Sparrow fires at 1 shot/sec = every 20 ticks at 20 ticks/sec.
 	// On tick 1, it fires. Cooldown ends at tick 21.
 	// Advance 10 more ticks: bird should NOT have fired again.
-	projectileCountAfterFirstAttack := len(runtime.projectiles)
 	for i := 0; i < 9; i++ {
 		advanceRuntimeTick(&runtime, time.Now())
 	}
 
-	_ = tickAfterFirstAttack
-	_ = projectileCountAfterFirstAttack
 	// 10 ticks in, cooldown is still active (needs 20 ticks). Enemy may already be
 	// dead from the first shot; we only need to verify the bird's LastFiredAtTick
 	// was set and CanAttack correctly blocks it.
@@ -143,7 +139,7 @@ func TestAdvanceRuntimeTickEnemyHealthDropsToZeroAndEnemyIsRemoved(t *testing.T)
 	}
 }
 
-func TestAdvanceRuntimeTickProjectileMovesTowardTarget(t *testing.T) {
+func TestAdvanceRuntimeTickIgnoresStoredProjectiles(t *testing.T) {
 	runtime := runtimeSession{
 		session: gamesession.State{
 			SessionID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -165,12 +161,13 @@ func TestAdvanceRuntimeTickProjectileMovesTowardTarget(t *testing.T) {
 		path: []gameobject.Position{{X: 0, Y: 0}, {X: 100, Y: 0}},
 	}
 
-	startX := runtime.projectiles[0].Position.X
 	advanceRuntimeTick(&runtime, time.Now())
 
-	// Either the projectile moved closer to the target or it arrived and was resolved.
-	if len(runtime.projectiles) > 0 && runtime.projectiles[0].Position.X <= startX {
-		t.Fatalf("projectile should have moved toward target from x=%f, got x=%f", startX, runtime.projectiles[0].Position.X)
+	if len(runtime.projectiles) != 0 {
+		t.Fatalf("expected obsolete stored projectile to be cleared, got %d projectiles", len(runtime.projectiles))
+	}
+	if runtime.enemies[0].Health != 30 {
+		t.Fatalf("stored projectile should not damage enemies, got health %d", runtime.enemies[0].Health)
 	}
 }
 

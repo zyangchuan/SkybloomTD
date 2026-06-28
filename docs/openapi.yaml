@@ -670,13 +670,15 @@ paths:
         gameplay ticker starts only after the player answers a quiz correctly;
         `game.quiz.result` includes `loop_started=true` when that happens.
         During the session, clients can send `game.action.place_tower` with a
-        `bird_type` and grid `x`/`y`, or send `game.pause` to persist
-        `loop_paused=true` and stop advancing ticks until a later resume flow is
-        added.
+        base `bird_type` and grid `x`/`y`, send `game.action.merge_tower` with
+        compatible source and target bird ids to create hybrid birds, or send
+        `game.pause` to persist `loop_paused=true` and stop advancing ticks
+        until a later resume flow is added. Hybrid bird types are returned in
+        the catalog and state snapshots, but cannot be placed directly.
         Reconnecting with the same `level_id` reuses the existing Redis session
-        for that user and level, including placed birds, active smogs, active
-        projectiles, health, wave, tick, current essence, loop start state, and
-        pause state, until the session expires. The gameplay loop runs three
+        for that user and level, including placed birds, active smogs, health,
+        wave, tick, current essence, loop start state, and pause state, until
+        the session expires. The gameplay loop runs three
         smog waves, each split into three subwaves of grouped spawns. The first
         wave starts
         on the first gameplay tick after the loop is unlocked, and each later
@@ -709,6 +711,7 @@ paths:
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
+        - $ref: "#/components/schemas/GameMergeTowerActionMessage"
         - $ref: "#/components/schemas/GamePauseWebSocketMessage"
         - $ref: "#/components/schemas/GameExitWebSocketMessage"
         - $ref: "#/components/schemas/GameQuizRequestMessage"
@@ -1165,6 +1168,7 @@ components:
 
     GamePlaceTowerActionMessage:
       type: object
+      description: Place a base bird tower on an empty grid tile. Hybrid birds must be created with `game.action.merge_tower` instead.
       required: [type, data]
       properties:
         type:
@@ -1177,12 +1181,44 @@ components:
             bird_type:
               type: string
               enum: [sparrow, woodpecker, eagle, peacock]
+              description: Base bird type to place. Hybrid bird types are rejected for direct placement.
             x:
               type: integer
               description: Grid column.
             y:
               type: integer
               description: Grid row.
+
+    GameMergeTowerActionMessage:
+      type: object
+      description: Merge an existing target tower with either another existing tower or a newly purchased base bird type. The hybrid appears at the target tower's position.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.merge_tower
+        data:
+          type: object
+          required: [target_bird_id]
+          properties:
+            source_bird_id:
+              type: string
+              description: Existing bird id to consume as one merge parent. Mutually exclusive with `source_bird_type`; no essence is consumed.
+            source_bird_type:
+              type: string
+              enum: [sparrow, woodpecker, eagle, peacock]
+              description: Base bird type to buy and merge into the target tower. Mutually exclusive with `source_bird_id`; consumes this bird type's normal essence cost.
+            target_bird_id:
+              type: string
+              description: Existing bird id to consume as the target merge parent; the hybrid appears at this bird's position.
+          description: |
+            Exactly one of `source_bird_id` or `source_bird_type` is required.
+
+            Supported unordered merge recipes:
+            - `sparrow` + `eagle` -> `falcon`
+            - `woodpecker` + `peacock` -> `kingfisher`
+            - `peacock` + `eagle` -> `phoenix`
+            - `kingfisher` + `eagle` -> `sun_god`
 
     GamePauseWebSocketMessage:
       type: object
@@ -1357,12 +1393,17 @@ components:
           properties:
             action:
               type: string
-              example: place_tower
+              enum: [place_tower, merge_tower]
             bird_id:
               type: string
               format: uuid
             bird:
               $ref: "#/components/schemas/PlacedBird"
+            removed_bird_ids:
+              type: array
+              description: Present for successful `merge_tower`; lists consumed existing bird ids. Existing-tower merges include source and target ids, while bought-source merges include only the target id.
+              items:
+                type: string
 
     GameActionRejectedMessage:
       type: object
@@ -1377,7 +1418,7 @@ components:
           properties:
             action:
               type: string
-              example: place_tower
+              enum: [place_tower, merge_tower]
             error:
               type: string
               example: insufficient essence
@@ -1554,7 +1595,7 @@ components:
             $ref: "#/components/schemas/Smog"
         projectiles:
           type: array
-          description: Active projectiles in flight.
+          description: Deprecated combat-visual compatibility field. Authoritative damage is resolved immediately in attack events, so this is normally empty.
           items:
             $ref: "#/components/schemas/Projectile"
         events:
@@ -1770,12 +1811,13 @@ components:
       properties:
         type:
           type: string
-          enum: [sparrow, woodpecker, eagle, peacock]
+          enum: [sparrow, woodpecker, eagle, peacock, falcon, kingfisher, phoenix, sun_god]
         stats:
           $ref: "#/components/schemas/BirdStats"
         attack:
           type: string
           enum: [single, splash]
+          description: Splash attacks resolve as three immediate feather fan lanes from the bird tower toward the selected target.
 
     PlacedBird:
       type: object
@@ -1786,7 +1828,7 @@ components:
           format: uuid
         type:
           type: string
-          enum: [sparrow, woodpecker, eagle, peacock]
+          enum: [sparrow, woodpecker, eagle, peacock, falcon, kingfisher, phoenix, sun_god]
         position:
           $ref: "#/components/schemas/GridPosition"
         stats:
@@ -1814,6 +1856,8 @@ components:
 
     Projectile:
       type: object
+      deprecated: true
+      description: Legacy projectile snapshot shape. Current authoritative combat no longer simulates projectile position or collision.
       required: [id, type, damage, projectile_speed, position, direction, remaining_range, hit_radius]
       properties:
         id:
@@ -1859,8 +1903,10 @@ components:
         projectile_id:
           type: string
           format: uuid
+          deprecated: true
         projectile_ids:
           type: array
+          deprecated: true
           items:
             type: string
             format: uuid
@@ -1882,6 +1928,8 @@ components:
         projectile_speed:
           type: number
           format: double
+          deprecated: true
+          description: Legacy visual projectile speed. Current backend combat resolves attacks immediately.
         fire_rate:
           type: number
           format: double
