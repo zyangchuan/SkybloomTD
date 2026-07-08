@@ -92,6 +92,15 @@ export default class BootScene extends Phaser.Scene {
     this.load.audio('audio_wave_1', '/game/assets/audio/Game_Scene_Music_Glorious_Morning.mp3');
     this.load.audio('audio_wave_2', '/game/assets/audio/Game_Scene_Music_Make_Way_for_No_Nonsense.mp3');
     this.load.audio('audio_wave_3', '/game/assets/audio/Game_Scene_Music_Skylit_Cave.mp3');
+    // Preload sound effects
+    this.load.audio('sfx_tower_placement', '/game/assets/sfx/tower_placement.wav');
+    this.load.audio('sfx_enemy_die', '/game/assets/sfx/enemy_die.wav');
+    this.load.audio('sfx_quiz_correct', '/game/assets/sfx/quiz_answer_correct.wav');
+    this.load.audio('sfx_quiz_wrong', '/game/assets/sfx/quiz_answer_wrong.wav');
+    this.load.audio('sfx_bird_sparrow_attack', '/game/assets/sfx/bird_sparrow_attack.wav');
+    this.load.audio('sfx_bird_woodpecker_attack', '/game/assets/sfx/bird_woodpecker_attack.wav');
+    this.load.audio('sfx_bird_eagle_attack', '/game/assets/sfx/bird_eagle_attack.wav');
+    this.load.audio('sfx_bird_peacock_attack', '/game/assets/sfx/bird_peacock_attack.wav');
 
   }
 

@@ -51,7 +51,7 @@ function getAuthErrorMessage(error: unknown) {
 }
 
 async function withSessionCheckTimeout<T>(promise: Promise<T>) {
-  let timeoutId: ReturnType<typeof window.setTimeout> | undefined;
+  let timeoutId: number | undefined;
 
   try {
     return await Promise.race([
