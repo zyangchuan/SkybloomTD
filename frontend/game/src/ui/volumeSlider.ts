@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { AudioSettings } from '../audio/AudioSettings'; 
 
 const mutedSize = 0.10;
 const unmutedSize = 0.115;
@@ -9,15 +10,15 @@ export class VolumeSlider {
     private trackResidue : Phaser.GameObjects.Image;
     private audio : Phaser.GameObjects.Image;
 
-    constructor(scene: Phaser.Scene, x: number, y: number, onVolumeChange: (volume: number) => void) {
+    constructor(scene: Phaser.Scene, key: string, x: number, y: number, onVolumeChange: (volume: number) => void) {
         this.track = scene.add.image(x, y, 'icon_blank_volume_track').setOrigin(0.5, 0.5).setDepth(102).setScale(0.3);
         this.track.setInteractive({ useHandCursor : true});
 
       
         //Need updateVolume, even when it is closed or window is refreshed, the sound remains the same
-        const savedVolume = Number(window.localStorage.getItem('volume') ?? 0.5);
-        const savedMuted = (window.localStorage.getItem('muted')) === 'true' || savedVolume === 0;
-        Number(window.localStorage.getItem('position')?? this.track.x);
+        const savedVolume = key === 'bgm' ? AudioSettings.getBgmVolume() : AudioSettings.getSfxVolume();
+        const savedMuted = (window.localStorage.getItem(`${key}` + '_muted')) === 'true' || savedVolume === 0;
+        Number(window.localStorage.getItem(`${key}` + '_position') ?? this.track.x);
 
         this.audio = scene.add.image(this.track.x - 280, this.track.y - 10,savedMuted? 'icon_audio_off' : 'icon_audio_on').setScale(savedMuted ? mutedSize : unmutedSize).setDepth(110).setInteractive({ useHandCursor: true });
 
@@ -36,28 +37,28 @@ export class VolumeSlider {
 
         // Audio image is replaced by a default bird 
         this.audio.on('pointerover', () => {
-            const muted = (window.localStorage.getItem('muted') === 'true');
+            const muted = (window.localStorage.getItem(`${key}` + '_muted') === 'true');
             this.audio.setScale(muted ? mutedSize + 0.02 : unmutedSize + 0.02);
         });
             
         this.audio.on('pointerout', () => {
-            const muted = (window.localStorage.getItem('muted') === 'true');
+            const muted = (window.localStorage.getItem(`${key}` + '_muted') === 'true');
             this.audio.setScale(muted ? mutedSize : unmutedSize);
         });
 
         this.audio.on('pointerdown', () => {
-            const muted = (window.localStorage.getItem('muted') === 'true');
-            window.localStorage.setItem('muted', (!muted).toString());
+            const muted = (window.localStorage.getItem(`${key}` + '_muted') === 'true');
+            window.localStorage.setItem(`${key}` + '_muted', (!muted).toString());
 
-            if ((window.localStorage.getItem('muted')) === 'true') {
+            if ((window.localStorage.getItem(`${key}` + '_muted')) === 'true') {
                 this.thumb.x = Phaser.Math.Clamp(this.track.x - left, left, right);
                 this.audio.setTexture('icon_audio_off').setScale(mutedSize);
                 onVolumeChange(0);
                 this.thumb.x = left;
                 this.trackResidue.setCrop(0, 0, 0 * this.trackResidue.width, y);
             } else {
-                const volume = Number(window.localStorage.getItem('volume') ?? 0.5);
-                const pos = Number(window.localStorage.getItem('position') ?? this.track.x);
+                const volume = key === 'bgm' ? AudioSettings.getBgmVolume() : AudioSettings.getSfxVolume();
+                const pos = Number(window.localStorage.getItem(`${key}` + '_position') ?? this.track.x);
                 this.thumb.x = Phaser.Math.Clamp(this.track.x - left, left, right);
                 this.audio.setTexture('icon_audio_on').setScale(unmutedSize);
                 onVolumeChange(volume);
@@ -76,15 +77,15 @@ export class VolumeSlider {
             onVolumeChange(volume);
 
             this.trackResidue.setCrop(0, 0, volume * this.trackResidue.width, y);
-            window.localStorage.setItem('volume', volume.toString());
+            window.localStorage.setItem(key, volume.toString());
             if (this.thumb.x === left) {
                 this.audio.setTexture('icon_audio_off');
-                window.localStorage.setItem('muted', 'true');
+                window.localStorage.setItem(`${key}` + '_muted', 'true');
             } else {
                 this.audio.setTexture('icon_audio_on');
-                window.localStorage.setItem('muted', 'false');
+                window.localStorage.setItem(`${key}` + '_muted', 'false');
             }
-            window.localStorage.setItem('position', this.thumb.x.toString())
+            window.localStorage.setItem(`${key}` + '_position', this.thumb.x.toString())
         });
 
         this.thumb.on('drag', (_pointer: any, dragX: number) => {
@@ -94,15 +95,15 @@ export class VolumeSlider {
 
             if (this.thumb.x === left) {
                 this.audio.setTexture('icon_audio_off');
-                window.localStorage.setItem('muted', 'true');
+                window.localStorage.setItem(`${key}` + '_muted', 'true');
             } else {
                 this.audio.setTexture('icon_audio_on');
-                window.localStorage.setItem('muted', 'false');
+                window.localStorage.setItem(`${key}` + '_muted', 'false');
             }
 
             this.trackResidue.setCrop(0, 0, volume * this.trackResidue.width, y);
-            window.localStorage.setItem('volume', volume.toString());
-            window.localStorage.setItem('position', this.thumb.x.toString());
+            window.localStorage.setItem(key, volume.toString());
+            window.localStorage.setItem(`${key}` + '_position', this.thumb.x.toString());
         });
     }
 

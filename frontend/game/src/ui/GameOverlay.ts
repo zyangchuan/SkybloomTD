@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { BgmManager } from '../audio/BgmManager';
 import { VolumeSlider } from './VolumeSlider';
+import { AudioSettings } from '../audio/AudioSettings';
 
 function isMobileDevice(): boolean {
   const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
@@ -82,7 +83,8 @@ export class GameOverlay {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '56px', color: '#000000',
     }).setOrigin(0.5).setDepth(103);
     
-    const bgmVolumeSlider = new VolumeSlider(this.scene, 1000, 800 - 100, (volume) => {
+    const bgmVolumeSlider = new VolumeSlider(this.scene, 'bgm', 1000, 800 - 100, (volume) => {
+      AudioSettings.setBgmVolume(volume);
       this.bgmManager.setVolume(volume);
     });
 
@@ -90,8 +92,8 @@ export class GameOverlay {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '56px', color: '#000000',
     }).setOrigin(0.5).setDepth(103);
     
-    const sfxVolumeSlider = new VolumeSlider(this.scene, 1000, 1000 - 100, (volume) => {
-      this.scene.sound.setVolume(volume);
+    const sfxVolumeSlider = new VolumeSlider(this.scene, 'sfx', 1000, 1000 - 100, (volume) => {
+      AudioSettings.setSfxVolume(volume);
     });
   }
 
