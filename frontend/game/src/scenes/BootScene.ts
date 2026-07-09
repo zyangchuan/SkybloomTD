@@ -60,6 +60,14 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('icon_heart', '/game/assets/gui/icons/Icon_Small_HeartFull.svg');
     this.load.svg('icon_essence', '/game/assets/gui/icons/Icon_Small_CoinDollar.svg');
     this.load.svg('icon_pause', '/game/assets/gui/icons/Icon_Small_WhiteOutline_Pause.svg');
+    this.load.svg('icon_volume_thumb', '/game/assets/gui/sliders/ScrollBar_Blank_Button.svg');
+    this.load.svg('icon_blank_volume_track', '/game/assets/gui/sliders/ScrollBar_Blank_Base.svg');
+    this.load.svg('icon_blue_volume_track', '/game/assets/gui/sliders/ScrollBar_Blue_Base.svg');
+    this.load.svg('icon_pointer', '/game/assets/gui/icons/ScrollBar_Blank_Pointer.svg');
+
+    // Preload HUD PNG icons
+    this.load.image('icon_audio_on', '/game/assets/gui/icons/Icon_Small_Bird_AudioOn.png');
+    this.load.image('icon_audio_off', '/game/assets/gui/icons/Icon_Small_Bird_AudioOff.png');
 
     // Preload bird item assets
     this.load.svg('box_square', '/game/assets/gui/boxes_banners/Box_Square.svg', { width: 256, height: 256 });

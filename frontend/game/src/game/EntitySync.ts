@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import Tower from '../components/Tower';
 import { DAMAGE_TO_BIRD } from '../data/birds';
+import  AudioSettings     from '../audio/AudioSettings';
 
 interface SmogEntry {
   sprite: Phaser.GameObjects.Sprite;
@@ -39,7 +40,7 @@ export class EntitySync {
         const posX = this.offsetX + position.x * this.tileSize + this.tileSize / 2;
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
-        this.scene.sound.play("sfx_tower_placement", { volume: 0.5 });
+        this.scene.sound.play("sfx_tower_placement", { volume: 0.5 * AudioSettings.getSfxVolume() });
         if (stats?.range) tower.range = stats.range;
         tower.setScale(this.tileSize / tower.width * 1.3).setDepth(4);
         this.towers.set(id, tower);
@@ -87,16 +88,16 @@ export class EntitySync {
     const baseProjectileSound = (damage: number) => {
        switch (damage) {
         case 10:
-          this.scene.sound.play("sfx_bird_sparrow_attack", { volume: 0.5 });
+          this.scene.sound.play("sfx_bird_sparrow_attack", { volume: 0.5 * AudioSettings.getSfxVolume() });
           break;
         case 6:
-          this.scene.sound.play("sfx_bird_woodpecker_attack", { volume: 0.5 });
+          this.scene.sound.play("sfx_bird_woodpecker_attack", { volume: 0.5 * AudioSettings.getSfxVolume() });
           break;
         case 30:
-          this.scene.sound.play("sfx_bird_eagle_attack", { volume: 0.5 });
+          this.scene.sound.play("sfx_bird_eagle_attack", { volume: 0.5 * AudioSettings.getSfxVolume() });
           break;
         case 7:
-           this.scene.sound.play("sfx_bird_peacock_attack", { volume: 0.5 });
+           this.scene.sound.play("sfx_bird_peacock_attack", { volume: 0.5 * AudioSettings.getSfxVolume() });
            break;
         default:
           console.error("Damage value does not exist in birds");

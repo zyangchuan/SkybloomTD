@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
+import AudioSettings from './AudioSettings';
 
 export class BgmManager {
     private currentSong: Phaser.Sound.WebAudioSound | null = null;
-    private maxVolume = 0.5;
+    private maxVolume = AudioSettings.getBgmVolume();
     private fadeDuration = 2000; 
 
     constructor(private scene: Phaser.Scene) {}
@@ -74,9 +75,11 @@ export class BgmManager {
     }
 
     setVolume(volume: number) {
-        if (this.currentSong) {
-            this.currentSong.setVolume(volume);
-        }
+       this.maxVolume = volume;
+         if (this.currentSong) {
+              this.currentSong.setVolume(volume);
+         }
+         AudioSettings.setBgmVolume(volume);
     }
 
     updateForWave(wave: number) {

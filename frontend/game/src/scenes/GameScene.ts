@@ -8,6 +8,8 @@ import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
 import { BgmManager } from '../audio/BgmManager';
 
+import AudioSettings from '../audio/AudioSettings';
+
 export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
@@ -45,12 +47,11 @@ export default class GameScene extends Phaser.Scene {
     new MapRenderer(this, this.tileSize, this.offsetX, this.offsetY, this.gridWidth, this.gridHeight).render(mapData);
 
     this.sound.pauseOnBlur = false;
-
+    this.audio    = new BgmManager(this);
     this.entities = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
-    this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
+    this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear(), this.audio);
     this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
     this.quiz     = new QuizManager(this, this.ws);
-    this.audio    = new BgmManager(this);
     this.quiz.createHUD();
 
     this.sound.pauseOnBlur = false;
@@ -141,7 +142,7 @@ export default class GameScene extends Phaser.Scene {
 
     // update if enemy is dead
     for (const e of state.events) {
-      if (e.type === 'smog.damage' && (e.health ?? 0) === 0) this.sound.play('sfx_enemy_die', { volume: 1.0 });
+      if (e.type === 'smog.damage' && (e.health ?? 0) === 0) this.sound.play('sfx_enemy_die', { volume: 1.0 * AudioSettings.getSfxVolume() });
     }
   }
 
