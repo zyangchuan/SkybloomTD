@@ -7,7 +7,7 @@ export class VolumeSlider {
     private audio : Phaser.GameObjects.Image;
 
     constructor(scene: Phaser.Scene, x: number, y: number, onVolumeChange: (volume: number) => void) {
-        this.track = scene.add.image(x, y, 'icon_blank_volume_track').setOrigin(0.5, 0.5).setDepth(102).setScale(0.4);
+        this.track = scene.add.image(x, y, 'icon_blank_volume_track').setOrigin(0.5, 0.5).setDepth(102).setScale(0.3);
         this.track.setInteractive({ useHandCursor : true});
 
       
@@ -16,22 +16,24 @@ export class VolumeSlider {
         const savedMuted = (window.localStorage.getItem('muted')) === 'true' || savedVolume === 0;
         const savedPos = Number(window.localStorage.getItem('position')?? this.track.x);
 
-        this.audio = scene.add.image(this.track.x - 130, this.track.y - 110,savedMuted? 'icon_audio_off' : 'icon_audio_on').setScale(0.35).setDepth(110).setInteractive({ userHandCursor: true });
+        this.audio = scene.add.image(this.track.x - 280, this.track.y - 10,savedMuted? 'icon_audio_off' : 'icon_audio_on').setScale(0.10).setDepth(110).setInteractive({ userHandCursor: true });
 
-        this.trackResidue = scene.add.image(x, y, 'icon_blue_volume_track').setOrigin(0.5, 0.5).setDepth(104).setScale(0.4);
+        this.trackResidue = scene.add.image(x, y, 'icon_blue_volume_track').setOrigin(0.5, 0.5).setDepth(104).setScale(0.3);
         this.trackResidue.setCrop(0, 0, (savedMuted? 0 : savedVolume) * this.trackResidue.width, y);
 
         const left  = x - this.track.displayWidth / 2;
         const right = x + this.track.displayWidth / 2;
 
-        this.thumb = scene.add.image(left + this.track.displayWidth * (savedMuted? 0 : savedVolume) , y, 'icon_volume_thumb')
-            .setOrigin(0.5).setDepth(105).setScale(0.65)
+        this.thumb = scene.add.image(left + this.track.displayWidth * (savedMuted? 0 : savedVolume), y, 'icon_volume_thumb')
+            .setOrigin(0.5).setDepth(105).setScale(0.50)
             .setInteractive({ draggable: true });
 
         scene.input.setDraggable(this.thumb);
 
-        this.audio.on('pointerover', () => this.audio.setScale(0.37));
-        this.audio.on('pointerout', () => this.audio.setScale(0.35));
+
+        // Audio is replaced by a default bird 
+        this.audio.on('pointerover', () => this.audio.setScale(0.115));
+        this.audio.on('pointerout', () => this.audio.setScale(0.10));
         this.audio.on('pointerdown', () => {
             const muted = (window.localStorage.getItem('muted') === 'true');
 
