@@ -66,7 +66,7 @@ export class GameOverlay {
     resumeBtn.on('pointerout',  () => { resumeBtn.setScale(1.1);  resumeLabel.setScale(1.0).setColor('#ffffff'); });
     resumeBtn.on('pointerdown', () => {
       this.exitPaused();
-      [backdrop, dialog, title, resumeBtn, resumeLabel, exitBtn, exitLabel, music, volumeSlider].forEach(o => o.destroy());
+      [backdrop, dialog, title, resumeBtn, resumeLabel, exitBtn, exitLabel, music, bgmVolumeSlider, sfx, sfxVolumeSlider].forEach(o => o.destroy());
     });
 
    const exitBtn   = this.scene.add.sprite(940, 600 - 100, 'btn_blank_round').setScale(1.1).setDepth(102).setInteractive({ useHandCursor: true });
@@ -82,11 +82,17 @@ export class GameOverlay {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '56px', color: '#000000',
     }).setOrigin(0.5).setDepth(103);
     
-    const volumeSlider = new VolumeSlider(this.scene, 1000, 700, (volume) => {
+    const bgmVolumeSlider = new VolumeSlider(this.scene, 1000, 800 - 100, (volume) => {
       this.bgmManager.setVolume(volume);
-  });
+    });
 
-
+    const sfx = this.scene.add.text(940, 900 - 100, 'SFX', {
+      fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '56px', color: '#000000',
+    }).setOrigin(0.5).setDepth(103);
+    
+    const sfxVolumeSlider = new VolumeSlider(this.scene, 1000, 1000 - 100, (volume) => {
+      this.scene.sound.setVolume(volume);
+    });
   }
 
   // ─── Mistakes summary ────────────────────────────────────────────────────────
