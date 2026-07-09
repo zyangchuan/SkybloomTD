@@ -9,6 +9,7 @@ export class VolumeSlider {
     private thumb: Phaser.GameObjects.Image;
     private trackResidue : Phaser.GameObjects.Image;
     private audio : Phaser.GameObjects.Image;
+    private lastVolume: number;
 
     constructor(scene: Phaser.Scene, key: string, x: number, y: number, onVolumeChange: (volume: number) => void) {
         this.track = scene.add.image(x, y, 'icon_blank_volume_track').setOrigin(0.5, 0.5).setDepth(102).setScale(0.3);
@@ -18,9 +19,11 @@ export class VolumeSlider {
         //Need updateVolume, even when it is closed or window is refreshed, the sound remains the same
         const savedVolume = key === 'bgm' ? AudioSettings.getBgmVolume() : AudioSettings.getSfxVolume();
         const savedMuted = (window.localStorage.getItem(`${key}` + '_muted')) === 'true' || savedVolume === 0;
-        Number(window.localStorage.getItem(`${key}` + '_position') ?? this.track.x);
 
-        this.audio = scene.add.image(this.track.x - 280, this.track.y - 10,savedMuted? 'icon_audio_off' : 'icon_audio_on').setScale(savedMuted ? mutedSize : unmutedSize).setDepth(110).setInteractive({ useHandCursor: true });
+        const savedLastVolume = Number(window.localStorage.getItem(`${key}` + '_lastVolume') ?? 0.5);
+        this.lastVolume = savedLastVolume > 0 ? savedLastVolume : 0.5;
+       
+        this.audio = scene.add.image(this.track.x - 280, this.track.y - 10, savedMuted? `icon_audio_${key}_off`: `icon_audio_${key}_on`).setScale(savedMuted ? mutedSize : unmutedSize).setDepth(110).setInteractive({ useHandCursor: true });
 
         this.trackResidue = scene.add.image(x, y, 'icon_blue_volume_track').setOrigin(0.5, 0.5).setDepth(104).setScale(0.3);
         this.trackResidue.setCrop(0, 0, (savedMuted? 0 : savedVolume) * this.trackResidue.width, y);
@@ -52,18 +55,17 @@ export class VolumeSlider {
 
             if ((window.localStorage.getItem(`${key}` + '_muted')) === 'true') {
                 this.thumb.x = Phaser.Math.Clamp(this.track.x - left, left, right);
-                this.audio.setTexture('icon_audio_off').setScale(mutedSize);
+                this.audio.setTexture(`icon_audio_${key}_off`).setScale(mutedSize);
                 onVolumeChange(0);
                 this.thumb.x = left;
                 this.trackResidue.setCrop(0, 0, 0 * this.trackResidue.width, y);
             } else {
-                const volume = key === 'bgm' ? AudioSettings.getBgmVolume() : AudioSettings.getSfxVolume();
                 const pos = Number(window.localStorage.getItem(`${key}` + '_position') ?? this.track.x);
                 this.thumb.x = Phaser.Math.Clamp(this.track.x - left, left, right);
-                this.audio.setTexture('icon_audio_on').setScale(unmutedSize);
-                onVolumeChange(volume);
+                this.audio.setTexture(`icon_audio_${key}_on`).setScale(unmutedSize);
+                onVolumeChange(this.lastVolume);
                 this.thumb.x = pos;
-                this.trackResidue.setCrop(0, 0, volume * this.trackResidue.width, y);      
+                this.trackResidue.setCrop(0, 0, this.lastVolume * this.trackResidue.width, y);      
             }
 
         });
@@ -75,14 +77,17 @@ export class VolumeSlider {
             this.thumb.x = posX;
             const volume = (posX - left) / (right - left);
             onVolumeChange(volume);
+            if (volume > 0) {
+                this.lastVolume = volume;
+                window.localStorage.setItem(`${key}` + '_lastVolume', this.lastVolume.toString());
+            }
 
             this.trackResidue.setCrop(0, 0, volume * this.trackResidue.width, y);
-            window.localStorage.setItem(key, volume.toString());
             if (this.thumb.x === left) {
-                this.audio.setTexture('icon_audio_off');
+                this.audio.setTexture(`icon_audio_${key}_off`);
                 window.localStorage.setItem(`${key}` + '_muted', 'true');
             } else {
-                this.audio.setTexture('icon_audio_on');
+                this.audio.setTexture(`icon_audio_${key}_on`);
                 window.localStorage.setItem(`${key}` + '_muted', 'false');
             }
             window.localStorage.setItem(`${key}` + '_position', this.thumb.x.toString())
@@ -92,17 +97,20 @@ export class VolumeSlider {
             this.thumb.x = Phaser.Math.Clamp(dragX, left, right);
             const volume = (this.thumb.x - left) / (right - left);
             onVolumeChange(volume);
+            if (volume > 0) {
+                this.lastVolume = volume;
+                window.localStorage.setItem(`${key}` + '_lastVolume', this.lastVolume.toString());
+            }
 
             if (this.thumb.x === left) {
-                this.audio.setTexture('icon_audio_off');
+                this.audio.setTexture(`icon_audio_${key}_off`);
                 window.localStorage.setItem(`${key}` + '_muted', 'true');
             } else {
-                this.audio.setTexture('icon_audio_on');
+                this.audio.setTexture(`icon_audio_${key}_on`);
                 window.localStorage.setItem(`${key}` + '_muted', 'false');
             }
 
             this.trackResidue.setCrop(0, 0, volume * this.trackResidue.width, y);
-            window.localStorage.setItem(key, volume.toString());
             window.localStorage.setItem(`${key}` + '_position', this.thumb.x.toString());
         });
     }

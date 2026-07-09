@@ -8,7 +8,7 @@ export class BgmManager {
 
     constructor(private scene: Phaser.Scene) {}
 
-    play(song: string) {
+ play(song: string) {
         // Already playing this song — don't restart it.
         if (this.currentSong?.key === song && this.currentSong.isPlaying) {
             return;
@@ -39,7 +39,7 @@ export class BgmManager {
     private fadeIn(song: string, start: boolean) {
         const next = this.scene.sound.add(song, {
             loop: true,
-            volume: start === true? 0.5 : 0,
+            volume: start === true? this.maxVolume : 0,
         }) as Phaser.Sound.WebAudioSound;
         next.play();
         this.currentSong = next;
