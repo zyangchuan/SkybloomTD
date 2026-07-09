@@ -77,7 +77,7 @@ export class BgmManager {
     setVolume(volume: number) {
        this.maxVolume = volume;
          if (this.currentSong) {
-              this.currentSong.setVolume(volume);
+            this.currentSong.setVolume(volume);
          }
          AudioSettings.setBgmVolume(volume);
     }

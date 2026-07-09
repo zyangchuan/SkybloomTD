@@ -60,7 +60,7 @@ export class VolumeSlider {
                 this.thumb.x = left;
                 this.trackResidue.setCrop(0, 0, 0 * this.trackResidue.width, y);
             } else {
-                const pos = Number(window.localStorage.getItem(`${key}` + '_position') ?? this.track.x);
+                const pos = left + (right - left) * this.lastVolume;
                 this.thumb.x = Phaser.Math.Clamp(this.track.x - left, left, right);
                 this.audio.setTexture(`icon_audio_${key}_on`).setScale(unmutedSize);
                 onVolumeChange(this.lastVolume);

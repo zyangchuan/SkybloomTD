@@ -141,7 +141,7 @@ export default class GameScene extends Phaser.Scene {
     if (state.projectiles !== undefined) this.entities.syncProjectiles(state.projectiles);
 
     // update if enemy is dead
-    for (const e of state.events) {
+    for (const e of state.events?? []) {
       if (e.type === 'smog.damage' && (e.health ?? 0) === 0) this.sound.play('sfx_enemy_die', { volume: 1.0 * AudioSettings.getSfxVolume() });
     }
   }

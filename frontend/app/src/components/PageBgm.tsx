@@ -90,7 +90,7 @@ export default function PageBgm() {
     }
 
     return (
-        <div className="fixed! top-10 left-[345px] z-50!">
+       <div className="fixed! top-6 left-6 z-50!">
             <button
                 type="button"
                 onClick={() => setSettingsOpen((prev) => !prev)}

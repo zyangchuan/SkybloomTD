@@ -63,7 +63,6 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('icon_volume_thumb', '/game/assets/gui/sliders/ScrollBar_Blank_Button.svg');
     this.load.svg('icon_blank_volume_track', '/game/assets/gui/sliders/ScrollBar_Blank_Base.svg');
     this.load.svg('icon_blue_volume_track', '/game/assets/gui/sliders/ScrollBar_Blue_Base.svg');
-    this.load.svg('icon_pointer', '/game/assets/gui/icons/ScrollBar_Blank_Pointer.svg');
 
     // Preload HUD PNG icons
     this.load.image('icon_audio_bgm_on', '/game/assets/gui/icons/Icon_Small_Bird_Sparrow_AudioOn.png');
