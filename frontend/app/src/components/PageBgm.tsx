@@ -9,7 +9,7 @@ export default function PageBgm() {
     const audio = useRef<HTMLAudioElement | null>(null);
 
     // setVolume to be used after adding volumeSlider
-    const [volume, setVolume] = useState(0.5);
+    const [volume, setVolume] = useState(0);
     const [muted, setMuted] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -90,7 +90,7 @@ export default function PageBgm() {
     }
 
     return (
-       <div className="fixed! top-6 left-6 z-50!">
+       <div className="top-6 left-6 z-50!">
             <button
                 type="button"
                 onClick={() => setSettingsOpen((prev) => !prev)}
@@ -115,16 +115,24 @@ export default function PageBgm() {
             </button>
             
             {settingsOpen && (
-               <div className="mt-2 flex items-center gap-3 rounded-md bg-white/90 px-4 py-3 shadow-md">
-                 <Image
-                    src={muted? "/gui/icons/Icon_Large_AudioOff_Blank.svg"
+               <div className="absolute h-40 w-72">
+                <Image 
+                    src="/gui/buttons_text/ButtonText_Large_Orange_Square.svg"
+                    alt=""
+                    fill
+                    className="object-contain"
+                />
+
+                <div className="absolute inset-0 flex items-center justify-center gap-4 px-5">
+                    <Image
+                      src={muted? "/gui/icons/Icon_Large_AudioOff_Blank.svg"
                               : "/gui/icons/Icon_Large_Audio_Blank.svg"
                     }
                     alt="audio"
                     onClick={handleToggleMute}
                     width={24}
                     height={24}
-                    className="cursor-pointer"
+                    className="w-12 h-12 cursor-pointer"
                     />
                  <input 
                     type="range"
@@ -133,9 +141,11 @@ export default function PageBgm() {
                     step="0.1"
                     value={muted? 0 : volume}
                     onChange={handleToggleVolume}
-                    className="w-24"
+                    className="w-50 h-50 cursor-pointer"
                     />
-                  </div>  
+
+                </div>
+            </div>  
 
             )}
         </div>
