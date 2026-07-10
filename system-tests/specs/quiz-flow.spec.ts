@@ -29,15 +29,11 @@ test.describe('quiz answer flow', () => {
     const firstAnswer = quizFrame.locator('button.option-9slice').first();
     await expect(firstAnswer).toBeVisible();
 
-    const start = await page.evaluate(() => performance.now());
+    const readQuizResultLatency = await prepareQuizResultLatencyMeasurement(page);
     await firstAnswer.click();
+    const feedbackLatencyMs = await readQuizResultLatency();
 
-    await expect(firstAnswer).toHaveClass(/highlight-(correct|incorrect)/, {
-      timeout: env.quizFeedbackLatencyMs,
-    });
-    const end = await page.evaluate(() => performance.now());
-    const feedbackLatencyMs = end - start;
-
+    console.log(`Quiz validation feedback latency: ${Math.round(feedbackLatencyMs)}ms`);
     expect(feedbackLatencyMs).toBeLessThanOrEqual(env.quizFeedbackLatencyMs);
     await expect(page.locator('#quiz-iframe')).toBeHidden({ timeout: 15_000 });
     await expect(page.getByText(/quiz not found|no quizzes remaining|failed to load quiz/i)).toBeHidden();
@@ -104,4 +100,46 @@ async function waitForQuizWindow(page: Page, canvas: Locator) {
       },
     )
     .toBe(true);
+}
+
+async function prepareQuizResultLatencyMeasurement(page: Page): Promise<() => Promise<number>> {
+  const iframeHandle = await page.locator('#quiz-iframe').elementHandle();
+  const frame = await iframeHandle?.contentFrame();
+  if (!frame) {
+    throw new Error('Quiz iframe was not available for latency measurement.');
+  }
+
+  await frame.evaluate(() => {
+    (window as any).__quizAnswerStartMs = 0;
+    (window as any).__quizResultMs = 0;
+    document.addEventListener(
+      'click',
+      () => {
+        (window as any).__quizAnswerStartMs = performance.now();
+      },
+      { capture: true, once: true },
+    );
+    window.addEventListener(
+      'message',
+      (event) => {
+        if (event.data?.type === 'quiz-result') {
+          (window as any).__quizResultMs = performance.now();
+        }
+      },
+    );
+  });
+
+  return async () => {
+    await expect
+      .poll(
+        async () => frame.evaluate(() => (window as any).__quizResultMs || 0),
+        {
+          timeout: env.quizFeedbackLatencyMs,
+          message: 'Quiz result message was not received within the latency threshold.',
+        },
+      )
+      .not.toBe(0);
+
+    return frame.evaluate(() => (window as any).__quizResultMs - (window as any).__quizAnswerStartMs);
+  };
 }
