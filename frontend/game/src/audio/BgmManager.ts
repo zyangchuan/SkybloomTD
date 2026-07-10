@@ -43,12 +43,15 @@ export class BgmManager {
         }) as Phaser.Sound.WebAudioSound;
         next.play();
         this.currentSong = next;
-        this.scene.tweens.add({
-            targets: next,
-            volume: this.maxVolume,
-            duration: this.fadeDuration,
-            ease: 'Linear',
-        });
+        
+        if (!start) {
+            this.scene.tweens.add({
+                targets: next,
+                volume: this.maxVolume,
+                duration: this.fadeDuration,
+                ease: 'Linear',
+            });
+        }
     }
 
     /*
