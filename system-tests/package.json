@@ -1,0 +1,12 @@
+{
+  "name": "skybloomtd-system-tests",
+  "private": true,
+  "scripts": {
+    "test:system": "playwright test",
+    "test:system:headed": "playwright test --headed",
+    "test:system:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.0"
+  }
+}
