@@ -2,6 +2,63 @@
 
 The public API contract is in `docs/openapi.yaml`.
 
+## Automated Testing
+
+The repository currently has automated unit and integration tests for the
+document service and game service.
+
+### Document Service
+
+Unit tests cover API-layer helpers and models:
+
+- deterministic database UUID generation
+- S3 directory path construction
+- document summary mapping
+- task status JSON serialization
+- queued document creation
+- safe path/filename normalization
+- game name normalization
+
+Integration tests exercise the real Gin router and controller flow while
+mocking external dependencies:
+
+- storage client
+- document store
+- task status store
+- RabbitMQ publisher
+
+### Game Service
+
+Unit tests cover pure game logic and helper functions:
+
+- enemy and bird stats
+- enemy health/speed scaling
+- deterministic map generation and path rules
+- enemy movement
+- projectile damage
+- quiz prompt formatting
+- quiz cooldown and answer validation
+
+Integration tests exercise connected game-service modules with fakes:
+
+- generation service creates generation records and publishes map/quiz jobs
+- generation service marks status failed when publishing fails
+- worker map jobs generate and cache maps
+- worker quiz jobs fetch source content, generate level data, cache quizzes,
+  and update generation status
+
+Run the current automated test suites from the repository root:
+
+```bash
+for dir in services/document-content/src/api services/game-service/src; do
+  echo "Testing $dir"
+  (cd "$dir" && go test ./...) || exit 1
+done
+```
+
+CI runs these tests on pull requests and pushes to `staging`. Production
+system testing will be added separately later.
+
 ## Environment Profiles
 
 Local compose runs use `.env.local` with `docker-compose.local.yml`:

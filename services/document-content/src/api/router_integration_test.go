@@ -51,45 +51,40 @@ func TestUploadFileHappyPath(t *testing.T) {
 		"rulebook.pdf",
 		"application/octet-stream",
 	).Return(source, nil).Once()
-
 	deps.documents.On("CreateQueuedDocument", mock.Anything, mock.MatchedBy(func(document models.Document) bool {
 		return document.ID != uuid.Nil &&
-			document.UserID == models.DatabaseUUID(testUserID, "user") &&
+			document.UserID.String() == storageUserID &&
 			document.S3Bucket != nil &&
 			*document.S3Bucket == source.S3Bucket &&
 			document.SourceFilename == source.SourceFilename &&
-			document.GameName == "Sky Bloom" &&
+			document.GameName == "SkybloomTD" &&
 			document.TaskID != "" &&
 			!document.IsReady
 	})).Return(nil).Once()
-
 	deps.taskStatus.On("Set", mock.Anything, mock.MatchedBy(func(status models.TaskStatus) bool {
 		return status.TaskID != "" &&
 			isUUIDString(status.DocumentID) &&
 			status.Status == models.TaskStatusQueued &&
 			status.Error == nil
 	})).Return(nil).Once()
-
 	deps.publisher.On("Publish", mock.Anything, mock.MatchedBy(nonEmptyString), mock.MatchedBy(func(value any) bool {
 		job, ok := value.(models.DocumentJob)
-		if !ok {
-			return false
-		}
-		return job.JobType == "document.process" &&
+		return ok &&
+			job.JobType == "document.process" &&
 			job.TaskID != "" &&
 			job.UserID == storageUserID &&
 			isUUIDString(job.DocumentID) &&
 			assert.ObjectsAreEqual(source, job.Source)
 	})).Return(nil).Once()
 
-	response := performRequest(router, newUploadRequest(t, "Sky Bloom", "rulebook.pdf", "pdf bytes"))
+	response := performRequest(router, newUploadRequest(t, "SkybloomTD", "rulebook.pdf", "pdf bytes"))
 
 	require.Equal(t, http.StatusOK, response.Code)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 	assert.Equal(t, "Upload file success", body["message"])
 	assert.Equal(t, storageUserID, body["user_id"])
-	assert.Equal(t, "Sky Bloom", body["game_name"])
+	assert.Equal(t, "SkybloomTD", body["game_name"])
 	assert.Equal(t, false, body["is_ready"])
 	assert.NotEmpty(t, body["task_id"])
 	assert.NotEmpty(t, body["document_id"])
@@ -114,7 +109,7 @@ func TestUploadFilePublisherFailureMarksTaskFailed(t *testing.T) {
 			*status.Error == publishErr.Error()
 	})).Return(nil).Once()
 
-	response := performRequest(router, newUploadRequest(t, "Sky Bloom", "rulebook.pdf", "pdf bytes"))
+	response := performRequest(router, newUploadRequest(t, "SkybloomTD", "rulebook.pdf", "pdf bytes"))
 
 	require.Equal(t, http.StatusServiceUnavailable, response.Code)
 	assert.JSONEq(t, `{"error":"failed to enqueue document job"}`, response.Body.String())
@@ -131,7 +126,7 @@ func TestDeleteDocumentHappyPath(t *testing.T) {
 		UserID:         userUUID,
 		S3Bucket:       &bucket,
 		SourceFilename: "rulebook.pdf",
-		GameName:       "Sky Bloom",
+		GameName:       "SkybloomTD",
 		TaskID:         "task-1",
 	}
 
@@ -147,7 +142,7 @@ func TestDeleteDocumentHappyPath(t *testing.T) {
 	assert.Empty(t, response.Body.String())
 }
 
-func TestTaskStatus(t *testing.T) {
+func TestTaskStatusFoundAndMissing(t *testing.T) {
 	t.Run("found", func(t *testing.T) {
 		deps := newAPIMocks(t)
 		router := newTestRouter(deps)
@@ -156,7 +151,6 @@ func TestTaskStatus(t *testing.T) {
 			DocumentID: uuid.NewString(),
 			Status:     models.TaskStatusSuccessful,
 		}
-
 		deps.taskStatus.On("Get", mock.Anything, "task-1").Return(status, nil).Once()
 
 		response := performRequest(router, httptest.NewRequest(http.MethodGet, "/tasks/task-1/status", nil))
@@ -172,7 +166,6 @@ func TestTaskStatus(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
 		deps := newAPIMocks(t)
 		router := newTestRouter(deps)
-
 		deps.taskStatus.On("Get", mock.Anything, "missing-task").Return(models.TaskStatus{}, models.ErrTaskStatusNotFound).Once()
 
 		response := performRequest(router, httptest.NewRequest(http.MethodGet, "/tasks/missing-task/status", nil))

@@ -187,6 +187,50 @@ Stop and remove local volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
 
+## Automated Testing
+
+The current automated tests cover the document service and game service with
+both unit tests and integration tests that use mocks/fakes instead of real
+Postgres, Redis, RabbitMQ, or S3 infrastructure.
+
+Document service tests:
+
+- Unit tests for model helpers, storage path construction, safe filenames,
+  game name normalization, task status JSON, and queued document mapping.
+- Integration tests for the real Gin router/controller flow with mocked
+  storage, document store, task status store, and RabbitMQ publisher.
+
+Game service tests:
+
+- Unit tests for enemy/bird stats, enemy scaling, map generation rules, enemy
+  movement, projectile damage, quiz prompt shape, cooldowns, and quiz answer
+  validation.
+- Integration tests for generation job publishing and worker map/quiz job
+  processing with fake repositories, status stores, caches, and publishers.
+
+Run all current Go tests from the repository root:
+
+```bash
+for dir in services/document-content/src/api services/game-service/src; do
+  echo "Testing $dir"
+  (cd "$dir" && go test ./...) || exit 1
+done
+```
+
+In restricted sandboxes where Go cannot write to the default global build
+cache, use a local cache per module:
+
+```bash
+for dir in services/document-content/src/api services/game-service/src; do
+  echo "Testing $dir"
+  (cd "$dir" && GOCACHE="$PWD/.gocache" go test ./...) || exit 1
+done
+```
+
+GitHub Actions runs these test suites on pull requests and on pushes to
+`staging`. The staging deployment workflow also runs the tests before
+deploying. Production system testing will be added separately later.
+
 ## Common WSL Fixes
 
 If the OCR worker cannot see the GPU:
