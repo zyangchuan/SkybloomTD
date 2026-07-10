@@ -50,14 +50,48 @@ Integration tests exercise connected game-service modules with fakes:
 Run the current automated test suites from the repository root:
 
 ```bash
-for dir in services/document-content/src/api services/game-service/src; do
-  echo "Testing $dir"
-  (cd "$dir" && go test ./...) || exit 1
-done
+./scripts/test-go.sh
 ```
 
 CI runs these tests on pull requests and pushes to `staging`. Production
 system testing will be added separately later.
+
+### Playwright System Tests
+
+Playwright system tests live in `system-tests/`. They run through the browser
+against a deployed URL and verify user-visible system behavior.
+The upload test uses `system-tests/testpdf.pdf` and waits up to five minutes
+for processing to complete. The delete check runs after upload in the same
+serial spec and removes the uploaded document.
+
+Required for all system tests:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://staging.example.com
+```
+
+Required for authenticated workflows:
+
+```bash
+PLAYWRIGHT_TEST_EMAIL=test@example.com
+PLAYWRIGHT_TEST_PASSWORD='test-password'
+```
+
+Required for game workflow tests that use an existing ready level:
+
+```bash
+PLAYWRIGHT_READY_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_SUB_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_QUIZ_FEEDBACK_LATENCY_MS=3000
+```
+
+Run in Docker from the repository root:
+
+```bash
+cp system-tests/.env.example system-tests/.env
+docker compose -f system-tests/docker-compose.yml up --build --abort-on-container-exit --exit-code-from playwright-system-tests
+```
 
 ## Environment Profiles
 

@@ -211,25 +211,37 @@ Game service tests:
 Run all current Go tests from the repository root:
 
 ```bash
-for dir in services/document-content/src/api services/game-service/src; do
-  echo "Testing $dir"
-  (cd "$dir" && go test ./...) || exit 1
-done
-```
-
-In restricted sandboxes where Go cannot write to the default global build
-cache, use a local cache per module:
-
-```bash
-for dir in services/document-content/src/api services/game-service/src; do
-  echo "Testing $dir"
-  (cd "$dir" && GOCACHE="$PWD/.gocache" go test ./...) || exit 1
-done
+./scripts/test-go.sh
 ```
 
 GitHub Actions runs these test suites on pull requests and on pushes to
 `staging`. The staging deployment workflow also runs the tests before
 deploying. Production system testing will be added separately later.
+
+### Playwright System Tests
+
+Playwright system tests live in `system-tests/` and run against a deployed app
+URL. They verify browser-visible workflows such as login, routing, document
+upload, document deletion, chapter navigation, game loading, and reconnect.
+The upload test uses `system-tests/testpdf.pdf` and waits up to five minutes
+for processing to complete. The delete check runs after upload in the same
+serial spec and removes the uploaded document.
+
+Game-specific tests also need IDs for a ready document/chapter/sub-chapter:
+
+```bash
+PLAYWRIGHT_READY_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_SUB_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_QUIZ_FEEDBACK_LATENCY_MS=3000
+```
+
+Run the Playwright system suite in Docker from the repository root:
+
+```bash
+cp system-tests/.env.example system-tests/.env
+docker compose -f system-tests/docker-compose.yml up --build --abort-on-container-exit --exit-code-from playwright-system-tests
+```
 
 ## Common WSL Fixes
 
