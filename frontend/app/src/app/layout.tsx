@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Concert_One } from "next/font/google";
 import "./globals.css";
-import PageBgm from "@/components/PageBgm";
+import PageAudio from "@/components/PageAudio";
 
 const concert_one = Concert_One({
   weight: "400", 
@@ -27,7 +27,7 @@ export default function RootLayout({
       className={`${concert_one.className} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col overflow-x-hidden">
-        <PageBgm />
+        <PageAudio />
         <div className="sky-clouds" aria-hidden="true">
           {/* Top Layer */}
           <span className="cloud cloud-1 left-18 top-9" />
