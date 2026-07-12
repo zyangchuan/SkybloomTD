@@ -1,6 +1,6 @@
 "use client";
 import Image from "next/image";
-
+import VolumeSlider from "./VolumeSlider";
 import { useEffect, useState, useRef } from "react";
 
 
@@ -196,14 +196,28 @@ export default function PageAudio() {
                                 height={24}
                                 className="w-12 h-12 pointer-events-auto cursor-pointer"
                             />
-                            <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.1"
-                                value={bgmMuted? 0 : bgmVolume}
-                                onChange={handleToggleBgmVolume}
-                                className="h-2 w-[166px] pointer-events-auto cursor-pointer"
+
+                            <VolumeSlider
+                                volume={bgmVolume}
+                                muted={bgmMuted}
+                                onVolumeChange={(newVolume) => {
+                                    setBgmVolume(newVolume);
+                                    setBgmMuted(newVolume === 0);
+
+                                    window.localStorage.setItem(
+                                        "web_bgm_volume",
+                                        String(newVolume)
+                                    );
+
+                                    window.localStorage.setItem(
+                                        "web_bgm_mute",
+                                        String(newVolume === 0)
+                                    );
+
+                                    if (audio.current) {
+                                        audio.current.volume = newVolume;
+                                    }
+                                }}
                             />
 
                         </div>
@@ -224,14 +238,23 @@ export default function PageAudio() {
                                 height={24}
                                 className="w-12 h-12 object-contain pointer-events-auto cursor-pointer"
                             />
-                            <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.1"
-                                value={sfxMuted ? 0 : sfxVolume}
-                                onChange={handleToggleSfxVolume}
-                                className="h-2 w-[166px] pointer-events-auto cursor-pointer"
+                            <VolumeSlider
+                                volume={sfxVolume}
+                                muted={sfxMuted}
+                                onVolumeChange={(newVolume) => {
+                                    setSfxVolume(newVolume);
+                                    setSfxMuted(newVolume === 0);
+
+                                    window.localStorage.setItem(
+                                        "web_sfx_volume",
+                                        String(newVolume)
+                                    );
+
+                                    window.localStorage.setItem(
+                                        "web_sfx_mute",
+                                        String(newVolume === 0)
+                                    );
+                                }}
                             />
 
                         </div>
