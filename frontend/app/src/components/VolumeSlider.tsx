@@ -1,7 +1,7 @@
 "use client"
 
 import Image from "next/image";
-import { useRef, useState } from "react"
+import { useRef} from "react"
 
 type VolumeSliderAssets = {
     volume: number;
@@ -24,7 +24,7 @@ export default function VolumeSlider({
         //RECTRANGLE RANGE
         const rect = track.current.getBoundingClientRect();
 
-        const length = Math.min(clientX - rect.left, rect.width);
+        const length = Math.min(Math.max(clientX - rect.left, 0), rect.width);
 
         const newVolume = length / rect.width;
 
@@ -65,8 +65,8 @@ export default function VolumeSlider({
             />
 
             <div
-                className="pointer-events-none absolute flex inset-0 overflow-hidden"
-                style={{ width: `${displayVolume * 100}%` }}
+                className="pointer-events-none absolute h-full overflow-hidden"
+                style={{ width: `${displayVolume * 100}%`,}}
             >
                 <div className="relative h-full w-[160px]">
                     <Image

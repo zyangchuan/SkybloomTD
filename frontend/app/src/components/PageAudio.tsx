@@ -108,38 +108,6 @@ export default function PageAudio() {
         return;
     }
 
-    const handleToggleBgmVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newbgmVolume = parseFloat(e.target.value);
-
-        window.localStorage.setItem("web_bgm_volume", String(newbgmVolume));
-        setBgmVolume(newbgmVolume);
-
-        if (audio.current) {
-            audio.current.volume = newbgmVolume;
-        }
-
-        if (newbgmVolume == 0) {
-            setBgmMuted(true);
-        } else {
-            setBgmMuted(false);
-        }
-    }
-
-    const handleToggleSfxVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newsfxVolume = parseFloat(e.target.value);
-
-        window.localStorage.setItem("web_sfx_volume", String(newsfxVolume));
-        setSfxVolume(newsfxVolume);
-
-        if (newsfxVolume == 0) {
-            setSfxMuted(true);
-        } else {
-            setSfxMuted(false);
-        }
-    }
-
-
-
     return (
         <div className="fixed top-6 left-6 !z-50">
             <button
@@ -197,28 +165,30 @@ export default function PageAudio() {
                                 className="w-12 h-12 pointer-events-auto cursor-pointer"
                             />
 
-                            <VolumeSlider
-                                volume={bgmVolume}
-                                muted={bgmMuted}
-                                onVolumeChange={(newVolume) => {
-                                    setBgmVolume(newVolume);
-                                    setBgmMuted(newVolume === 0);
+                            <div className="scale-[0.9]">
+                                <VolumeSlider
+                                    volume={bgmVolume}
+                                    muted={bgmMuted}
+                                    onVolumeChange={(newVolume) => {
+                                        setBgmVolume(newVolume);
+                                        setBgmMuted(newVolume === 0);
 
-                                    window.localStorage.setItem(
-                                        "web_bgm_volume",
-                                        String(newVolume)
-                                    );
+                                        window.localStorage.setItem(
+                                            "web_bgm_volume",
+                                            String(newVolume)
+                                        );
 
-                                    window.localStorage.setItem(
-                                        "web_bgm_mute",
-                                        String(newVolume === 0)
-                                    );
+                                        window.localStorage.setItem(
+                                            "web_bgm_mute",
+                                            String(newVolume === 0)
+                                        );
 
-                                    if (audio.current) {
-                                        audio.current.volume = newVolume;
-                                    }
-                                }}
-                            />
+                                        if (audio.current) {
+                                            audio.current.volume = newVolume;
+                                        }
+                                    }}
+                                />
+                            </div>
 
                         </div>
 
@@ -238,24 +208,26 @@ export default function PageAudio() {
                                 height={24}
                                 className="w-12 h-12 object-contain pointer-events-auto cursor-pointer"
                             />
-                            <VolumeSlider
-                                volume={sfxVolume}
-                                muted={sfxMuted}
-                                onVolumeChange={(newVolume) => {
-                                    setSfxVolume(newVolume);
-                                    setSfxMuted(newVolume === 0);
+                            <div className="scale-[0.9]">
+                                <VolumeSlider
+                                    volume={sfxVolume}
+                                    muted={sfxMuted}
+                                    onVolumeChange={(newVolume) => {
+                                        setSfxVolume(newVolume);
+                                        setSfxMuted(newVolume === 0);
 
-                                    window.localStorage.setItem(
-                                        "web_sfx_volume",
-                                        String(newVolume)
-                                    );
+                                        window.localStorage.setItem(
+                                            "web_sfx_volume",
+                                            String(newVolume)
+                                        );
 
-                                    window.localStorage.setItem(
-                                        "web_sfx_mute",
-                                        String(newVolume === 0)
-                                    );
-                                }}
-                            />
+                                        window.localStorage.setItem(
+                                            "web_sfx_mute",
+                                            String(newVolume === 0)
+                                        );
+                                    }}
+                                />
+                            </div>
 
                         </div>
                     </div>
