@@ -65,10 +65,10 @@ export default class BootScene extends Phaser.Scene {
     this.load.svg('icon_blue_volume_track', '/game/assets/gui/sliders/ScrollBar_Blue_Base.svg');
 
     // Preload HUD PNG icons
-    this.load.image('icon_audio_bgm_on', '/game/assets/gui/icons/Icon_Small_Bird_Sparrow_AudioOn.png');
-    this.load.image('icon_audio_bgm_off', '/game/assets/gui/icons/Icon_Small_Bird_Sparrow_AudioOff.png');
-    this.load.image('icon_audio_sfx_on', '/game/assets/gui/icons/Icon_Small_Bird_SunGod_AudioOn.png');
-    this.load.image('icon_audio_sfx_off', '/game/assets/gui/icons/Icon_Small_Bird_SunGod_AudioOff.png');
+    this.load.image('icon_audio_bgm_on', '/game/assets/gui/icons/Icon_Large_Music_Blank.svg');
+    this.load.image('icon_audio_bgm_off', '/game/assets//gui/icons/Icon_Large_MusicOff_Blank.svg');
+    this.load.image('icon_audio_sfx_on', '/game/assets/gui/icons/Icon_Large_Audio_Blank.svg');
+    this.load.image('icon_audio_sfx_off', '/game/assets/gui/icons/Icon_Large_AudioOff_Blank.svg');
 
     // Preload bird item assets
     this.load.svg('box_square', '/game/assets/gui/boxes_banners/Box_Square.svg', { width: 256, height: 256 });

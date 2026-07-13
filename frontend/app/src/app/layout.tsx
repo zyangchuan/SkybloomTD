@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Concert_One } from "next/font/google";
 import "./globals.css";
-import PageAudio from "@/components/PageAudio";
+import { PageAudio } from "@/components/PageAudio";
 
 const concert_one = Concert_One({
   weight: "400", 

@@ -79,7 +79,7 @@ export class GameOverlay {
     exitBtn.on('pointerdown', () => this.exitGameThen(() => this.navigateToDashboard()));
 
 
-    const music = this.scene.add.text(940, 700 - 100, 'MUSIC', {
+    const music = this.scene.add.text(940, 700 - 100, 'BGM', {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '56px', color: '#000000',
     }).setOrigin(0.5).setDepth(103);
     

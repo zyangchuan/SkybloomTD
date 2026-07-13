@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
 import { AudioSettings } from '../audio/AudioSettings'; 
 
-const mutedSize = 0.10;
-const unmutedSize = 0.115;
+const mutedSize = 0.44;
+const unmutedSize = 0.44;
 
 export class VolumeSlider {
     private track: Phaser.GameObjects.Image;
