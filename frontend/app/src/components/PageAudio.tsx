@@ -16,7 +16,7 @@ export default function PageAudio() {
     const [settingsOpen, setSettingsOpen] = useState(false);
 
     useEffect(() => {
-        // to not have music in quiz interface 
+        // to not have music in quiz interface
         if (window.self !== window.top) return;
         console.log('setting up background music');
 
