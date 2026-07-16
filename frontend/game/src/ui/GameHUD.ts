@@ -5,7 +5,7 @@ export class GameHUD {
   private essenceText!: Phaser.GameObjects.Text;
   private waveText!: Phaser.GameObjects.Text;
 
-  constructor(scene: Phaser.Scene, onPause: () => void) {
+  constructor(scene: Phaser.Scene, onPause: () => void, onAlmanac: () => void) {
     scene.add.nineslice(420, 80, 'box_orange_square', undefined, 820, 110, 32, 32, 32, 32).setDepth(30);
 
     scene.add.image(75, 80, 'icon_heart').setDisplaySize(60, 60).setDepth(30);
@@ -25,11 +25,16 @@ export class GameHUD {
       fontSize: '64px', color: '#451a03',
     }).setOrigin(0, 0.5).setDepth(30);
 
+    const almanacButton = scene.add.image(scene.scale.width - 300, 80, 'almanac').setDisplaySize(140, 140).setDepth(90).setInteractive({ useHandCursor: true }).setRotation(0.3);
+    almanacButton.on('pointerdown', onAlmanac);
+
     const pauseBtnBg = scene.add
       .nineslice(scene.scale.width - 90, 80, 'box_orange_square', undefined, 120, 110, 32, 32, 32, 32)
       .setDepth(30)
       .setInteractive({ useHandCursor: true });
     scene.add.image(scene.scale.width - 90, 80, 'icon_pause').setDisplaySize(60, 60).setDepth(31);
+   
+  
     pauseBtnBg.on('pointerdown', onPause);
   }
 

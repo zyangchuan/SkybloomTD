@@ -109,6 +109,9 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_kingfisher', '/game/assets/birds/kingfisher_projectile.png');
     this.load.image('projectile_phoenix', '/game/assets/birds/pheonix_projectile.png');
     this.load.image('projectile_sun_god', '/game/assets/birds/sun_god_projectile.png');
+
+    // Preload Almanac
+    this.load.image('almanac', '/game/assets/almanac.png');
   }
 
   create() {
