@@ -66,12 +66,14 @@ func main() {
 	levelRepo := repository.NewLevelRepository(db)
 	sourceClient := source.NewClient(cfg.DocumentContentGRPCAddr, cfg.DocumentContentGRPCTimeout, cfg.LevelSourceMaxChars)
 	generatorClient := generator.NewClient(generator.Config{
-		APIKey:      cfg.OpenAIAPIKey,
-		BaseURL:     cfg.OpenAIBaseURL,
-		Model:       cfg.Model,
-		Temperature: cfg.Temperature,
-		Timeout:     cfg.Timeout,
-		MaxRetries:  cfg.MaxRetries,
+		APIKey:              cfg.OpenAIAPIKey,
+		BaseURL:             cfg.OpenAIBaseURL,
+		Model:               cfg.Model,
+		Temperature:         cfg.Temperature,
+		Timeout:             cfg.Timeout,
+		MaxRetries:          cfg.MaxRetries,
+		QuizCount:           cfg.QuizCount,
+		VerifierConcurrency: cfg.VerifierConcurrency,
 	})
 
 	worker := workerpkg.NewWithStoresAndQuizCache(cfg, levelRepo, sourceClient, generatorClient, statusStore, mapStore, quizStore)

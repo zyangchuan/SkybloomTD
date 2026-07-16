@@ -300,23 +300,30 @@ The server responds with `game.quiz.presented` containing only `quiz_id`,
 `quiz_type`, `question_markdown`, and `options_markdown`. Submit the selected
 zero-based option index with `game.quiz.answer`. The server validates the
 answer, deletes that quiz from Redis, and responds with `game.quiz.result`.
-Correct answers award 50 essence. Incorrect answers are saved with the selected
-wrong option for a later mistakes summary.
+Correct answers award 50 essence. Incorrect answers are saved in the Redis game
+session with the selected wrong option for a later mistakes summary.
 
 To retrieve the saved mistake summary for a completed or in-progress level, the
 frontend can call the game-service HTTP API:
 
 ```text
-GET /api/game-service/quiz-mistakes?level_id=00000000-0000-0000-0000-000000000000
+GET /api/game-service/quiz-mistakes?session_id=00000000-0000-0000-0000-000000000000
 ```
 
 The response includes only mistakes for the authenticated user and requested
-level, including the question, options, selected option, and correct option.
+game session, including the question, options, selected option, and correct
+option.
 
 Level generation is idempotent per user, sub-chapter, and map algorithm version.
 If the database already has quizzes for that user's sub-chapter, the game
 service reuses the saved level and skips quiz generation. Quizzes are persisted
 in PostgreSQL and copied into the dedicated `game-redis` container for in-game
-answer validation. New quiz generations request exactly 30 quizzes. Generated
-map data is also cached in `game-redis` and can be regenerated from the stored
-seed if the cache expires.
+answer validation. New quiz generations use the quiz-count constant in the
+game-service config, currently 5 for testing. During gameplay, when the cached
+remaining quiz count falls to the refill-threshold config constant, the server
+uses a short Redis lease to enqueue at most one async `quiz.refill` job for that
+level. The refill worker generates and verifies another quiz-count batch,
+appends it to PostgreSQL and the active Redis quiz cache, and stops appending
+when the max-quizzes-per-level config constant is reached. Generated map data is
+also cached in `game-redis` and can be regenerated from the stored seed if the
+cache expires.

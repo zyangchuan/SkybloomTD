@@ -42,25 +42,6 @@ func (Quiz) TableName() string {
 	return "quizzes"
 }
 
-type QuizMistake struct {
-	ID               string     `gorm:"type:uuid;primaryKey"`
-	UserID           string     `gorm:"type:uuid;not null;index"`
-	LevelID          string     `gorm:"type:uuid;not null;index"`
-	GenerationID     string     `gorm:"type:text;not null;index"`
-	QuizID           string     `gorm:"type:uuid;not null;index"`
-	QuizIndex        int        `gorm:"not null"`
-	QuizType         string     `gorm:"type:text;not null"`
-	QuestionMarkdown string     `gorm:"type:text;not null"`
-	OptionsMarkdown  JSON       `gorm:"type:jsonb;not null"`
-	AnswerIndex      int        `gorm:"not null"`
-	SelectedIndex    int        `gorm:"not null"`
-	CreatedAt        *time.Time `gorm:"default:CURRENT_TIMESTAMP"`
-}
-
-func (QuizMistake) TableName() string {
-	return "quiz_mistakes"
-}
-
 type ReusableLevel struct {
 	LevelID                string
 	UserID                 string

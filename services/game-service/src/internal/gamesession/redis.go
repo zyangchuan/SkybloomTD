@@ -90,6 +90,20 @@ type RuntimeState struct {
 	Projectiles       []StoredProjectile
 }
 
+type QuizMistake struct {
+	ID               string     `json:"id"`
+	LevelID          string     `json:"level_id"`
+	GenerationID     string     `json:"generation_id"`
+	QuizID           string     `json:"quiz_id"`
+	QuizIndex        int        `json:"quiz_index"`
+	QuizType         string     `json:"quiz_type"`
+	QuestionMarkdown string     `json:"question_markdown"`
+	OptionsMarkdown  []string   `json:"options_markdown"`
+	AnswerIndex      int        `json:"answer_index"`
+	SelectedIndex    int        `json:"selected_index"`
+	CreatedAt        *time.Time `json:"created_at"`
+}
+
 type Store struct {
 	client *redisclient.Client
 	ttl    time.Duration
@@ -309,11 +323,102 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 		return err
 	}
 	values := hashValues(raw)
-	args := []string{"DEL", key(sessionID)}
+	args := []string{"DEL", key(sessionID), mistakesKey(sessionID)}
 	if values["user_id"] != "" && values["level_id"] != "" {
 		args = append(args, indexKey(values["user_id"], values["level_id"]))
 	}
 	_, err = s.client.Do(args...)
+	return err
+}
+
+func (s *Store) SaveQuizMistake(ctx context.Context, sessionID string, userID string, mistake QuizMistake) error {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return errors.New("game session store is not configured")
+	}
+	state, err := s.getBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if state.UserID != userID {
+		return ErrSessionNotFound
+	}
+	if mistake.ID == "" {
+		mistake.ID = uuid.NewString()
+	}
+	if mistake.LevelID == "" {
+		mistake.LevelID = state.LevelID
+	}
+	if mistake.GenerationID == "" {
+		mistake.GenerationID = state.GenerationID
+	}
+	now := time.Now().UTC()
+	mistake.CreatedAt = &now
+	body, err := json.Marshal(mistake)
+	if err != nil {
+		return err
+	}
+	redisKey := mistakesKey(sessionID)
+	if _, err := s.client.Do("RPUSH", redisKey, string(body)); err != nil {
+		return err
+	}
+	if _, err := s.client.Do("EXPIRE", redisKey, strconv.Itoa(int(s.ttl.Seconds()))); err != nil {
+		return err
+	}
+	return s.refreshTTL(sessionID, state.UserID, state.LevelID)
+}
+
+func (s *Store) ListQuizMistakes(ctx context.Context, sessionID string, userID string) ([]QuizMistake, error) {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return nil, errors.New("game session store is not configured")
+	}
+	state, err := s.getBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if state.UserID != userID {
+		return nil, ErrSessionNotFound
+	}
+	raw, err := s.client.Do("LRANGE", mistakesKey(sessionID), "0", "-1")
+	if errors.Is(err, redisclient.ErrNil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected redis mistakes payload type %T", raw)
+	}
+	mistakes := make([]QuizMistake, 0, len(values))
+	for _, value := range values {
+		body, ok := value.(string)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		var mistake QuizMistake
+		if err := json.Unmarshal([]byte(body), &mistake); err != nil {
+			return nil, err
+		}
+		mistakes = append(mistakes, mistake)
+	}
+	return mistakes, nil
+}
+
+func (s *Store) ClearQuizMistakes(ctx context.Context, sessionID string, userID string) error {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return errors.New("game session store is not configured")
+	}
+	state, err := s.getBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if state.UserID != userID {
+		return ErrSessionNotFound
+	}
+	_, err = s.client.Do("DEL", mistakesKey(sessionID))
 	return err
 }
 
@@ -326,6 +431,10 @@ func (s *Store) Close() error {
 
 func key(sessionID string) string {
 	return "game-session:v1:" + sessionID
+}
+
+func mistakesKey(sessionID string) string {
+	return key(sessionID) + ":mistakes"
 }
 
 func indexKey(userID string, levelID string) string {
@@ -376,6 +485,9 @@ func (s *Store) refreshTTL(sessionID string, userID string, levelID string) erro
 	}
 	seconds := strconv.Itoa(int(s.ttl.Seconds()))
 	if _, err := s.client.Do("SET", indexKey(userID, levelID), sessionID, "EX", seconds); err != nil {
+		return err
+	}
+	if _, err := s.client.Do("EXPIRE", mistakesKey(sessionID), seconds); err != nil && !strings.Contains(err.Error(), "no such key") {
 		return err
 	}
 	return nil

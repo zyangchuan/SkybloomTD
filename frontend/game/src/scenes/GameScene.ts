@@ -33,8 +33,6 @@ export default class GameScene extends Phaser.Scene {
 
   constructor() { super('GameScene'); }
 
-  // ─── Lifecycle ───────────────────────────────────────────────────────────────
-
   create(data: { initialState: any, ws: WebSocket, levelId: string }) {
     this.ws = data.ws;
     this.levelId = data.levelId;
@@ -70,8 +68,6 @@ export default class GameScene extends Phaser.Scene {
     this.entities.interpolate(delta);
   }
 
-  // ─── Grid ────────────────────────────────────────────────────────────────────
-
   private initGrid(mapData: any) {
     this.gridWidth  = mapData.width  || 18;
     this.gridHeight = mapData.height || 12;
@@ -81,8 +77,6 @@ export default class GameScene extends Phaser.Scene {
     this.enemyPath  = mapData.enemy_path || [];
     this.obstacles  = mapData.objects    || [];
   }
-
-  // ─── WebSocket ───────────────────────────────────────────────────────────────
 
   private setupWebSocket(levelId: string) {
     if (!this.ws) return;
@@ -127,8 +121,6 @@ export default class GameScene extends Phaser.Scene {
     });
   }
 
-  // ─── State sync ──────────────────────────────────────────────────────────────
-
   private updateFromState(state: any) {
     if (!state) return;
     if (state.session_id !== undefined) this.sessionId = state.session_id;
@@ -150,8 +142,6 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
-  // ─── UI feedback ─────────────────────────────────────────────────────────────
-
   private showRejectMessage(errorText: string) {
     const pointer = this.input.activePointer;
     const warning = this.add.text(pointer.x, pointer.y - 20, errorText.toUpperCase(), {
@@ -163,8 +153,6 @@ export default class GameScene extends Phaser.Scene {
       duration: 1600, ease: 'Quad.easeOut', onComplete: () => warning.destroy(),
     });
   }
-
-  // ─── Utility ─────────────────────────────────────────────────────────────────
 
   private showStartButton() {
     if (this.startBtn) return;

@@ -22,8 +22,6 @@ export class GameOverlay {
 
   isPaused() { return this.pauseWindowOpen; }
 
-  // ─── Pause window ────────────────────────────────────────────────────────────
-
   showPauseWindow() {
     if (document.getElementById('quiz-overlay') || this.pauseWindowOpen) return;
     this.pauseWindowOpen = true;
@@ -66,8 +64,6 @@ export class GameOverlay {
     exitBtn.on('pointerdown', () => this.exitGameThen(() => this.navigateToDashboard()));
   }
 
-  // ─── Mistakes summary ────────────────────────────────────────────────────────
-
   showMistakesSummaryWindow(isVictory: boolean) {
     this.clearQuiz();
     document.getElementById('mistakes-overlay')?.remove();
@@ -106,8 +102,6 @@ export class GameOverlay {
     };
     window.addEventListener('message', this.summaryMessageHandler);
   }
-
-  // ─── Exit flow ───────────────────────────────────────────────────────────────
 
   exitGameThen(continuation: () => void) {
     if (this.pendingExitContinuation) return;

@@ -52,9 +52,6 @@ const (
 
 type LevelRepository interface {
 	GetBootstrap(ctx context.Context, levelID string, userID string) (repository.LevelBootstrap, error)
-	SaveQuizMistake(ctx context.Context, input repository.QuizMistakeInput) error
-	ListQuizMistakes(ctx context.Context, userID string, levelID string) ([]repository.QuizMistakeSummaryItem, error)
-	ClearQuizMistakes(ctx context.Context, userID string, levelID string) error
 	Ping(ctx context.Context) error
 }
 
@@ -76,8 +73,10 @@ type MapCache interface {
 }
 
 type QuizCache interface {
+	AcquireRefillLease(ctx context.Context, generationID string, leaseValue string, ttl time.Duration) (bool, error)
 	Get(ctx context.Context, generationID string) (quizcache.LevelQuizzes, error)
 	PeekRandom(ctx context.Context, generationID string) (quizcache.CachedQuiz, int, error)
+	ReleaseRefillLease(ctx context.Context, generationID string, leaseValue string) error
 	Take(ctx context.Context, generationID string, quizID string) (quizcache.CachedQuiz, int, error)
 	Set(ctx context.Context, generationID string, quizzes quizcache.LevelQuizzes) error
 	Delete(ctx context.Context, generationID string) error
@@ -87,7 +86,14 @@ type GameSessionStore interface {
 	Start(ctx context.Context, options gamesession.StartOptions) (gamesession.State, error)
 	LoadRuntimeState(ctx context.Context, sessionID string) (gamesession.RuntimeState, error)
 	SaveRuntimeState(ctx context.Context, sessionID string, runtime gamesession.RuntimeState) error
+	SaveQuizMistake(ctx context.Context, sessionID string, userID string, mistake gamesession.QuizMistake) error
+	ListQuizMistakes(ctx context.Context, sessionID string, userID string) ([]gamesession.QuizMistake, error)
+	ClearQuizMistakes(ctx context.Context, sessionID string, userID string) error
 	Delete(ctx context.Context, sessionID string) error
+}
+
+type QuizRefillPublisher interface {
+	Publish(ctx context.Context, messageID string, value any) error
 }
 
 type Server struct {
@@ -99,6 +105,7 @@ type Server struct {
 	maps     MapCache
 	quizzes  QuizCache
 	sessions GameSessionStore
+	refills  QuizRefillPublisher
 	upgrader websocket.Upgrader
 }
 
@@ -269,6 +276,7 @@ type runningGameLoop struct {
 	sessionID         string
 	levelID           string
 	generationID      string
+	subChapterID      string
 	userID            string
 	currentQuizID     string
 	lastQuizStartedAt time.Time
@@ -360,6 +368,20 @@ func NewWithGenerationCachesAndSessions(
 	statuses GenerationStatusStore,
 	sessions GameSessionStore,
 ) *Server {
+	return NewWithGenerationCachesSessionsAndRefills(cfg, levels, maps, quizzes, jobs, starter, statuses, sessions, nil)
+}
+
+func NewWithGenerationCachesSessionsAndRefills(
+	cfg config.Config,
+	levels LevelRepository,
+	maps MapCache,
+	quizzes QuizCache,
+	jobs GenerationRepository,
+	starter GenerationStarter,
+	statuses GenerationStatusStore,
+	sessions GameSessionStore,
+	refills QuizRefillPublisher,
+) *Server {
 	server := &Server{
 		config:   cfg,
 		levels:   levels,
@@ -369,6 +391,7 @@ func NewWithGenerationCachesAndSessions(
 		maps:     maps,
 		quizzes:  quizzes,
 		sessions: sessions,
+		refills:  refills,
 	}
 	server.upgrader = websocket.Upgrader{
 		CheckOrigin: server.checkOrigin,
@@ -732,11 +755,6 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Flush/Clear old quiz mistakes for this level and user so they start the new run with a clean slate
-	if err := s.levels.ClearQuizMistakes(callCtx, userID, levelID); err != nil {
-		log.Printf("failed to clear quiz mistakes level_id=%s user_id=%s: %v", levelID, userID, err)
-	}
-
 	level, err := s.levels.GetBootstrap(callCtx, levelID, userID)
 	if errors.Is(err, models.ErrLevelNotFound) {
 		return nil, errors.New("level not found")
@@ -764,6 +782,9 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	if err != nil {
 		log.Printf("game session create failed level_id=%s user_id=%s: %v", levelID, userID, err)
 		return nil, errors.New("failed to start game session")
+	}
+	if err := s.sessions.ClearQuizMistakes(callCtx, session.SessionID, userID); err != nil && !errors.Is(err, gamesession.ErrSessionNotFound) {
+		log.Printf("failed to clear quiz mistakes session_id=%s user_id=%s: %v", session.SessionID, userID, err)
 	}
 	storedRuntime, err := s.sessions.LoadRuntimeState(callCtx, session.SessionID)
 	if err != nil {
@@ -809,12 +830,14 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		return nil, err
 	}
 	if runtime.session.Health <= 0 {
+		s.cleanupQuizCacheAfterGameEnd(ctx, runtime, "health_depleted")
 		if err := writeGameOver(conn, writeMu, runtime, "health_depleted"); err != nil {
 			return nil, err
 		}
 		return nil, nil
 	}
 	if gameWon(runtime) {
+		s.cleanupQuizCacheAfterGameEnd(ctx, runtime, "all_waves_cleared")
 		if err := writeGameVictory(conn, writeMu, runtime, "all_waves_cleared"); err != nil {
 			return nil, err
 		}
@@ -826,6 +849,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		sessionID:         runtime.session.SessionID,
 		levelID:           runtime.session.LevelID,
 		generationID:      runtime.session.GenerationID,
+		subChapterID:      runtime.session.SubChapterID,
 		userID:            runtime.session.UserID,
 		lastQuizStartedAt: runtime.lastQuizStartedAt,
 		loopStarted:       runtime.loopStarted,
@@ -900,12 +924,14 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 				return
 			}
 			if runtime.session.Health <= 0 {
+				s.cleanupQuizCacheAfterGameEnd(ctx, runtime, "health_depleted")
 				if err := writeGameOver(conn, writeMu, runtime, "health_depleted"); err != nil {
 					log.Printf("game over write failed session_id=%s: %v", runtime.session.SessionID, err)
 				}
 				return
 			}
 			if gameWon(runtime) {
+				s.cleanupQuizCacheAfterGameEnd(ctx, runtime, "all_waves_cleared")
 				if err := writeGameVictory(conn, writeMu, runtime, "all_waves_cleared"); err != nil {
 					log.Printf("game victory write failed session_id=%s: %v", runtime.session.SessionID, err)
 				}
@@ -935,14 +961,12 @@ func (s *Server) handleGameExit(ctx context.Context, loop *runningGameLoop, requ
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if loop != nil {
-		if err := s.levels.ClearQuizMistakes(callCtx, loop.userID, loop.levelID); err != nil {
-			log.Printf("failed to clear quiz mistakes on exit level_id=%s user_id=%s: %v", loop.levelID, loop.userID, err)
+	if loop == nil {
+		if runtime, err := s.sessions.LoadRuntimeState(callCtx, sessionID); err == nil {
+			generationID = runtime.GenerationID
+		} else if !errors.Is(err, gamesession.ErrSessionNotFound) {
+			log.Printf("failed to load game session runtime for quiz cache cleanup session_id=%s: %v", sessionID, err)
 		}
-	} else if runtime, err := s.sessions.LoadRuntimeState(callCtx, sessionID); err == nil {
-		generationID = runtime.GenerationID
-	} else if !errors.Is(err, gamesession.ErrSessionNotFound) {
-		log.Printf("failed to load game session runtime for quiz cache cleanup session_id=%s: %v", sessionID, err)
 	}
 
 	if err := s.deleteQuizCache(callCtx, generationID); err != nil {
@@ -961,6 +985,72 @@ func (s *Server) deleteQuizCache(ctx context.Context, generationID string) error
 		return nil
 	}
 	return s.quizzes.Delete(ctx, generationID)
+}
+
+func (s *Server) cleanupQuizCacheAfterGameEnd(ctx context.Context, runtime runtimeSession, reason string) {
+	if strings.TrimSpace(runtime.session.GenerationID) == "" {
+		return
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := s.deleteQuizCache(callCtx, runtime.session.GenerationID); err != nil {
+		log.Printf(
+			"failed to clear quiz cache after game end session_id=%s generation_id=%s reason=%s: %v",
+			runtime.session.SessionID,
+			runtime.session.GenerationID,
+			reason,
+			err,
+		)
+	}
+}
+
+func (s *Server) maybeTriggerQuizRefill(loop *runningGameLoop, remaining int) {
+	if loop == nil || s.quizzes == nil {
+		return
+	}
+	if s.refills == nil {
+		log.Printf("quiz refill skipped because publisher is not configured generation_id=%s level_id=%s remaining=%d", loop.generationID, loop.levelID, remaining)
+		return
+	}
+	threshold := s.config.QuizRefillThreshold
+	if threshold < 0 || remaining > threshold {
+		return
+	}
+	refillID := uuid.NewString()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		acquired, err := s.quizzes.AcquireRefillLease(ctx, loop.generationID, refillID, s.config.QuizRefillLeaseTTL)
+		if err != nil {
+			log.Printf("quiz refill lease acquire failed generation_id=%s level_id=%s: %v", loop.generationID, loop.levelID, err)
+			return
+		}
+		if !acquired {
+			log.Printf("quiz refill already pending generation_id=%s level_id=%s remaining=%d", loop.generationID, loop.levelID, remaining)
+			return
+		}
+
+		job := models.LevelJob{
+			JobType:             models.JobTypeQuizRefill,
+			TaskID:              refillID,
+			GenerationID:        loop.generationID,
+			LevelID:             loop.levelID,
+			UserID:              loop.userID,
+			SubChapterID:        loop.subChapterID,
+			RefillID:            refillID,
+			MaxQuizCount:        s.config.MaxQuizzesPerLevel,
+			MapAlgorithmVersion: mapgen.Version,
+		}
+		if err := s.refills.Publish(ctx, refillID, job); err != nil {
+			log.Printf("quiz refill publish failed generation_id=%s level_id=%s: %v", loop.generationID, loop.levelID, err)
+			if releaseErr := s.quizzes.ReleaseRefillLease(context.Background(), loop.generationID, refillID); releaseErr != nil {
+				log.Printf("quiz refill lease release after publish failure failed generation_id=%s refill_id=%s: %v", loop.generationID, refillID, releaseErr)
+			}
+			return
+		}
+		log.Printf("quiz refill queued generation_id=%s level_id=%s remaining=%d threshold=%d refill_id=%s", loop.generationID, loop.levelID, remaining, threshold, refillID)
+	}()
 }
 
 func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop) error {
@@ -985,6 +1075,7 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
 	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
 		loop.currentQuizID = ""
+		s.maybeTriggerQuizRefill(loop, 0)
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
 			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
@@ -995,6 +1086,7 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	}
 	if len(quizzes.Quizzes) == 0 {
 		loop.currentQuizID = ""
+		s.maybeTriggerQuizRefill(loop, 0)
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
 			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
@@ -1003,6 +1095,7 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 
 	if quiz, ok := cachedQuizByID(quizzes.Quizzes, quizzes.CurrentQuizID); ok {
 		loop.currentQuizID = quiz.ID
+		s.maybeTriggerQuizRefill(loop, len(quizzes.Quizzes))
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.presented",
 			Data: quizPromptState(quiz, len(quizzes.Quizzes)),
@@ -1019,6 +1112,7 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	quiz, remaining, err := s.quizzes.PeekRandom(callCtx, loop.generationID)
 	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
 		loop.currentQuizID = ""
+		s.maybeTriggerQuizRefill(loop, 0)
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
 			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
@@ -1027,12 +1121,8 @@ func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, wr
 	if err != nil {
 		return errors.New("failed to load quiz")
 	}
-	startedAt := time.Now().UTC()
-	if err := s.markQuizStartedThroughLoop(ctx, loop, startedAt); err != nil {
-		return err
-	}
-	loop.lastQuizStartedAt = startedAt
 	loop.currentQuizID = quiz.ID
+	s.maybeTriggerQuizRefill(loop, remaining)
 	return writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.presented",
 		Data: quizPromptState(quiz, remaining),
@@ -1053,6 +1143,7 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
 	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
 		loop.currentQuizID = ""
+		s.maybeTriggerQuizRefill(loop, 0)
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
 			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
@@ -1089,6 +1180,12 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	if loop.currentQuizID == request.QuizID {
 		loop.currentQuizID = ""
 	}
+	s.maybeTriggerQuizRefill(loop, remaining)
+	answeredAt := time.Now().UTC()
+	if err := s.markQuizStartedThroughLoop(ctx, loop, answeredAt); err != nil {
+		return err
+	}
+	loop.lastQuizStartedAt = answeredAt
 
 	correct := request.SelectedIndex == answeredQuiz.AnswerIndex
 	essenceAwarded := 0
@@ -1191,23 +1288,22 @@ func (s *Server) markQuizStartedThroughLoop(ctx context.Context, loop *runningGa
 }
 
 func (s *Server) saveQuizMistakeAsync(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) {
-	if s.levels == nil {
-		log.Printf("quiz mistake save skipped quiz_id=%s: level repository is not configured", quiz.ID)
+	if s.sessions == nil {
+		log.Printf("quiz mistake save skipped quiz_id=%s: game session store is not configured", quiz.ID)
 		return
 	}
 	input := quizMistakeInput(loop, quiz, selectedIndex)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.levels.SaveQuizMistake(ctx, input); err != nil {
-			log.Printf("quiz mistake save failed quiz_id=%s user_id=%s: %v", input.QuizID, input.UserID, err)
+		if err := s.sessions.SaveQuizMistake(ctx, loop.sessionID, loop.userID, input); err != nil {
+			log.Printf("quiz mistake save failed quiz_id=%s session_id=%s user_id=%s: %v", input.QuizID, loop.sessionID, loop.userID, err)
 		}
 	}()
 }
 
-func quizMistakeInput(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) repository.QuizMistakeInput {
-	return repository.QuizMistakeInput{
-		UserID:           loop.userID,
+func quizMistakeInput(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) gamesession.QuizMistake {
+	return gamesession.QuizMistake{
 		LevelID:          loop.levelID,
 		GenerationID:     loop.generationID,
 		QuizID:           quiz.ID,
@@ -2345,9 +2441,10 @@ func (s *Server) generationStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 type QuizMistakeSummaryState struct {
-	LevelID  string                   `json:"level_id"`
-	Count    int                      `json:"count"`
-	Mistakes []QuizMistakeSummaryItem `json:"mistakes"`
+	SessionID string                   `json:"session_id"`
+	LevelID   string                   `json:"level_id"`
+	Count     int                      `json:"count"`
+	Mistakes  []QuizMistakeSummaryItem `json:"mistakes"`
 }
 
 type QuizMistakeSummaryItem struct {
@@ -2376,37 +2473,45 @@ func (s *Server) quizMistakes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 		return
 	}
-	if s.levels == nil {
+	if s.sessions == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "quiz mistake summary is not configured"})
 		return
 	}
 
-	levelID := strings.TrimSpace(r.URL.Query().Get("level_id"))
-	if levelID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level_id is required"})
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session_id is required"})
 		return
 	}
-	if !uuidPattern.MatchString(levelID) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "level_id must be a valid UUID"})
+	if !uuidPattern.MatchString(sessionID) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "session_id must be a valid UUID"})
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	mistakes, err := s.levels.ListQuizMistakes(ctx, userID, levelID)
+	mistakes, err := s.sessions.ListQuizMistakes(ctx, sessionID, userID)
+	if errors.Is(err, gamesession.ErrSessionNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "game session not found"})
+		return
+	}
 	if err != nil {
-		log.Printf("quiz mistake summary lookup failed level_id=%s user_id=%s: %v", levelID, userID, err)
+		log.Printf("quiz mistake summary lookup failed session_id=%s user_id=%s: %v", sessionID, userID, err)
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "failed to read quiz mistake summary"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, quizMistakeSummaryState(levelID, mistakes))
+	writeJSON(w, http.StatusOK, quizMistakeSummaryState(sessionID, mistakes))
 }
 
-func quizMistakeSummaryState(levelID string, mistakes []repository.QuizMistakeSummaryItem) QuizMistakeSummaryState {
+func quizMistakeSummaryState(sessionID string, mistakes []gamesession.QuizMistake) QuizMistakeSummaryState {
 	items := make([]QuizMistakeSummaryItem, 0, len(mistakes))
+	levelID := ""
 	for _, mistake := range mistakes {
+		if levelID == "" {
+			levelID = mistake.LevelID
+		}
 		options := quiztext.SanitizeMarkdownSlice(mistake.OptionsMarkdown)
 		items = append(items, QuizMistakeSummaryItem{
 			ID:                     mistake.ID,
@@ -2425,9 +2530,10 @@ func quizMistakeSummaryState(levelID string, mistakes []repository.QuizMistakeSu
 		})
 	}
 	return QuizMistakeSummaryState{
-		LevelID:  levelID,
-		Count:    len(items),
-		Mistakes: items,
+		SessionID: sessionID,
+		LevelID:   levelID,
+		Count:     len(items),
+		Mistakes:  items,
 	}
 }
 
