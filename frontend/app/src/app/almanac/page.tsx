@@ -2,13 +2,16 @@
 
 import Image from "next/image";
 import { useState } from "react";
-
+import { useRouter } from "next/navigation";
 import OrangeSquare from "@/components/OrangeSquare";
 import BlueSquare from "@/components/BlueSquare";
 
 type Category = "birds" | "enemies";
 
 export default function AlmanacPage() {
+
+    const route = useRouter();
+
     const [selectedCategory, setSelectedCategory] =
         useState<Category | null>(null);
 
@@ -23,7 +26,7 @@ export default function AlmanacPage() {
                     <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-[100px]">
                         <div className="flex gap-[100px]">
                             <button
-                                onClick={() => setSelectedCategory("birds")}
+                                onClick={() => route.push('/almanac/birds')}
                                 className="relative flex h-[300px] w-[400px] items-center"
                             >
                                 <BlueSquare className="relative h-full w-full">

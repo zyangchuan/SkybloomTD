@@ -1,7 +1,5 @@
 // alamanc for both enemies and birds
 
-
-
 export interface AlmanacEntry {
     id: string;
     name: string;
@@ -9,8 +7,6 @@ export interface AlmanacEntry {
     evolveComb?: string
     desc: string;
 }
-
-
 
 export const BIRD_INFO: AlmanacEntry[] = [
 
