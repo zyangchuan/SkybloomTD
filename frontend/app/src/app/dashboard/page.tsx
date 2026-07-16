@@ -19,6 +19,7 @@ import GameCardItem from '@/components/GameCardItem';
 import UploadDocumentModal from '@/components/UploadDocumentModal';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
+import { AlmanacButton } from '@/components/Almanac';
 
 interface DocumentSummary {
   document_id: string;
@@ -302,6 +303,10 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col flex-1 items-center justify-center font-sans p-4">
       <Image src="/skybloomtd-logo.png" alt="SkybloomTD" width={400} height={400} className="mb-6 drop-shadow-lg" />
+
+      <div className="absolute bottom-[20px] left-[120px] -rotate-25">
+        <AlmanacButton/>
+      </div>
       
       <OrangeSquare className="w-full max-w-5xl flex flex-col items-center justify-center py-10 px-8">
         <h1 className="text-4xl text-white mb-6 drop-shadow-[0_2px_0_rgba(0,0,0,0.25)] tracking-wider">
