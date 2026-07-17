@@ -100,7 +100,7 @@ export default function EnemiesPage() {
 
                                 <div className="border-b-4 flex items-center justify-between border-orange-900/20 pb-2">
                                     <span className="font-bold"> Movement:</span>
-                                    <span className="text-red-500"> {selectedEnemy.stats.movement} </span>
+                                    <span className="text-lime-300"> {selectedEnemy.stats.movement} </span>
                                 </div>
 
                                 <div className="min-h-0 overflow-y-auto break-words pr-2  text-[18px] leading-relaxed">

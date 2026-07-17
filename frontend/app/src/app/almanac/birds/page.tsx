@@ -7,12 +7,12 @@ import ButtonWhite from "@/components/ButtonWhite";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { BIRD_INFO, AlmanacBirdsEntry}  from "@/data/almanac";
+import { BIRD_INFO, AlmanacBirdsEntry } from "@/data/almanac";
 
 export default function BirdsPage() {
 
     const route = useRouter();
-    const [selectedBird, setSelectedBird] = useState< AlmanacBirdsEntry>(BIRD_INFO[0] ?? null);
+    const [selectedBird, setSelectedBird] = useState<AlmanacBirdsEntry>(BIRD_INFO[0] ?? null);
 
     return (
         <div className="flex min-h-screen items-center justify-center">
@@ -25,11 +25,11 @@ export default function BirdsPage() {
                         className="flex w-[166px] h-[50px] items-center justify-center gap-2"
                     >
                         <ArrowLeft className="w-[30px] h-[60px]" />
-                       <span className="text-[23px]">Back</span>
+                        <span className="text-[23px]">Back</span>
                     </ButtonWhite>
                 </div>
 
-                <div className="absolute left-[60px] top-[100px] bottom-[20px] right-[60px]">
+                <div className="absolute left-[60px] top-[40px] bottom-[20px] right-[60px]">
                     {/* Main content*/}
                     <div className="grid h-full min-h-0 grid-cols-[480px_1fr]">
 
@@ -40,31 +40,31 @@ export default function BirdsPage() {
                             </h1>
 
                             <div className="grid grid-cols-2 gap-10 min-h-0 justify-items-center overflow-y-auto pb-[20px]">
-                                 {/* Birds icon */}
+                                {/* Birds icon */}
                                 {BIRD_INFO.map((bird) => (
-                                        <button
-                                            key={bird.id}
-                                            onClick={() => setSelectedBird(bird)}
-                                            className="flex justify-items-center w-[200px] h-[220px]"
-                                        >
-                                            <BlueSquare className="flex flex-col items-center h-full w-full cursor-pointer">
-                                                <div className="relative h-full w-full">
-                                                    <Image
-                                                        src={`/assets/birds/${bird.id}_head.png`}
-                                                        alt={`${bird.id}`}
-                                                        fill
-                                                        className="object-contain"
-                                                    />
-                                                </div>
+                                    <button
+                                        key={bird.id}
+                                        onClick={() => setSelectedBird(bird)}
+                                        className="flex justify-items-center w-[200px] h-[220px]"
+                                    >
+                                        <BlueSquare className="flex flex-col items-center h-full w-full cursor-pointer">
+                                            <div className="relative h-full w-full">
+                                                <Image
+                                                    src={`/assets/birds/${bird.id}_head.png`}
+                                                    alt={`${bird.id}`}
+                                                    fill
+                                                    className="object-contain"
+                                                />
+                                            </div>
 
-                                                <h1 className="text-[30px] whitespace-nowrap ">
-                                                    {bird.name}
-                                                </h1>
+                                            <h1 className="text-[30px] whitespace-nowrap ">
+                                                {bird.name}
+                                            </h1>
 
-                                            </BlueSquare>
+                                        </BlueSquare>
 
-                                        </button>
-                                   
+                                    </button>
+
                                 ))}
                             </div>
                         </div>
@@ -100,11 +100,33 @@ export default function BirdsPage() {
 
                                 <div className="border-b-4 flex items-center justify-between border-orange-900/20 pb-2">
                                     <span className="font-bold"> Attack Speed:</span>
-                                    <span className="text-red-500"> {selectedBird.stats.attack_speed} </span>
+                                    <span className="text-lime-300"> {selectedBird.stats.attack_speed}/s</span>
                                 </div>
 
+                                <div className="border-b-4 flex items-center justify-between border-orange-900/20 pb-2">
+                                    <span className="font-bold"> Attack Range:</span>
+                                    <span className="text-purple-500"> {selectedBird.stats.attack_range}</span>
+                                </div>
+
+                                <div className="border-b-4 flex items-center justify-between border-orange-900/20 pb-2">
+                                    <span className="font-bold"> Attack Type:</span>
+                                    <span className="text-olive-300"> {selectedBird.stats.attack_type}</span>
+                                </div>
+
+                                <div className="border-b-4 flex items-center justify-between border-orange-900/20 pb-2">
+                                    <span className="font-bold"> Cost:</span>
+                                    <span className="text-yellow-300"> {selectedBird.stats.cost}</span>
+                                </div>
+
+                                {selectedBird.evolveComb && (
+                                    <div className="border-b-4 flex items-center justify-between border-orange-900/20 pb-2">
+                                        <span className="font-bold"> Evolution Combination:</span>
+                                        <span className="text-green-300"> {selectedBird.evolveComb}</span>
+                                    </div>
+                                )}
+
                                 <div className="min-h-0 overflow-y-auto break-words pr-2  text-[18px] leading-relaxed">
-                                   {selectedBird.desc}
+                                    {selectedBird.desc}
                                 </div>
 
                             </div>
