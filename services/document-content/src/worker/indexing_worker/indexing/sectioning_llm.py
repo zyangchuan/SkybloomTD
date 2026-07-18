@@ -66,6 +66,18 @@ sub-chapters as separate top-level arrays. Do not classify every input heading.
 Omit headings that are title page text, contents labels, running/page headers,
 companion subtitles, examples, definitions, theorem headings, malformed OCR
 garbage, decorative titles, or anything that should not control slicing.
+Also omit front matter, back matter, and meta-document headings such as preface,
+foreword, author's note, acknowledgements, dedication, copyright, bibliography,
+references, glossary, appendix, index, revision history, about the author, or
+publishing/edition notes unless the document's actual learning objective is to
+study that material.
+
+Only create chapters and sub-chapters for teachable learning content: sections
+that help a learner understand the document's subject, concepts, procedures,
+examples with enough surrounding lesson substance, or assessable knowledge.
+Do not create a playable level for document navigation, source commentary,
+publication metadata, or headings whose main purpose is to frame the book rather
+than teach the topic.
 
 You may combine nearby headings into one clean title. For example, headings
 like "Chapter 4" followed by "Integrals" can become "Chapter 4: Integrals".

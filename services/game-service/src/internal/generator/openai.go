@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"skybloom/game-service/internal/quiztext"
@@ -30,7 +31,12 @@ nearby content instead.
 
 Produce a complete level made of:
 - a markdown summary for the level
-- exactly 30 quizzes for the level
+- exactly the requested number of quizzes for the level
+
+All quizzes in the output must be unique. Do not repeat the same question,
+same tested fact, same calculation, or same learning check with different
+wording. Each quiz should assess a distinct concept, detail, procedure,
+example, or implication from the sub-chapter.
 
 Each quiz can be either:
 - mcq: exactly 3 markdown option strings
@@ -43,6 +49,14 @@ string from options_markdown. Before finalizing each quiz, solve it yourself and
 verify that the chosen correct option is actually correct. If the OCR-derived
 answer appears wrong, rewrite the options and answer key to the corrected answer.
 
+Every quiz must be self-contained from a learner's perspective. Do not require
+the player to see the original document, source order, an earlier example, an
+unnamed equation, a figure, an author's note, or the surrounding passage to
+understand what is being asked. When testing a specific expression, claim,
+definition, or scenario, restate the needed context directly in the question.
+Prefer questions that teach or check the sub-chapter concept over questions
+about where something appeared in the source document.
+
 When using math, produce KaTeX-compatible LaTeX only:
 - wrap math in $...$, $$...$$, \(...\), or \[...\]
 - use ASCII command names such as \frac, \sqrt, \sin, \cos, \tan, \ln, \log, and \cdot
@@ -51,15 +65,40 @@ When using math, produce KaTeX-compatible LaTeX only:
 - do not put dangling quotes or backticks inside math delimiters
 - because this is JSON, every displayed LaTeX backslash must be escaped as \\ in the JSON string`
 
-const quizCount = 30
+const defaultQuizCount = 5
+const defaultVerifierConcurrency = 6
+
+const blindVerifierSystemPrompt = `You are a quiz quality reviewer acting like a learner.
+
+You see only one quiz, the level summary, and the sub-chapter title. Judge
+whether a real player could answer the question from the quiz itself and normal
+learning context, without seeing the original document. Reject questions that
+depend on hidden source references, document position, unnamed examples,
+unstated equations, figures, passages, author intent, or missing scenario
+details. Also reject questions that are vague, not educationally useful, or have
+multiple plausible answers from the visible wording alone.
+
+Return strict JSON only.`
+
+const groundedVerifierSystemPrompt = `You are a quiz correctness reviewer.
+
+You receive one quiz and the source text used to create the level. Judge whether
+the quiz is relevant to the selected sub-chapter, whether the marked answer is
+supported, and whether the distractors are clearly incorrect. The source may
+contain OCR errors, so allow obvious repairs to notation and formatting, but
+reject unsupported facts or questions about irrelevant/non-learning material.
+
+Return strict JSON only.`
 
 type Config struct {
-	APIKey      string
-	BaseURL     string
-	Model       string
-	Temperature float64
-	Timeout     time.Duration
-	MaxRetries  int
+	APIKey              string
+	BaseURL             string
+	Model               string
+	Temperature         float64
+	Timeout             time.Duration
+	MaxRetries          int
+	QuizCount           int
+	VerifierConcurrency int
 }
 
 type Client struct {
@@ -80,6 +119,21 @@ type QuizItem struct {
 	CorrectOptionMarkdown string   `json:"correct_option_markdown"`
 }
 
+type ExistingQuiz struct {
+	QuizIndex        int      `json:"quiz_index"`
+	QuestionMarkdown string   `json:"question_markdown"`
+	OptionsMarkdown  []string `json:"options_markdown"`
+}
+
+type quizVerification struct {
+	Pass          bool   `json:"pass"`
+	Answerable    bool   `json:"answerable"`
+	Correct       bool   `json:"correct"`
+	Useful        bool   `json:"useful"`
+	Relevant      bool   `json:"relevant"`
+	FailureReason string `json:"failure_reason"`
+}
+
 func NewClient(cfg Config) *Client {
 	return &Client{
 		config: cfg,
@@ -95,12 +149,40 @@ func (c *Client) GenerateLevel(ctx context.Context, sourceContext source.SourceC
 	}
 
 	prompt := fmt.Sprintf(
-		"Generate the level for this sub-chapter.\n\nSub-chapter title: %s\nSub-chapter id: %s\n\nSource text:\n%s",
+		"Generate the level for this sub-chapter.\n\nQuiz count: %d\nSub-chapter title: %s\nSub-chapter id: %s\n\nSource text:\n%s",
+		c.quizCount(),
 		firstNonEmpty(sourceContext.SubChapterTitle, "Untitled"),
 		sourceContext.SubChapterID,
 		sourceContext.SourceText,
 	)
+	return c.generateWithPrompt(ctx, sourceContext, prompt, nil)
+}
 
+func (c *Client) GenerateQuizRefill(ctx context.Context, sourceContext source.SourceContext, existingQuizzes []ExistingQuiz) (LevelGeneration, error) {
+	if sourceContext.Status != "retrieved" {
+		return LevelGeneration{}, errors.New("source context was not retrieved successfully")
+	}
+	existingBody, err := json.Marshal(existingQuizzes)
+	if err != nil {
+		return LevelGeneration{}, err
+	}
+	prompt := fmt.Sprintf(
+		"Generate an additional quiz refill batch for this existing level.\n\nQuiz count: %d\nSub-chapter title: %s\nSub-chapter id: %s\n\nEvery new quiz must be unique. Do not repeat any existing quiz word-for-word, and do not create a near-duplicate that tests the same fact, calculation, definition, or concept with different wording. Use different parts or angles of the source text for each new quiz.\n\nExisting quizzes to avoid repeating:\n%s\n\nSource text:\n%s",
+		c.quizCount(),
+		firstNonEmpty(sourceContext.SubChapterTitle, "Untitled"),
+		sourceContext.SubChapterID,
+		string(existingBody),
+		sourceContext.SourceText,
+	)
+	return c.generateWithPrompt(ctx, sourceContext, prompt, refillDuplicateValidator(existingQuizzes))
+}
+
+func (c *Client) generateWithPrompt(
+	ctx context.Context,
+	sourceContext source.SourceContext,
+	prompt string,
+	extraValidator func(LevelGeneration) error,
+) (LevelGeneration, error) {
 	var generation LevelGeneration
 	var lastErr error
 	var lastValidationErr error
@@ -120,7 +202,21 @@ func (c *Client) GenerateLevel(ctx context.Context, sourceContext source.SourceC
 		validationFailed := false
 		if err == nil {
 			normalizeGeneration(&generation)
-			if err := validateGeneration(generation); err == nil {
+			if err := c.validateGeneration(generation); err == nil {
+				if extraValidator != nil {
+					if err := extraValidator(generation); err != nil {
+						lastValidationErr = err
+						validationFailed = true
+						lastErr = fmt.Errorf("validate level generation: %w", err)
+						continue
+					}
+				}
+				if err := c.verifyGeneration(ctx, sourceContext, generation); err != nil {
+					lastValidationErr = err
+					validationFailed = true
+					lastErr = fmt.Errorf("verify level generation: %w", err)
+					continue
+				}
 				return generation, nil
 			} else {
 				lastValidationErr = err
@@ -141,28 +237,25 @@ func (c *Client) GenerateLevel(ctx context.Context, sourceContext source.SourceC
 
 func promptWithValidationFailure(prompt string, validationErr error) string {
 	return fmt.Sprintf(
-		"%s\n\nPrevious attempt failed validation: %s\nRegenerate the full level and obey every schema rule exactly. For true_false quizzes, options_markdown must contain exactly two strings: True and False. For mcq quizzes, options_markdown must contain exactly three strings. For every quiz, correct_option_markdown must exactly equal one option, and answer_index must point to that same option after you independently solve and verify the question.",
+		"%s\n\nPrevious attempt failed validation or learner-perspective verification: %s\nRegenerate the full level and obey every schema rule exactly. For true_false quizzes, options_markdown must contain exactly two strings: True and False. For mcq quizzes, options_markdown must contain exactly three strings. For every quiz, correct_option_markdown must exactly equal one option, and answer_index must point to that same option after you independently solve and verify the question. Make every question self-contained: restate any needed expression, equation, definition, scenario, or claim directly in the question, and avoid questions that depend on the learner seeing the original source document. Ensure every quiz is unique and does not repeat an existing question or another generated question.",
 		prompt,
 		validationErr.Error(),
 	)
 }
 
 func (c *Client) callOpenAI(ctx context.Context, prompt string, generation *LevelGeneration) error {
+	return c.callStructured(ctx, systemPrompt, prompt, c.levelGenerationFormat(), generation)
+}
+
+func (c *Client) callStructured(ctx context.Context, system string, prompt string, format map[string]any, target any) error {
 	requestBody := map[string]any{
 		"model":       c.config.Model,
 		"temperature": c.config.Temperature,
 		"input": []map[string]string{
-			{"role": "system", "content": systemPrompt},
+			{"role": "system", "content": system},
 			{"role": "user", "content": prompt},
 		},
-		"text": map[string]any{
-			"format": map[string]any{
-				"type":   "json_schema",
-				"name":   "level_generation",
-				"strict": true,
-				"schema": levelGenerationSchema(),
-			},
-		},
+		"text": map[string]any{"format": format},
 	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -194,8 +287,8 @@ func (c *Client) callOpenAI(ctx context.Context, prompt string, generation *Leve
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal([]byte(outputText), generation); err != nil {
-		return fmt.Errorf("decode level generation: %w", err)
+	if err := json.Unmarshal([]byte(outputText), target); err != nil {
+		return fmt.Errorf("decode structured OpenAI response: %w", err)
 	}
 	return nil
 }
@@ -236,7 +329,141 @@ func responseOutputText(data []byte) (string, error) {
 	return "", errors.New("OpenAI response did not include output_text")
 }
 
-func levelGenerationSchema() map[string]any {
+func (c *Client) verifyGeneration(ctx context.Context, sourceContext source.SourceContext, generation LevelGeneration) error {
+	concurrency := c.config.VerifierConcurrency
+	if concurrency <= 0 {
+		concurrency = defaultVerifierConcurrency
+	}
+	if concurrency > len(generation.Quizzes) {
+		concurrency = len(generation.Quizzes)
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	type verificationJob struct {
+		index int
+		quiz  QuizItem
+	}
+
+	jobs := make(chan verificationJob)
+	results := make(chan error, len(generation.Quizzes))
+	var wg sync.WaitGroup
+
+	for workerIndex := 0; workerIndex < concurrency; workerIndex++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				results <- c.verifyQuiz(ctx, sourceContext, generation.SummaryMarkdown, job.index, job.quiz)
+			}
+		}()
+	}
+
+	for index, quiz := range generation.Quizzes {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return ctx.Err()
+		case jobs <- verificationJob{index: index, quiz: quiz}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	failures := make([]string, 0)
+	for err := range results {
+		if err != nil {
+			failures = append(failures, err.Error())
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d quiz quality checks failed: %s", len(failures), strings.Join(failures, "; "))
+	}
+	return nil
+}
+
+func (c *Client) verifyQuiz(ctx context.Context, sourceContext source.SourceContext, summary string, index int, quiz QuizItem) error {
+	blindPrompt := fmt.Sprintf(
+		"Review this quiz from the learner's perspective. The learner does not see the original source text.\n\nSub-chapter title: %s\nLevel summary:\n%s\n\nQuiz index: %d\n%s",
+		firstNonEmpty(sourceContext.SubChapterTitle, "Untitled"),
+		summary,
+		index,
+		quizReviewPayload(quiz),
+	)
+	blind, err := c.callQuizVerifier(ctx, blindVerifierSystemPrompt, blindPrompt)
+	if err != nil {
+		return fmt.Errorf("quiz %d blind verifier error: %w", index, err)
+	}
+	if !blind.Pass || !blind.Answerable || !blind.Useful {
+		return fmt.Errorf("quiz %d is not self-contained/useful: %s", index, firstNonEmpty(blind.FailureReason, "blind verifier rejected it"))
+	}
+
+	groundedPrompt := fmt.Sprintf(
+		"Review this quiz against the source text.\n\nSub-chapter title: %s\nSource text:\n%s\n\nQuiz index: %d\n%s",
+		firstNonEmpty(sourceContext.SubChapterTitle, "Untitled"),
+		sourceContext.SourceText,
+		index,
+		quizReviewPayload(quiz),
+	)
+	grounded, err := c.callQuizVerifier(ctx, groundedVerifierSystemPrompt, groundedPrompt)
+	if err != nil {
+		return fmt.Errorf("quiz %d grounded verifier error: %w", index, err)
+	}
+	if !grounded.Pass || !grounded.Correct || !grounded.Relevant {
+		return fmt.Errorf("quiz %d is not correct/relevant: %s", index, firstNonEmpty(grounded.FailureReason, "grounded verifier rejected it"))
+	}
+
+	return nil
+}
+
+func (c *Client) callQuizVerifier(ctx context.Context, system string, prompt string) (quizVerification, error) {
+	var verification quizVerification
+	callCtx, cancel := context.WithTimeout(ctx, c.config.Timeout)
+	defer cancel()
+	if err := c.callStructured(callCtx, system, prompt, quizVerificationFormat(), &verification); err != nil {
+		return quizVerification{}, err
+	}
+	verification.FailureReason = strings.TrimSpace(verification.FailureReason)
+	return verification, nil
+}
+
+func quizReviewPayload(quiz QuizItem) string {
+	payload := map[string]any{
+		"quiz_type":               quiz.QuizType,
+		"question_markdown":       quiz.QuestionMarkdown,
+		"options_markdown":        quiz.OptionsMarkdown,
+		"answer_index":            quiz.AnswerIndex,
+		"correct_option_markdown": quiz.CorrectOptionMarkdown,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func (c *Client) levelGenerationFormat() map[string]any {
+	return map[string]any{
+		"type":   "json_schema",
+		"name":   "level_generation",
+		"strict": true,
+		"schema": levelGenerationSchema(c.quizCount()),
+	}
+}
+
+func quizVerificationFormat() map[string]any {
+	return map[string]any{
+		"type":   "json_schema",
+		"name":   "quiz_verification",
+		"strict": true,
+		"schema": quizVerificationSchema(),
+	}
+}
+
+func levelGenerationSchema(quizCount int) map[string]any {
 	requiredQuizFields := []string{"quiz_type", "question_markdown", "options_markdown", "answer_index", "correct_option_markdown"}
 	mcqQuizSchema := map[string]any{
 		"type":                 "object",
@@ -310,6 +537,22 @@ func levelGenerationSchema() map[string]any {
 				"maxItems": quizCount,
 				"items":    quizSchema,
 			},
+		},
+	}
+}
+
+func quizVerificationSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"pass", "answerable", "correct", "useful", "relevant", "failure_reason"},
+		"properties": map[string]any{
+			"pass":           map[string]any{"type": "boolean"},
+			"answerable":     map[string]any{"type": "boolean"},
+			"correct":        map[string]any{"type": "boolean"},
+			"useful":         map[string]any{"type": "boolean"},
+			"relevant":       map[string]any{"type": "boolean"},
+			"failure_reason": map[string]any{"type": "string"},
 		},
 	}
 }
@@ -415,7 +658,8 @@ func normalizeAnswerIndexFromCorrectOption(quiz *QuizItem) {
 	}
 }
 
-func validateGeneration(generation LevelGeneration) error {
+func (c *Client) validateGeneration(generation LevelGeneration) error {
+	quizCount := c.quizCount()
 	if strings.TrimSpace(generation.SummaryMarkdown) == "" {
 		return errors.New("summary_markdown cannot be empty")
 	}
@@ -461,6 +705,40 @@ func validateGeneration(generation LevelGeneration) error {
 	return nil
 }
 
+func refillDuplicateValidator(existingQuizzes []ExistingQuiz) func(LevelGeneration) error {
+	existingQuestions := map[string]struct{}{}
+	for _, quiz := range existingQuizzes {
+		key := normalizeQuestionForMatch(quiz.QuestionMarkdown)
+		if key != "" {
+			existingQuestions[key] = struct{}{}
+		}
+	}
+	return func(generation LevelGeneration) error {
+		batchQuestions := map[string]struct{}{}
+		for index, quiz := range generation.Quizzes {
+			key := normalizeQuestionForMatch(quiz.QuestionMarkdown)
+			if key == "" {
+				continue
+			}
+			if _, ok := existingQuestions[key]; ok {
+				return fmt.Errorf("refill quiz %d repeats an existing quiz question; generate a different question", index)
+			}
+			if _, ok := batchQuestions[key]; ok {
+				return fmt.Errorf("refill quiz %d repeats another refill quiz question; generate varied questions", index)
+			}
+			batchQuestions[key] = struct{}{}
+		}
+		return nil
+	}
+}
+
+func (c *Client) quizCount() int {
+	if c.config.QuizCount > 0 {
+		return c.config.QuizCount
+	}
+	return defaultQuizCount
+}
+
 func matchingOptionIndex(options []string, option string) int {
 	normalizedOption := normalizeOptionForMatch(option)
 	if normalizedOption == "" {
@@ -476,6 +754,24 @@ func matchingOptionIndex(options []string, option string) int {
 
 func normalizeOptionForMatch(option string) string {
 	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(option)), " "))
+}
+
+func normalizeQuestionForMatch(question string) string {
+	value := quiztext.SanitizeMarkdown(question)
+	value = strings.ToLower(value)
+	replacer := strings.NewReplacer(
+		"`", "",
+		"*", "",
+		"_", "",
+		"#", "",
+		"$", "",
+		"\\(", "",
+		"\\)", "",
+		"\\[", "",
+		"\\]", "",
+	)
+	value = replacer.Replace(value)
+	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func hasDuplicateOptions(options []string) bool {

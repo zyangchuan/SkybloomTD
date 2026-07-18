@@ -77,7 +77,7 @@ func main() {
 	defer publisher.Close()
 
 	generationService := generation.NewService(cfg, levelRepo, statusStore, publisher)
-	router := server.NewWithGenerationCachesAndSessions(cfg, levelRepo, mapStore, quizStore, levelRepo, generationService, statusStore, sessionStore).Router()
+	router := server.NewWithGenerationCachesSessionsAndRefills(cfg, levelRepo, mapStore, quizStore, levelRepo, generationService, statusStore, sessionStore, publisher).Router()
 	addr := ":" + cfg.Port
 	log.Printf("game-service listening on %s", addr)
 	if err := http.ListenAndServe(addr, router); err != nil {

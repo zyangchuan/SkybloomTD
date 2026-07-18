@@ -41,7 +41,6 @@ export default function UploadDocumentModal({ isOpen, onClose, onUploadSuccess }
     };
   }, [isOpen]);
 
-  // Clean up states when modal is closed
   useEffect(() => {
     if (!isOpen) {
       setTimeout(() => {

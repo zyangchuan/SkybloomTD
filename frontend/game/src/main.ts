@@ -18,7 +18,6 @@ const config: Phaser.Types.Core.GameConfig & { resolution?: number } = {
 
 const game = new Phaser.Game(config);
 
-// Bind simple dynamic resize listener to refresh scale perfectly when screen metrics change on mobile
 window.addEventListener('resize', () => {
   if (game && game.scale) {
     game.scale.refresh();
@@ -30,5 +29,5 @@ window.addEventListener('orientationchange', () => {
     if (game && game.scale) {
       game.scale.refresh();
     }
-  }, 200); // 200ms delay to let mobile viewport calculations settle before refresh
+  }, 200);
 });

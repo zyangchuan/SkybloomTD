@@ -19,28 +19,34 @@ interface QuizMistake {
   created_at: string;
 }
 
+type RenderMathInElement = (
+  element: HTMLElement,
+  options: {
+    delimiters: Array<{ left: string; right: string; display: boolean }>;
+    throwOnError: boolean;
+  }
+) => void;
+
 function MistakesSummaryContent() {
   const searchParams = useSearchParams();
   const isMobile = searchParams.get('mobile') === 'true';
-  const levelId = searchParams.get('level_id') || '';
   const sessionId = searchParams.get('session_id') || '';
   const victory = searchParams.get('victory') === 'true';
 
   const [mistakes, setMistakes] = useState<QuizMistake[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(sessionId));
   const [katexReady, setKatexReady] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Fetch Mistakes list from API
   useEffect(() => {
-    if (!levelId) {
-      setLoading(false);
+    if (!sessionId) {
       return;
     }
 
     async function fetchMistakes() {
       try {
-        const response = await fetch(`/api/game-service/quiz-mistakes?level_id=${levelId}`);
+        const response = await fetch(`/api/game-service/quiz-mistakes?session_id=${sessionId}`);
         if (response.ok) {
           const data = await response.json();
           setMistakes(data.mistakes || []);
@@ -55,7 +61,7 @@ function MistakesSummaryContent() {
     }
 
     fetchMistakes();
-  }, [levelId]);
+  }, [sessionId]);
 
   // Preload KaTeX libraries dynamically inside the iframe context
   useEffect(() => {
@@ -89,9 +95,10 @@ function MistakesSummaryContent() {
 
   // Run KaTeX auto-typesetter when content or script is ready
   useEffect(() => {
-    if (katexReady && containerRef.current && (window as any).renderMathInElement) {
+    const renderMathInElement = (window as Window & { renderMathInElement?: RenderMathInElement }).renderMathInElement;
+    if (katexReady && containerRef.current && renderMathInElement) {
       try {
-        (window as any).renderMathInElement(containerRef.current, {
+        renderMathInElement(containerRef.current, {
           delimiters: [
             { left: '$$', right: '$$', display: true },
             { left: '$', right: '$', display: false },
