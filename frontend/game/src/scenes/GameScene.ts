@@ -46,7 +46,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.entities = new EntitySync(this, this.tileSize, this.offsetX, this.offsetY);
     this.overlay  = new GameOverlay(this, (t, d) => this.sendWs(t, d), () => this.sessionId, () => this.levelId, () => this.quiz.clear());
-    this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow());
+    this.hud      = new GameHUD(this, () => this.overlay.showPauseWindow(), () => { window.location.href = '/almanac' });
     this.quiz     = new QuizManager(this, this.ws);
     this.quiz.createHUD();
 
