@@ -671,14 +671,21 @@ paths:
         ticker starts after that message.
         During the session, clients can send `game.action.place_tower` with a
         base `bird_type` and grid `x`/`y`, send `game.action.merge_tower` with
-        compatible source and target bird ids to create hybrid birds, or send
-        `game.pause` to persist `loop_paused=true` and stop advancing ticks
-        until a later resume flow is added. Hybrid bird types are returned in
-        the catalog and state snapshots, but cannot be placed directly.
+        compatible source and target bird ids to create hybrid birds, send
+        `game.action.use_consumable` to prepare a ready Airstrike against three
+        map targets, or send `game.pause` to persist `loop_paused=true` and stop
+        advancing ticks until a later resume flow is added. A prepared Airstrike
+        reserves the charge and returns a `deployment_id`; the client may render
+        the animation and then send `game.action.commit_consumable` to resolve
+        damage early. If that commit message never arrives, the server
+        auto-resolves the deployment on the returned `auto_commit_at_tick`.
+        Hybrid bird types are returned in the catalog and state snapshots, but
+        cannot be placed directly.
         Reconnecting with the same `level_id` reuses the existing Redis session
         for that user and level, including placed birds, active smogs, health,
         wave, tick, current essence, loop start state, and pause state, until
-        the session expires. The gameplay loop runs five
+        the session expires. Consumable inventory and pending consumable
+        deployments are also restored. The gameplay loop runs five
         enemy waves, each split into grouped spawns. The first
         wave starts
         on the first gameplay tick after the session starts, and each later
@@ -696,6 +703,12 @@ paths:
         data, then send `game.quiz.answer` with the selected option index.
         Starting a fresh quiz has a 20 second cooldown. Re-requesting the
         currently pending unanswered quiz is allowed immediately.
+        To acquire an Airstrike, send `game.consumable.acquire` with
+        `item_type=airstrike`. The server presents a consumable quiz with
+        `game.consumable.quiz.presented`; answering correctly with
+        `game.consumable.quiz.answer` grants one ready Airstrike instead of
+        essence. Progression quizzes and consumable acquisition quizzes cannot
+        be pending at the same time.
         Quiz requests before `game.session.run` return `game.quiz.unavailable`
         with `reason=game_not_started`. Correct answers award 50 essence;
         incorrect answers are saved for a later mistakes summary. Answered
@@ -716,10 +729,14 @@ paths:
         - $ref: "#/components/schemas/GameSessionRunWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
         - $ref: "#/components/schemas/GameMergeTowerActionMessage"
+        - $ref: "#/components/schemas/GameUseConsumableActionMessage"
+        - $ref: "#/components/schemas/GameCommitConsumableActionMessage"
         - $ref: "#/components/schemas/GamePauseWebSocketMessage"
         - $ref: "#/components/schemas/GameExitWebSocketMessage"
         - $ref: "#/components/schemas/GameQuizRequestMessage"
         - $ref: "#/components/schemas/GameQuizAnswerMessage"
+        - $ref: "#/components/schemas/GameConsumableAcquireMessage"
+        - $ref: "#/components/schemas/GameConsumableQuizAnswerMessage"
       x-websocket-server-messages:
         - $ref: "#/components/schemas/LevelGenerationStartedMessage"
         - $ref: "#/components/schemas/GameInitialStateMessage"
@@ -732,7 +749,11 @@ paths:
         - $ref: "#/components/schemas/GameQuizPresentedMessage"
         - $ref: "#/components/schemas/GameQuizResultMessage"
         - $ref: "#/components/schemas/GameQuizUnavailableMessage"
+        - $ref: "#/components/schemas/GameConsumableQuizPresentedMessage"
+        - $ref: "#/components/schemas/GameConsumableQuizResultMessage"
         - $ref: "#/components/schemas/GameActionAcceptedMessage"
+        - $ref: "#/components/schemas/GameConsumablePreparedMessage"
+        - $ref: "#/components/schemas/GameConsumableResolvedMessage"
         - $ref: "#/components/schemas/GameActionRejectedMessage"
         - $ref: "#/components/schemas/GameErrorMessage"
       responses:
@@ -1234,6 +1255,49 @@ components:
 
             Hybrid upgrade costs: `falcon`, `kingfisher`, and `phoenix` cost 50 essence; `sun_god` costs 200 essence.
 
+    GameUseConsumableActionMessage:
+      type: object
+      description: |
+        Prepare and reserve a ready consumable deployment. For Airstrike, the
+        server validates exactly three map targets and returns
+        `game.consumable.prepared`. The client should render the deployment
+        animation only after this message is accepted.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.use_consumable
+        data:
+          type: object
+          required: [item_type, targets]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+            targets:
+              type: array
+              minItems: 3
+              maxItems: 3
+              description: Three distinct in-map target positions.
+              items:
+                $ref: "#/components/schemas/GridPosition"
+
+    GameCommitConsumableActionMessage:
+      type: object
+      description: Resolve a prepared consumable deployment early, normally after the client-side deployment animation completes. If this message never arrives, the server auto-resolves at the deployment's `auto_commit_at_tick`.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.commit_consumable
+        data:
+          type: object
+          required: [deployment_id]
+          properties:
+            deployment_id:
+              type: string
+              format: uuid
+
     GamePauseWebSocketMessage:
       type: object
       required: [type]
@@ -1276,6 +1340,44 @@ components:
           type: object
           required: [quiz_id, selected_index]
           properties:
+            quiz_id:
+              type: string
+              format: uuid
+            selected_index:
+              type: integer
+              minimum: 0
+              description: Zero-based option index chosen by the player.
+
+    GameConsumableAcquireMessage:
+      type: object
+      description: Request a quiz that awards one consumable charge when answered correctly.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.acquire
+        data:
+          type: object
+          required: [item_type]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+
+    GameConsumableQuizAnswerMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.quiz.answer
+        data:
+          type: object
+          required: [item_type, quiz_id, selected_index]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
             quiz_id:
               type: string
               format: uuid
@@ -1394,6 +1496,26 @@ components:
         data:
           $ref: "#/components/schemas/QuizUnavailable"
 
+    GameConsumableQuizPresentedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.quiz.presented
+        data:
+          $ref: "#/components/schemas/ConsumableQuizPrompt"
+
+    GameConsumableQuizResultMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.quiz.result
+        data:
+          $ref: "#/components/schemas/ConsumableQuizResult"
+
     GameActionAcceptedMessage:
       type: object
       required: [type, data]
@@ -1419,6 +1541,32 @@ components:
               items:
                 type: string
 
+    GameConsumablePreparedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.prepared
+        data:
+          type: object
+          required: [deployment, consumables]
+          properties:
+            deployment:
+              $ref: "#/components/schemas/ConsumableDeployment"
+            consumables:
+              $ref: "#/components/schemas/ConsumableInventory"
+
+    GameConsumableResolvedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.resolved
+        data:
+          $ref: "#/components/schemas/ConsumableResolution"
+
     GameActionRejectedMessage:
       type: object
       required: [type, data]
@@ -1432,7 +1580,7 @@ components:
           properties:
             action:
               type: string
-              enum: [place_tower, merge_tower]
+              enum: [place_tower, merge_tower, prepare_consumable, commit_consumable, validate_consumable_acquire]
             error:
               type: string
               example: insufficient essence
@@ -1562,7 +1710,7 @@ components:
     GameState:
       type: object
       description: Authoritative gameplay snapshot. After `game.session.run`, `game.state` messages are sent 20 times per second.
-      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, quiz_cooldown_remaining_seconds, birds, smogs, projectiles]
+      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, quiz_cooldown_remaining_seconds, birds, enemies, projectiles, consumables]
       properties:
         session_id:
           type: string
@@ -1609,14 +1757,27 @@ components:
             $ref: "#/components/schemas/PlacedBird"
         smogs:
           type: array
+          deprecated: true
           description: Active enemies with authoritative positions and health.
           items:
             $ref: "#/components/schemas/Smog"
+        enemies:
+          type: array
+          description: Active enemies with authoritative positions and health.
+          items:
+            $ref: "#/components/schemas/Enemy"
         projectiles:
           type: array
           description: Deprecated combat-visual compatibility field. Authoritative damage is resolved immediately in attack events, so this is normally empty.
           items:
             $ref: "#/components/schemas/Projectile"
+        consumables:
+          $ref: "#/components/schemas/ConsumableInventory"
+        pending_consumables:
+          type: array
+          description: Prepared consumable deployments waiting for client commit or server auto-resolution.
+          items:
+            $ref: "#/components/schemas/ConsumableDeployment"
         events:
           type: array
           description: Transient events emitted for this tick, such as attacks, damage, spawns, escapes, and wave starts.
@@ -1744,13 +1905,54 @@ components:
         remaining:
           type: integer
           description: Number of quizzes left after deleting the answered quiz.
+
+    ConsumableQuizPrompt:
+      allOf:
+        - $ref: "#/components/schemas/QuizPrompt"
+        - type: object
+          required: [item_type]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+
+    ConsumableQuizResult:
+      type: object
+      required: [item_type, quiz_id, correct, selected_index, correct_index, selected_option_markdown, correct_option_markdown, consumable_awarded, consumables, remaining]
+      properties:
+        item_type:
+          type: string
+          enum: [airstrike]
+        quiz_id:
+          type: string
+          format: uuid
+        correct:
+          type: boolean
+        selected_index:
+          type: integer
+        correct_index:
+          type: integer
+        selected_option_markdown:
+          type: string
+        correct_option_markdown:
+          type: string
+        consumable_awarded:
+          type: integer
+          description: Number of consumable charges awarded by this answer.
+          example: 1
+        consumables:
+          $ref: "#/components/schemas/ConsumableInventory"
+        remaining:
+          type: integer
+          description: Number of quizzes left after deleting the answered quiz.
+
     QuizUnavailable:
       type: object
       required: [reason]
       properties:
         reason:
           type: string
-          enum: [game_not_started, no_quizzes_remaining, quiz_cooldown]
+          enum: [game_not_started, no_quizzes_remaining, quiz_cooldown, progression_quiz_pending, consumable_quiz_pending]
           example: no_quizzes_remaining
         retry_after_seconds:
           type: integer
@@ -1860,6 +2062,7 @@ components:
 
     Smog:
       type: object
+      deprecated: true
       required: [id, health, position, speed, path_index]
       properties:
         id:
@@ -1874,6 +2077,105 @@ components:
           format: double
         path_index:
           type: integer
+
+    Enemy:
+      type: object
+      required: [id, type, health, position, speed, path_index]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [smog, noise, junk]
+        health:
+          type: integer
+        position:
+          $ref: "#/components/schemas/GridPosition"
+        speed:
+          type: number
+          format: double
+        path_index:
+          type: integer
+
+    ConsumableInventory:
+      type: object
+      required: [airstrike]
+      properties:
+        airstrike:
+          $ref: "#/components/schemas/ConsumableItemState"
+
+    ConsumableItemState:
+      type: object
+      required: [status, charges]
+      properties:
+        status:
+          type: string
+          enum: [empty, ready, pending, quiz_pending]
+          description: "`pending` means a charge has been reserved by a prepared deployment. `quiz_pending` means an acquisition quiz is awaiting an answer."
+        charges:
+          type: integer
+          minimum: 0
+        pending_quiz_id:
+          type: string
+          format: uuid
+          description: Present when `status=quiz_pending`; identifies the quiz that awards this consumable.
+
+    ConsumableDeployment:
+      type: object
+      required: [deployment_id, item_type, targets, prepared_at_tick, auto_commit_at_tick, status]
+      properties:
+        deployment_id:
+          type: string
+          format: uuid
+        item_type:
+          type: string
+          enum: [airstrike]
+        targets:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/GridPosition"
+        prepared_at_tick:
+          type: integer
+          format: int64
+        auto_commit_at_tick:
+          type: integer
+          format: int64
+          description: Server tick when the deployment resolves if the client does not send `game.action.commit_consumable`.
+        status:
+          type: string
+          enum: [pending]
+
+    ConsumableResolution:
+      type: object
+      required: [deployment_id, item_type, targets, consumables, enemies, events]
+      properties:
+        deployment_id:
+          type: string
+          format: uuid
+        item_type:
+          type: string
+          enum: [airstrike]
+        targets:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/GridPosition"
+        consumables:
+          $ref: "#/components/schemas/ConsumableInventory"
+        enemies:
+          type: array
+          description: Enemy list after applying the consumable damage.
+          items:
+            $ref: "#/components/schemas/Enemy"
+        events:
+          type: array
+          description: Impact and damage events produced by the resolved deployment.
+          items:
+            $ref: "#/components/schemas/GameEvent"
 
     Projectile:
       type: object
@@ -1914,13 +2216,17 @@ components:
       properties:
         type:
           type: string
-          enum: [wave.started, wave.cleared, smog.spawned, smog.escaped, bird.attack, smog.damage]
+          enum: [wave.started, wave.cleared, enemy.spawned, enemy.escaped, bird.attack, enemy.damage, airstrike.impact]
         bird_id:
+          type: string
+          format: uuid
+        enemy_id:
           type: string
           format: uuid
         smog_id:
           type: string
           format: uuid
+          deprecated: true
         projectile_id:
           type: string
           format: uuid
@@ -1931,12 +2237,24 @@ components:
           items:
             type: string
             format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+          description: Present for consumable deployment events.
+        item_type:
+          type: string
+          enum: [airstrike]
+        targets:
+          type: array
+          description: Present for `airstrike.impact`.
+          items:
+            $ref: "#/components/schemas/GridPosition"
         damage:
           type: number
           format: double
         health:
           type: integer
-          description: Remaining smog health for damage events, or remaining base health for escape events.
+          description: Remaining enemy health for damage events, or remaining base health for escape events.
         wave:
           type: integer
 

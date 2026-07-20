@@ -23,6 +23,7 @@ import (
 	"skybloom/game-service/internal/mapgen"
 	"skybloom/game-service/internal/models"
 	"skybloom/game-service/internal/quizcache"
+	"skybloom/game-service/internal/quizflow"
 	"skybloom/game-service/internal/quiztext"
 	"skybloom/game-service/internal/repository"
 )
@@ -34,6 +35,12 @@ const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
 const mergeTowerAction = "merge_tower"
+const prepareConsumableAction = "prepare_consumable"
+const commitConsumableAction = "commit_consumable"
+const grantConsumableAction = "grant_consumable"
+const validateConsumableAcquireAction = "validate_consumable_acquire"
+const markConsumableQuizPendingAction = "mark_consumable_quiz_pending"
+const finishConsumableQuizAction = "finish_consumable_quiz"
 const awardQuizEssenceAction = "award_quiz_essence"
 const markQuizStartedAction = "mark_quiz_started"
 const pauseGameAction = "pause_game"
@@ -41,13 +48,22 @@ const resumeGameAction = "resume_game"
 const startGameAction = "start_game"
 
 const (
-	waveClearDelayTicks        = int64(60)
-	enemySpawnIntervalTicks    = int64(22)
-	minEnemySpawnIntervalTicks = int64(8)
-	groupGapTicks              = int64(160)
-	baseHealthDamage           = 10
-	correctQuizEssenceAward    = 50
-	quizRequestCooldown        = 20 * time.Second
+	waveClearDelayTicks         = int64(60)
+	enemySpawnIntervalTicks     = int64(22)
+	minEnemySpawnIntervalTicks  = int64(8)
+	groupGapTicks               = int64(160)
+	baseHealthDamage            = 10
+	correctQuizEssenceAward     = 50
+	quizRequestCooldown         = 20 * time.Second
+	airstrikeItemType           = "airstrike"
+	consumableStatusEmpty       = "empty"
+	consumableStatusReady       = "ready"
+	consumableStatusPending     = "pending"
+	consumableStatusQuizPending = "quiz_pending"
+	airstrikeTargetCount        = 3
+	airstrikeDamage             = 80.0
+	airstrikeRadius             = 1.35
+	airstrikeAutoCommitTicks    = int64(40)
 )
 
 type LevelRepository interface {
@@ -119,22 +135,24 @@ type InitialState struct {
 }
 
 type GameState struct {
-	SessionID                    string            `json:"session_id"`
-	LevelID                      string            `json:"level_id"`
-	Health                       int               `json:"health"`
-	Essence                      int               `json:"essence"`
-	Wave                         int               `json:"wave"`
-	Tick                         int64             `json:"tick"`
-	ServerTime                   time.Time         `json:"server_time"`
-	LoopStarted                  bool              `json:"loop_started"`
-	LoopPaused                   bool              `json:"loop_paused"`
-	QuizCooldownRemainingSeconds int               `json:"quiz_cooldown_remaining_seconds"`
-	BirdTypes                    []BirdTypeInfo    `json:"bird_types,omitempty"`
-	EnemyTypes                   []EnemyTypeInfo   `json:"enemy_types,omitempty"`
-	Birds                        []PlacedBirdState `json:"birds"`
-	Enemies                      []EnemyState      `json:"enemies"`
-	Projectiles                  []ProjectileState `json:"projectiles"`
-	Events                       []GameEvent       `json:"events,omitempty"`
+	SessionID                    string                      `json:"session_id"`
+	LevelID                      string                      `json:"level_id"`
+	Health                       int                         `json:"health"`
+	Essence                      int                         `json:"essence"`
+	Wave                         int                         `json:"wave"`
+	Tick                         int64                       `json:"tick"`
+	ServerTime                   time.Time                   `json:"server_time"`
+	LoopStarted                  bool                        `json:"loop_started"`
+	LoopPaused                   bool                        `json:"loop_paused"`
+	QuizCooldownRemainingSeconds int                         `json:"quiz_cooldown_remaining_seconds"`
+	BirdTypes                    []BirdTypeInfo              `json:"bird_types,omitempty"`
+	EnemyTypes                   []EnemyTypeInfo             `json:"enemy_types,omitempty"`
+	Birds                        []PlacedBirdState           `json:"birds"`
+	Enemies                      []EnemyState                `json:"enemies"`
+	Projectiles                  []ProjectileState           `json:"projectiles"`
+	Consumables                  ConsumableState             `json:"consumables"`
+	PendingConsumables           []ConsumableDeploymentState `json:"pending_consumables,omitempty"`
+	Events                       []GameEvent                 `json:"events,omitempty"`
 }
 
 type BirdTypeInfo struct {
@@ -177,15 +195,37 @@ type ProjectileState struct {
 	HitRadius       float64                   `json:"hit_radius"`
 }
 
+type ConsumableState struct {
+	Airstrike ConsumableItemState `json:"airstrike"`
+}
+
+type ConsumableItemState struct {
+	Status        string `json:"status"`
+	Charges       int    `json:"charges"`
+	PendingQuizID string `json:"pending_quiz_id,omitempty"`
+}
+
+type ConsumableDeploymentState struct {
+	DeploymentID     string                `json:"deployment_id"`
+	ItemType         string                `json:"item_type"`
+	Targets          []gameobject.Position `json:"targets"`
+	PreparedAtTick   int64                 `json:"prepared_at_tick"`
+	AutoCommitAtTick int64                 `json:"auto_commit_at_tick"`
+	Status           string                `json:"status"`
+}
+
 type GameEvent struct {
-	Type          string   `json:"type"`
-	BirdID        string   `json:"bird_id,omitempty"`
-	EnemyID       string   `json:"enemy_id,omitempty"`
-	ProjectileID  string   `json:"projectile_id,omitempty"`
-	ProjectileIDs []string `json:"projectile_ids,omitempty"`
-	Damage        float64  `json:"damage,omitempty"`
-	Health        int      `json:"health,omitempty"`
-	Wave          int      `json:"wave,omitempty"`
+	Type          string                `json:"type"`
+	BirdID        string                `json:"bird_id,omitempty"`
+	EnemyID       string                `json:"enemy_id,omitempty"`
+	ProjectileID  string                `json:"projectile_id,omitempty"`
+	ProjectileIDs []string              `json:"projectile_ids,omitempty"`
+	DeploymentID  string                `json:"deployment_id,omitempty"`
+	ItemType      string                `json:"item_type,omitempty"`
+	Targets       []gameobject.Position `json:"targets,omitempty"`
+	Damage        float64               `json:"damage,omitempty"`
+	Health        int                   `json:"health,omitempty"`
+	Wave          int                   `json:"wave,omitempty"`
 }
 
 type GameOverState struct {
@@ -212,18 +252,36 @@ type GameExitedState struct {
 	Reason    string `json:"reason"`
 }
 
-type QuizPromptState struct {
-	QuizID           string   `json:"quiz_id"`
-	QuizType         string   `json:"quiz_type"`
-	QuestionMarkdown string   `json:"question_markdown"`
-	OptionsMarkdown  []string `json:"options_markdown"`
-	Remaining        int      `json:"remaining"`
+type consumableResolution struct {
+	DeploymentID string                `json:"deployment_id"`
+	ItemType     string                `json:"item_type"`
+	Targets      []gameobject.Position `json:"targets"`
+	Consumables  ConsumableState       `json:"consumables"`
+	Enemies      []EnemyState          `json:"enemies"`
+	Events       []GameEvent           `json:"events"`
 }
 
-type QuizUnavailableState struct {
-	Reason            string `json:"reason"`
-	RetryAfterSeconds int    `json:"retry_after_seconds,omitempty"`
+type ConsumableQuizPromptState struct {
+	ItemType string `json:"item_type"`
+	quizflow.Prompt
 }
+
+type ConsumableQuizResultState struct {
+	ItemType               string          `json:"item_type"`
+	QuizID                 string          `json:"quiz_id"`
+	Correct                bool            `json:"correct"`
+	SelectedIndex          int             `json:"selected_index"`
+	CorrectIndex           int             `json:"correct_index"`
+	SelectedOptionMarkdown string          `json:"selected_option_markdown"`
+	CorrectOptionMarkdown  string          `json:"correct_option_markdown"`
+	ConsumableAwarded      int             `json:"consumable_awarded"`
+	Consumables            ConsumableState `json:"consumables"`
+	Remaining              int             `json:"remaining"`
+}
+
+type QuizPromptState = quizflow.Prompt
+
+type QuizUnavailableState = quizflow.Unavailable
 
 type QuizResultState struct {
 	QuizID                 string `json:"quiz_id"`
@@ -243,6 +301,42 @@ type placeTowerRequest struct {
 	Y        int    `json:"y"`
 }
 
+type useConsumableRequest struct {
+	ItemType string                `json:"item_type"`
+	Targets  []gameobject.Position `json:"targets"`
+}
+
+type consumableAcquireRequest struct {
+	ItemType string `json:"item_type"`
+}
+
+type consumableQuizAnswerRequest struct {
+	ItemType      string `json:"item_type"`
+	QuizID        string `json:"quiz_id"`
+	SelectedIndex int    `json:"selected_index"`
+}
+
+type commitConsumableRequest struct {
+	DeploymentID string `json:"deployment_id"`
+}
+
+type grantConsumableRequest struct {
+	ItemType string
+	Charges  int
+}
+
+type finishConsumableQuizRequest struct {
+	ItemType string
+	QuizID   string
+	Correct  bool
+	Charges  int
+}
+
+type consumableQuizPendingRequest struct {
+	ItemType string
+	QuizID   string
+}
+
 type mergeTowerRequest struct {
 	SourceBirdID   string `json:"source_bird_id,omitempty"`
 	SourceBirdType string `json:"source_bird_type,omitempty"`
@@ -259,31 +353,38 @@ type quizAnswerRequest struct {
 }
 
 type clientAction struct {
-	Type          string
-	PlaceTower    placeTowerRequest
-	MergeTower    mergeTowerRequest
-	EssenceReward int
-	QuizStartedAt time.Time
-	Result        chan actionResult
+	Type                 string
+	PlaceTower           placeTowerRequest
+	MergeTower           mergeTowerRequest
+	UseConsumable        useConsumableRequest
+	CommitConsumable     commitConsumableRequest
+	GrantConsumable      grantConsumableRequest
+	ConsumableQuiz       consumableQuizPendingRequest
+	FinishConsumableQuiz finishConsumableQuizRequest
+	EssenceReward        int
+	QuizStartedAt        time.Time
+	Result               chan actionResult
 }
 
 type actionResult struct {
-	Essence int
-	Err     error
+	Essence     int
+	Consumables ConsumableState
+	Err         error
 }
 
 type runningGameLoop struct {
-	sessionID         string
-	levelID           string
-	generationID      string
-	subChapterID      string
-	userID            string
-	currentQuizID     string
-	lastQuizStartedAt time.Time
-	loopStarted       bool
-	stop              context.CancelFunc
-	actions           chan clientAction
-	done              chan struct{}
+	sessionID               string
+	levelID                 string
+	generationID            string
+	subChapterID            string
+	userID                  string
+	currentQuizID           string
+	currentConsumableQuizID string
+	lastQuizStartedAt       time.Time
+	loopStarted             bool
+	stop                    context.CancelFunc
+	actions                 chan clientAction
+	done                    chan struct{}
 }
 
 func (l *runningGameLoop) stopped() bool {
@@ -310,16 +411,18 @@ func stopGameLoop(loop *runningGameLoop) {
 }
 
 type runtimeSession struct {
-	session           gamesession.State
-	economy           gamesession.Economy
-	birds             []placedBird
-	enemies           []gameobject.Enemy
-	projectiles       []gameobject.Projectile
-	levelMap          mapgen.GeneratedMap
-	path              []gameobject.Position
-	loopStarted       bool
-	loopPaused        bool
-	lastQuizStartedAt time.Time
+	session            gamesession.State
+	economy            gamesession.Economy
+	birds              []placedBird
+	enemies            []gameobject.Enemy
+	projectiles        []gameobject.Projectile
+	consumables        ConsumableState
+	pendingConsumables []ConsumableDeploymentState
+	levelMap           mapgen.GeneratedMap
+	path               []gameobject.Position
+	loopStarted        bool
+	loopPaused         bool
+	lastQuizStartedAt  time.Time
 
 	waveStartedAtTick int64
 	waveSpawned       int
@@ -573,6 +676,38 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 					return
 				}
 			}
+		case "game.consumable.acquire":
+			request, err := decodeConsumableAcquire(message.Data)
+			if err != nil {
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if err := s.handleConsumableAcquire(ctx, conn, writeMu, gameLoop, request); err != nil {
+				log.Printf("game.consumable.acquire failed user_id=%s: %v", userID, err)
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+			}
+		case "game.consumable.quiz.answer":
+			request, err := decodeConsumableQuizAnswer(message.Data)
+			if err != nil {
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if err := s.handleConsumableQuizAnswer(ctx, conn, writeMu, gameLoop, request); err != nil {
+				log.Printf("game.consumable.quiz.answer failed user_id=%s: %v", userID, err)
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+			}
 		case "game.pause":
 			if gameLoop != nil && !gameLoop.stopped() {
 				select {
@@ -641,6 +776,56 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 			case gameLoop.actions <- clientAction{Type: mergeTowerAction, MergeTower: action}:
 			default:
 				if writeErr := writeActionRejected(conn, writeMu, mergeTowerAction, "action queue is full"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+			}
+		case "game.action.use_consumable":
+			action, err := decodeUseConsumableAction(message.Data)
+			if err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, prepareConsumableAction, err.Error()); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if gameLoop == nil || gameLoop.stopped() {
+				gameLoop = nil
+				if writeErr := writeActionRejected(conn, writeMu, prepareConsumableAction, "game session is not running"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			select {
+			case gameLoop.actions <- clientAction{Type: prepareConsumableAction, UseConsumable: action}:
+			default:
+				if writeErr := writeActionRejected(conn, writeMu, prepareConsumableAction, "action queue is full"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+			}
+		case "game.action.commit_consumable":
+			action, err := decodeCommitConsumableAction(message.Data)
+			if err != nil {
+				if writeErr := writeActionRejected(conn, writeMu, commitConsumableAction, err.Error()); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			if gameLoop == nil || gameLoop.stopped() {
+				gameLoop = nil
+				if writeErr := writeActionRejected(conn, writeMu, commitConsumableAction, "game session is not running"); writeErr != nil {
+					log.Printf("websocket action rejection write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			select {
+			case gameLoop.actions <- clientAction{Type: commitConsumableAction, CommitConsumable: action}:
+			default:
+				if writeErr := writeActionRejected(conn, writeMu, commitConsumableAction, "action queue is full"); writeErr != nil {
 					log.Printf("websocket action rejection write failed: %v", writeErr)
 					return
 				}
@@ -803,14 +988,17 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	session.Tick = storedRuntime.Tick
 
 	runtime := runtimeSession{
-		session:     session,
-		economy:     gamesession.NewEconomy(session.Essence),
-		birds:       restoredBirds,
-		enemies:     enemiesFromStored(storedRuntime.Enemies),
-		levelMap:    levelMap,
-		path:        gamePath(levelMap),
-		loopStarted: storedRuntime.LoopStarted,
-		loopPaused:  storedRuntime.LoopPaused,
+		session:            session,
+		economy:            gamesession.NewEconomy(session.Essence),
+		birds:              restoredBirds,
+		enemies:            enemiesFromStored(storedRuntime.Enemies),
+		projectiles:        projectilesFromStored(storedRuntime.Projectiles),
+		consumables:        consumablesFromStored(storedRuntime.Consumables),
+		pendingConsumables: pendingConsumablesFromStored(storedRuntime.PendingConsumables),
+		levelMap:           levelMap,
+		path:               gamePath(levelMap),
+		loopStarted:        storedRuntime.LoopStarted,
+		loopPaused:         storedRuntime.LoopPaused,
 
 		lastQuizStartedAt: storedRuntime.LastQuizStartedAt,
 		waveStartedAtTick: storedRuntime.WaveStartedAtTick,
@@ -844,18 +1032,29 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		return nil, nil
 	}
 
+	currentQuizID := ""
+	if runtime.consumables.Airstrike.PendingQuizID == "" && s.quizzes != nil {
+		if quizzes, err := s.quizzes.Get(callCtx, runtime.session.GenerationID); err == nil {
+			currentQuizID = strings.TrimSpace(quizzes.CurrentQuizID)
+		} else if !errors.Is(err, quizcache.ErrQuizzesNotFound) {
+			log.Printf("failed to restore current quiz id session_id=%s generation_id=%s: %v", runtime.session.SessionID, runtime.session.GenerationID, err)
+		}
+	}
+
 	loopCtx, stop := context.WithCancel(ctx)
 	loop := &runningGameLoop{
-		sessionID:         runtime.session.SessionID,
-		levelID:           runtime.session.LevelID,
-		generationID:      runtime.session.GenerationID,
-		subChapterID:      runtime.session.SubChapterID,
-		userID:            runtime.session.UserID,
-		lastQuizStartedAt: runtime.lastQuizStartedAt,
-		loopStarted:       runtime.loopStarted,
-		stop:              stop,
-		actions:           make(chan clientAction, 64),
-		done:              make(chan struct{}),
+		sessionID:               runtime.session.SessionID,
+		levelID:                 runtime.session.LevelID,
+		generationID:            runtime.session.GenerationID,
+		subChapterID:            runtime.session.SubChapterID,
+		userID:                  runtime.session.UserID,
+		currentQuizID:           currentQuizID,
+		currentConsumableQuizID: runtime.consumables.Airstrike.PendingQuizID,
+		lastQuizStartedAt:       runtime.lastQuizStartedAt,
+		loopStarted:             runtime.loopStarted,
+		stop:                    stop,
+		actions:                 make(chan clientAction, 64),
+		done:                    make(chan struct{}),
 	}
 	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop)
 	return loop, nil
@@ -888,6 +1087,58 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 					log.Printf("websocket action accepted write failed: %v", err)
 					return
 				}
+			case prepareConsumableAction:
+				deployment, err := s.prepareConsumableDeployment(ctx, &runtime, action.UseConsumable)
+				if err != nil {
+					if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
+						log.Printf("websocket action rejection write failed: %v", writeErr)
+						return
+					}
+					continue
+				}
+				if err := writeWebsocketJSON(conn, writeMu, Message{
+					Type: "game.consumable.prepared",
+					Data: map[string]any{
+						"deployment":  deployment,
+						"consumables": runtime.consumables,
+					},
+				}); err != nil {
+					log.Printf("websocket consumable prepared write failed: %v", err)
+					return
+				}
+			case commitConsumableAction:
+				resolution, err := s.resolveConsumableDeployment(ctx, &runtime, action.CommitConsumable.DeploymentID)
+				if err != nil {
+					if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
+						log.Printf("websocket action rejection write failed: %v", writeErr)
+						return
+					}
+					continue
+				}
+				if err := writeConsumableResolved(conn, writeMu, resolution); err != nil {
+					log.Printf("websocket consumable resolved write failed: %v", err)
+					return
+				}
+			case grantConsumableAction:
+				err := s.grantConsumable(ctx, &runtime, action.GrantConsumable)
+				if action.Result != nil {
+					action.Result <- actionResult{Consumables: runtime.consumables, Err: err}
+				}
+			case validateConsumableAcquireAction:
+				err := validateConsumableAcquire(&runtime, action.ConsumableQuiz.ItemType)
+				if action.Result != nil {
+					action.Result <- actionResult{Err: err}
+				}
+			case markConsumableQuizPendingAction:
+				err := s.markConsumableQuizPending(ctx, &runtime, action.ConsumableQuiz)
+				if action.Result != nil {
+					action.Result <- actionResult{Consumables: runtime.consumables, Err: err}
+				}
+			case finishConsumableQuizAction:
+				consumables, err := s.finishConsumableQuiz(ctx, &runtime, action.FinishConsumableQuiz)
+				if action.Result != nil {
+					action.Result <- actionResult{Consumables: consumables, Err: err}
+				}
 			case awardQuizEssenceAction:
 				essence, err := s.awardEssence(ctx, &runtime, action.EssenceReward)
 				if action.Result != nil {
@@ -916,6 +1167,7 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 				continue
 			}
 			events := advanceRuntimeTick(&runtime, now)
+			events = append(events, s.resolveDueConsumableDeployments(ctx, &runtime)...)
 			if err := s.saveRuntimeState(ctx, runtime); err != nil {
 				log.Printf("game session runtime save failed session_id=%s: %v", runtime.session.SessionID, err)
 			}
@@ -1053,79 +1305,64 @@ func (s *Server) maybeTriggerQuizRefill(loop *runningGameLoop, remaining int) {
 	}()
 }
 
+func (s *Server) quizService() *quizflow.Service {
+	return quizflow.NewService(s.quizzes, quizRequestCooldown)
+}
+
 func (s *Server) handleQuizRequest(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop) error {
 	if loop == nil || loop.stopped() {
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "game_not_started"},
+			Data: QuizUnavailableState{Reason: quizflow.UnavailableGameNotStarted},
 		})
 	}
 	if !loop.loopStarted {
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "game_not_started"},
+			Data: QuizUnavailableState{Reason: quizflow.UnavailableGameNotStarted},
 		})
 	}
-	if s.quizzes == nil {
-		return errors.New("quiz cache is not configured")
+	if loop.currentConsumableQuizID != "" {
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "consumable_quiz_pending"},
+		})
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
-	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
-		loop.currentQuizID = ""
-		s.maybeTriggerQuizRefill(loop, 0)
-		return writeWebsocketJSON(conn, writeMu, Message{
-			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
-		})
-	}
+	result, err := s.quizService().Present(callCtx, quizflow.PresentRequest{
+		GenerationID:      loop.generationID,
+		CurrentQuizID:     loop.currentQuizID,
+		LastQuizStartedAt: loop.lastQuizStartedAt,
+		Now:               time.Now().UTC(),
+		RequireCooldown:   true,
+	})
 	if err != nil {
-		return errors.New("failed to load quiz")
+		return err
 	}
-	if len(quizzes.Quizzes) == 0 {
+	if result.Unavailable.Reason != "" {
+		if result.Unavailable.Reason == quizflow.UnavailableNoQuizzesRemaining {
+			loop.currentQuizID = ""
+		}
+		s.maybeTriggerQuizRefill(loop, result.Remaining)
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: result.Unavailable,
+		})
+	}
+	if result.CurrentQuizID == "" {
 		loop.currentQuizID = ""
-		s.maybeTriggerQuizRefill(loop, 0)
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
+			Data: QuizUnavailableState{Reason: quizflow.UnavailableNoQuizzesRemaining},
 		})
 	}
-
-	if quiz, ok := cachedQuizByID(quizzes.Quizzes, quizzes.CurrentQuizID); ok {
-		loop.currentQuizID = quiz.ID
-		s.maybeTriggerQuizRefill(loop, len(quizzes.Quizzes))
-		return writeWebsocketJSON(conn, writeMu, Message{
-			Type: "game.quiz.presented",
-			Data: quizPromptState(quiz, len(quizzes.Quizzes)),
-		})
-	}
-
-	if retryAfter := quizCooldownRemainingSeconds(loop.lastQuizStartedAt, time.Now().UTC()); retryAfter > 0 {
-		return writeWebsocketJSON(conn, writeMu, Message{
-			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "quiz_cooldown", RetryAfterSeconds: retryAfter},
-		})
-	}
-
-	quiz, remaining, err := s.quizzes.PeekRandom(callCtx, loop.generationID)
-	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
-		loop.currentQuizID = ""
-		s.maybeTriggerQuizRefill(loop, 0)
-		return writeWebsocketJSON(conn, writeMu, Message{
-			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
-		})
-	}
-	if err != nil {
-		return errors.New("failed to load quiz")
-	}
-	loop.currentQuizID = quiz.ID
-	s.maybeTriggerQuizRefill(loop, remaining)
+	loop.currentQuizID = result.CurrentQuizID
+	s.maybeTriggerQuizRefill(loop, result.Remaining)
 	return writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.presented",
-		Data: quizPromptState(quiz, remaining),
+		Data: result.Prompt,
 	})
 }
 
@@ -1133,64 +1370,40 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	if loop == nil || loop.stopped() {
 		return errors.New("game session is not running")
 	}
-	if s.quizzes == nil {
-		return errors.New("quiz cache is not configured")
-	}
 
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	quizzes, err := s.quizzes.Get(callCtx, loop.generationID)
-	if errors.Is(err, quizcache.ErrQuizzesNotFound) {
+	result, err := s.quizService().Answer(callCtx, quizflow.AnswerRequest{
+		GenerationID:  loop.generationID,
+		CurrentQuizID: loop.currentQuizID,
+		QuizID:        request.QuizID,
+		SelectedIndex: request.SelectedIndex,
+	})
+	if err != nil {
+		return err
+	}
+	if result.Unavailable.Reason != "" {
 		loop.currentQuizID = ""
-		s.maybeTriggerQuizRefill(loop, 0)
+		s.maybeTriggerQuizRefill(loop, result.Remaining)
 		return writeWebsocketJSON(conn, writeMu, Message{
 			Type: "game.quiz.unavailable",
-			Data: QuizUnavailableState{Reason: "no_quizzes_remaining"},
+			Data: result.Unavailable,
 		})
-	}
-	if err != nil {
-		return errors.New("failed to load quiz")
-	}
-	expectedQuizID := loop.currentQuizID
-	if expectedQuizID == "" {
-		expectedQuizID = quizzes.CurrentQuizID
-	}
-	if expectedQuizID == "" && len(quizzes.Quizzes) > 0 {
-		expectedQuizID = quizzes.Quizzes[0].ID
-	}
-	if expectedQuizID != "" && expectedQuizID != request.QuizID {
-		return errors.New("quiz_id is not the current quiz")
-	}
-	currentQuiz, ok := cachedQuizByID(quizzes.Quizzes, request.QuizID)
-	if !ok {
-		return errors.New("quiz not found")
-	}
-	if request.SelectedIndex < 0 || request.SelectedIndex >= len(currentQuiz.OptionsMarkdown) {
-		return errors.New("selected_index is out of range")
-	}
-
-	answeredQuiz, remaining, err := s.quizzes.Take(callCtx, loop.generationID, request.QuizID)
-	if errors.Is(err, quizcache.ErrQuizNotFound) || errors.Is(err, quizcache.ErrQuizzesNotFound) {
-		return errors.New("quiz not found")
-	}
-	if err != nil {
-		return errors.New("failed to remove answered quiz")
 	}
 	if loop.currentQuizID == request.QuizID {
 		loop.currentQuizID = ""
 	}
-	s.maybeTriggerQuizRefill(loop, remaining)
+	s.maybeTriggerQuizRefill(loop, result.Remaining)
 	answeredAt := time.Now().UTC()
 	if err := s.markQuizStartedThroughLoop(ctx, loop, answeredAt); err != nil {
 		return err
 	}
 	loop.lastQuizStartedAt = answeredAt
 
-	correct := request.SelectedIndex == answeredQuiz.AnswerIndex
 	essenceAwarded := 0
 	essence := 0
-	if correct {
+	if result.Correct {
 		essenceAwarded = correctQuizEssenceAward
 		essence, err = s.awardEssenceThroughLoop(ctx, loop, correctQuizEssenceAward)
 		if err != nil {
@@ -1201,34 +1414,176 @@ func (s *Server) handleQuizAnswer(ctx context.Context, conn *websocket.Conn, wri
 	if err := writeWebsocketJSON(conn, writeMu, Message{
 		Type: "game.quiz.result",
 		Data: QuizResultState{
-			QuizID:                 answeredQuiz.ID,
-			Correct:                correct,
-			SelectedIndex:          request.SelectedIndex,
-			CorrectIndex:           answeredQuiz.AnswerIndex,
-			SelectedOptionMarkdown: optionMarkdown(answeredQuiz.OptionsMarkdown, request.SelectedIndex),
-			CorrectOptionMarkdown:  optionMarkdown(answeredQuiz.OptionsMarkdown, answeredQuiz.AnswerIndex),
+			QuizID:                 result.Quiz.ID,
+			Correct:                result.Correct,
+			SelectedIndex:          result.SelectedIndex,
+			CorrectIndex:           result.CorrectIndex,
+			SelectedOptionMarkdown: result.SelectedOptionMarkdown,
+			CorrectOptionMarkdown:  result.CorrectOptionMarkdown,
 			EssenceAwarded:         essenceAwarded,
 			Essence:                essence,
-			Remaining:              remaining,
+			Remaining:              result.Remaining,
 		},
 	}); err != nil {
 		return err
 	}
 
-	if !correct {
-		s.saveQuizMistakeAsync(loop, answeredQuiz, request.SelectedIndex)
+	if !result.Correct {
+		s.saveQuizMistakeAsync(loop, result.Quiz, request.SelectedIndex)
 	}
 
 	return nil
 }
 
-func cachedQuizByID(quizzes []quizcache.CachedQuiz, quizID string) (quizcache.CachedQuiz, bool) {
-	for _, quiz := range quizzes {
-		if quiz.ID == quizID {
-			return quiz, true
+func (s *Server) handleConsumableAcquire(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop, request consumableAcquireRequest) error {
+	if loop == nil || loop.stopped() {
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: quizflow.UnavailableGameNotStarted},
+		})
+	}
+	if !loop.loopStarted {
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: quizflow.UnavailableGameNotStarted},
+		})
+	}
+	if request.ItemType != airstrikeItemType {
+		return errors.New("unknown consumable type")
+	}
+	if loop.currentQuizID != "" {
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: "progression_quiz_pending"},
+		})
+	}
+	if loop.currentConsumableQuizID == "" {
+		if err := s.validateConsumableAcquireThroughLoop(ctx, loop, request.ItemType); err != nil {
+			if writeErr := writeActionRejected(conn, writeMu, validateConsumableAcquireAction, err.Error()); writeErr != nil {
+				return writeErr
+			}
+			return nil
 		}
 	}
-	return quizcache.CachedQuiz{}, false
+
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	result, err := s.quizService().Present(callCtx, quizflow.PresentRequest{
+		GenerationID:    loop.generationID,
+		CurrentQuizID:   loop.currentConsumableQuizID,
+		Now:             time.Now().UTC(),
+		RequireCooldown: false,
+	})
+	if err != nil {
+		return err
+	}
+	if result.Unavailable.Reason != "" {
+		if result.Unavailable.Reason == quizflow.UnavailableNoQuizzesRemaining {
+			loop.currentConsumableQuizID = ""
+		}
+		s.maybeTriggerQuizRefill(loop, result.Remaining)
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: result.Unavailable,
+		})
+	}
+	if result.CurrentQuizID == "" {
+		loop.currentConsumableQuizID = ""
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: QuizUnavailableState{Reason: quizflow.UnavailableNoQuizzesRemaining},
+		})
+	}
+	if loop.currentConsumableQuizID == "" {
+		if _, err := s.markConsumableQuizPendingThroughLoop(ctx, loop, consumableQuizPendingRequest{ItemType: request.ItemType, QuizID: result.CurrentQuizID}); err != nil {
+			return err
+		}
+	}
+	loop.currentConsumableQuizID = result.CurrentQuizID
+	s.maybeTriggerQuizRefill(loop, result.Remaining)
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "game.consumable.quiz.presented",
+		Data: ConsumableQuizPromptState{
+			ItemType: request.ItemType,
+			Prompt:   result.Prompt,
+		},
+	})
+}
+
+func (s *Server) handleConsumableQuizAnswer(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, loop *runningGameLoop, request consumableQuizAnswerRequest) error {
+	if loop == nil || loop.stopped() {
+		return errors.New("game session is not running")
+	}
+	if request.ItemType != airstrikeItemType {
+		return errors.New("unknown consumable type")
+	}
+	if loop.currentConsumableQuizID == "" {
+		return errors.New("no consumable quiz is pending")
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	result, err := s.quizService().Answer(callCtx, quizflow.AnswerRequest{
+		GenerationID:  loop.generationID,
+		CurrentQuizID: loop.currentConsumableQuizID,
+		QuizID:        request.QuizID,
+		SelectedIndex: request.SelectedIndex,
+	})
+	if err != nil {
+		return err
+	}
+	if result.Unavailable.Reason != "" {
+		loop.currentConsumableQuizID = ""
+		s.maybeTriggerQuizRefill(loop, result.Remaining)
+		return writeWebsocketJSON(conn, writeMu, Message{
+			Type: "game.quiz.unavailable",
+			Data: result.Unavailable,
+		})
+	}
+	s.maybeTriggerQuizRefill(loop, result.Remaining)
+
+	award := 0
+	if result.Correct {
+		award = 1
+	}
+	consumables, err := s.finishConsumableQuizThroughLoop(ctx, loop, finishConsumableQuizRequest{
+		ItemType: request.ItemType,
+		QuizID:   request.QuizID,
+		Correct:  result.Correct,
+		Charges:  award,
+	})
+	if err != nil {
+		return err
+	}
+	if loop.currentConsumableQuizID == request.QuizID {
+		loop.currentConsumableQuizID = ""
+	}
+
+	if err := writeWebsocketJSON(conn, writeMu, Message{
+		Type: "game.consumable.quiz.result",
+		Data: ConsumableQuizResultState{
+			ItemType:               request.ItemType,
+			QuizID:                 result.Quiz.ID,
+			Correct:                result.Correct,
+			SelectedIndex:          result.SelectedIndex,
+			CorrectIndex:           result.CorrectIndex,
+			SelectedOptionMarkdown: result.SelectedOptionMarkdown,
+			CorrectOptionMarkdown:  result.CorrectOptionMarkdown,
+			ConsumableAwarded:      award,
+			Consumables:            consumables,
+			Remaining:              result.Remaining,
+		},
+	}); err != nil {
+		return err
+	}
+
+	if !result.Correct {
+		s.saveQuizMistakeAsync(loop, result.Quiz, request.SelectedIndex)
+	}
+
+	return nil
 }
 
 func (s *Server) awardEssenceThroughLoop(ctx context.Context, loop *runningGameLoop, amount int) (int, error) {
@@ -1287,6 +1642,90 @@ func (s *Server) markQuizStartedThroughLoop(ctx context.Context, loop *runningGa
 	}
 }
 
+func (s *Server) validateConsumableAcquireThroughLoop(ctx context.Context, loop *runningGameLoop, itemType string) error {
+	if loop == nil || loop.stopped() {
+		return errors.New("game session is not running")
+	}
+	result := make(chan actionResult, 1)
+	action := clientAction{
+		Type:           validateConsumableAcquireAction,
+		ConsumableQuiz: consumableQuizPendingRequest{ItemType: itemType},
+		Result:         result,
+	}
+	select {
+	case loop.actions <- action:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * time.Second):
+		return errors.New("game action queue timed out")
+	}
+
+	select {
+	case response := <-result:
+		return response.Err
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(2 * time.Second):
+		return errors.New("game action response timed out")
+	}
+}
+
+func (s *Server) markConsumableQuizPendingThroughLoop(ctx context.Context, loop *runningGameLoop, request consumableQuizPendingRequest) (ConsumableState, error) {
+	if loop == nil || loop.stopped() {
+		return ConsumableState{}, errors.New("game session is not running")
+	}
+	result := make(chan actionResult, 1)
+	action := clientAction{
+		Type:           markConsumableQuizPendingAction,
+		ConsumableQuiz: request,
+		Result:         result,
+	}
+	select {
+	case loop.actions <- action:
+	case <-ctx.Done():
+		return ConsumableState{}, ctx.Err()
+	case <-time.After(2 * time.Second):
+		return ConsumableState{}, errors.New("game action queue timed out")
+	}
+
+	select {
+	case response := <-result:
+		return response.Consumables, response.Err
+	case <-ctx.Done():
+		return ConsumableState{}, ctx.Err()
+	case <-time.After(2 * time.Second):
+		return ConsumableState{}, errors.New("game action response timed out")
+	}
+}
+
+func (s *Server) finishConsumableQuizThroughLoop(ctx context.Context, loop *runningGameLoop, request finishConsumableQuizRequest) (ConsumableState, error) {
+	if loop == nil || loop.stopped() {
+		return ConsumableState{}, errors.New("game session is not running")
+	}
+	result := make(chan actionResult, 1)
+	action := clientAction{
+		Type:                 finishConsumableQuizAction,
+		FinishConsumableQuiz: request,
+		Result:               result,
+	}
+	select {
+	case loop.actions <- action:
+	case <-ctx.Done():
+		return ConsumableState{}, ctx.Err()
+	case <-time.After(2 * time.Second):
+		return ConsumableState{}, errors.New("game action queue timed out")
+	}
+
+	select {
+	case response := <-result:
+		return response.Consumables, response.Err
+	case <-ctx.Done():
+		return ConsumableState{}, ctx.Err()
+	case <-time.After(2 * time.Second):
+		return ConsumableState{}, errors.New("game action response timed out")
+	}
+}
+
 func (s *Server) saveQuizMistakeAsync(loop *runningGameLoop, quiz quizcache.CachedQuiz, selectedIndex int) {
 	if s.sessions == nil {
 		log.Printf("quiz mistake save skipped quiz_id=%s: game session store is not configured", quiz.ID)
@@ -1325,6 +1764,244 @@ func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSessio
 	default:
 		return errors.New("unsupported action")
 	}
+}
+
+func (s *Server) prepareConsumableDeployment(ctx context.Context, runtime *runtimeSession, request useConsumableRequest) (ConsumableDeploymentState, error) {
+	if runtime == nil {
+		return ConsumableDeploymentState{}, errors.New("game session is not running")
+	}
+	if !runtime.loopStarted || runtime.session.Health <= 0 || gameWon(*runtime) {
+		return ConsumableDeploymentState{}, errors.New("game session is not running")
+	}
+	if strings.TrimSpace(request.ItemType) != airstrikeItemType {
+		return ConsumableDeploymentState{}, errors.New("unknown consumable type")
+	}
+	if err := validateAirstrikeTargets(runtime.levelMap, request.Targets); err != nil {
+		return ConsumableDeploymentState{}, err
+	}
+	if runtime.consumables.Airstrike.Status != consumableStatusReady || runtime.consumables.Airstrike.Charges <= 0 {
+		return ConsumableDeploymentState{}, errors.New("airstrike is not ready")
+	}
+	if hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) {
+		return ConsumableDeploymentState{}, errors.New("airstrike deployment is already pending")
+	}
+
+	previousConsumables := runtime.consumables
+	previousPending := runtime.pendingConsumables
+
+	runtime.consumables.Airstrike.Charges--
+	if runtime.consumables.Airstrike.Charges <= 0 {
+		runtime.consumables.Airstrike.Charges = 0
+		runtime.consumables.Airstrike.Status = consumableStatusPending
+	}
+	deployment := ConsumableDeploymentState{
+		DeploymentID:     uuid.NewString(),
+		ItemType:         airstrikeItemType,
+		Targets:          copyPositions(request.Targets),
+		PreparedAtTick:   runtime.session.Tick,
+		AutoCommitAtTick: runtime.session.Tick + airstrikeAutoCommitTicks,
+		Status:           consumableStatusPending,
+	}
+	runtime.pendingConsumables = append(append([]ConsumableDeploymentState{}, runtime.pendingConsumables...), deployment)
+
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.consumables = previousConsumables
+		runtime.pendingConsumables = previousPending
+		return ConsumableDeploymentState{}, errors.New("failed to save consumable deployment")
+	}
+	return deployment, nil
+}
+
+func (s *Server) resolveConsumableDeployment(ctx context.Context, runtime *runtimeSession, deploymentID string) (consumableResolution, error) {
+	if runtime == nil {
+		return consumableResolution{}, errors.New("game session is not running")
+	}
+	index := pendingConsumableIndex(runtime.pendingConsumables, deploymentID)
+	if index < 0 {
+		return consumableResolution{}, errors.New("consumable deployment is not pending")
+	}
+	resolution := resolvePendingConsumableAt(runtime, index)
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		return consumableResolution{}, errors.New("failed to save consumable resolution")
+	}
+	return resolution, nil
+}
+
+func (s *Server) resolveDueConsumableDeployments(ctx context.Context, runtime *runtimeSession) []GameEvent {
+	_ = ctx
+	if runtime == nil || len(runtime.pendingConsumables) == 0 {
+		return nil
+	}
+	events := make([]GameEvent, 0)
+	for i := 0; i < len(runtime.pendingConsumables); {
+		deployment := runtime.pendingConsumables[i]
+		if deployment.Status != consumableStatusPending || runtime.session.Tick < deployment.AutoCommitAtTick {
+			i++
+			continue
+		}
+		resolution := resolvePendingConsumableAt(runtime, i)
+		events = append(events, resolution.Events...)
+	}
+	return events
+}
+
+func resolvePendingConsumableAt(runtime *runtimeSession, index int) consumableResolution {
+	deployment := runtime.pendingConsumables[index]
+	runtime.pendingConsumables = append(runtime.pendingConsumables[:index], runtime.pendingConsumables[index+1:]...)
+
+	events := make([]GameEvent, 0)
+	switch deployment.ItemType {
+	case airstrikeItemType:
+		events = append(events, applyAirstrikeDeployment(runtime, deployment)...)
+		runtime.consumables.Airstrike.Status = consumableStatusEmpty
+		if runtime.consumables.Airstrike.Charges > 0 {
+			runtime.consumables.Airstrike.Status = consumableStatusReady
+		}
+	}
+	return consumableResolution{
+		DeploymentID: deployment.DeploymentID,
+		ItemType:     deployment.ItemType,
+		Targets:      deployment.Targets,
+		Consumables:  runtime.consumables,
+		Enemies:      enemyStates(runtime.enemies),
+		Events:       events,
+	}
+}
+
+func applyAirstrikeDeployment(runtime *runtimeSession, deployment ConsumableDeploymentState) []GameEvent {
+	if runtime == nil {
+		return nil
+	}
+	events := []GameEvent{{
+		Type:         "airstrike.impact",
+		DeploymentID: deployment.DeploymentID,
+		ItemType:     deployment.ItemType,
+		Targets:      deployment.Targets,
+	}}
+	damaged := map[string]bool{}
+	for i := range runtime.enemies {
+		enemy := &runtime.enemies[i]
+		if !enemy.IsAlive() || damaged[enemy.ID] || !isInAnyAirstrikeArea(enemy.Position, deployment.Targets) {
+			continue
+		}
+		damaged[enemy.ID] = true
+		beforeHealth := enemy.Health
+		enemy.TakeDamage(airstrikeDamage)
+		damage := float64(beforeHealth - enemy.Health)
+		if damage <= 0 {
+			continue
+		}
+		events = append(events, GameEvent{
+			Type:         "enemy.damage",
+			EnemyID:      enemy.ID,
+			DeploymentID: deployment.DeploymentID,
+			ItemType:     deployment.ItemType,
+			Damage:       damage,
+			Health:       enemy.Health,
+		})
+		if !enemy.IsAlive() {
+			awardEssenceForEnemyKill(runtime, enemy.Type)
+		}
+	}
+	runtime.enemies = aliveEnemies(runtime.enemies)
+	return events
+}
+
+func (s *Server) grantConsumable(ctx context.Context, runtime *runtimeSession, request grantConsumableRequest) error {
+	if runtime == nil {
+		return errors.New("game session is not running")
+	}
+	if request.ItemType != airstrikeItemType {
+		return errors.New("unknown consumable type")
+	}
+	charges := request.Charges
+	if charges <= 0 {
+		charges = 1
+	}
+	previousConsumables := runtime.consumables
+	runtime.consumables.Airstrike.Charges += charges
+	if !hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) {
+		runtime.consumables.Airstrike.Status = consumableStatusReady
+	}
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.consumables = previousConsumables
+		return errors.New("failed to save consumable reward")
+	}
+	return nil
+}
+
+func validateConsumableAcquire(runtime *runtimeSession, itemType string) error {
+	if runtime == nil {
+		return errors.New("game session is not running")
+	}
+	if itemType != airstrikeItemType {
+		return errors.New("unknown consumable type")
+	}
+	if runtime.consumables.Airstrike.PendingQuizID != "" || runtime.consumables.Airstrike.Status == consumableStatusQuizPending {
+		return errors.New("airstrike quiz is already pending")
+	}
+	if runtime.consumables.Airstrike.Charges > 0 || runtime.consumables.Airstrike.Status == consumableStatusReady {
+		return errors.New("airstrike is already ready")
+	}
+	if hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) || runtime.consumables.Airstrike.Status == consumableStatusPending {
+		return errors.New("airstrike deployment is already pending")
+	}
+	return nil
+}
+
+func (s *Server) markConsumableQuizPending(ctx context.Context, runtime *runtimeSession, request consumableQuizPendingRequest) error {
+	if runtime == nil {
+		return errors.New("game session is not running")
+	}
+	if request.ItemType != airstrikeItemType {
+		return errors.New("unknown consumable type")
+	}
+	if strings.TrimSpace(request.QuizID) == "" {
+		return errors.New("quiz_id is required")
+	}
+	previousConsumables := runtime.consumables
+	runtime.consumables.Airstrike.Status = consumableStatusQuizPending
+	runtime.consumables.Airstrike.PendingQuizID = request.QuizID
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.consumables = previousConsumables
+		return errors.New("failed to save consumable quiz")
+	}
+	return nil
+}
+
+func (s *Server) finishConsumableQuiz(ctx context.Context, runtime *runtimeSession, request finishConsumableQuizRequest) (ConsumableState, error) {
+	if runtime == nil {
+		return ConsumableState{}, errors.New("game session is not running")
+	}
+	if request.ItemType != airstrikeItemType {
+		return ConsumableState{}, errors.New("unknown consumable type")
+	}
+	if runtime.consumables.Airstrike.PendingQuizID != "" && runtime.consumables.Airstrike.PendingQuizID != request.QuizID {
+		return ConsumableState{}, errors.New("quiz_id is not the pending consumable quiz")
+	}
+
+	previousConsumables := runtime.consumables
+	runtime.consumables.Airstrike.PendingQuizID = ""
+	if request.Correct {
+		charges := request.Charges
+		if charges <= 0 {
+			charges = 1
+		}
+		runtime.consumables.Airstrike.Charges += charges
+		if !hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) {
+			runtime.consumables.Airstrike.Status = consumableStatusReady
+		}
+	} else {
+		runtime.consumables.Airstrike.Status = consumableStatusEmpty
+		if runtime.consumables.Airstrike.Charges > 0 {
+			runtime.consumables.Airstrike.Status = consumableStatusReady
+		}
+	}
+	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
+		runtime.consumables = previousConsumables
+		return previousConsumables, errors.New("failed to save consumable quiz result")
+	}
+	return runtime.consumables, nil
 }
 
 func (s *Server) placeTower(ctx context.Context, runtime *runtimeSession, request placeTowerRequest) error {
@@ -1533,19 +2210,21 @@ func (s *Server) awardEssence(ctx context.Context, runtime *runtimeSession, amou
 
 func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) error {
 	return s.sessions.SaveRuntimeState(ctx, runtime.session.SessionID, gamesession.RuntimeState{
-		Health:            runtime.session.Health,
-		Essence:           runtime.economy.Essence,
-		Wave:              runtime.session.Wave,
-		Tick:              runtime.session.Tick,
-		LoopStarted:       runtime.loopStarted,
-		LoopPaused:        false,
-		WaveStartedAtTick: runtime.waveStartedAtTick,
-		WaveSpawned:       runtime.waveSpawned,
-		NextWaveTick:      runtime.nextWaveTick,
-		LastQuizStartedAt: runtime.lastQuizStartedAt,
-		Birds:             storedBirds(runtime.birds),
-		Enemies:           storedEnemies(runtime.enemies),
-		Projectiles:       storedProjectiles(runtime.projectiles),
+		Health:             runtime.session.Health,
+		Essence:            runtime.economy.Essence,
+		Wave:               runtime.session.Wave,
+		Tick:               runtime.session.Tick,
+		LoopStarted:        runtime.loopStarted,
+		LoopPaused:         false,
+		WaveStartedAtTick:  runtime.waveStartedAtTick,
+		WaveSpawned:        runtime.waveSpawned,
+		NextWaveTick:       runtime.nextWaveTick,
+		LastQuizStartedAt:  runtime.lastQuizStartedAt,
+		Birds:              storedBirds(runtime.birds),
+		Enemies:            storedEnemies(runtime.enemies),
+		Projectiles:        storedProjectiles(runtime.projectiles),
+		Consumables:        consumablesToStored(runtime.consumables),
+		PendingConsumables: pendingConsumablesToStored(runtime.pendingConsumables),
 	})
 }
 
@@ -1572,19 +2251,14 @@ func gameStateFromRuntime(runtime runtimeSession, loop *runningGameLoop, serverT
 		Birds:                        placedBirdStates(runtime.birds),
 		Enemies:                      enemyStates(runtime.enemies),
 		Projectiles:                  projectileStates(runtime.projectiles),
+		Consumables:                  runtime.consumables,
+		PendingConsumables:           runtime.pendingConsumables,
 		Events:                       events,
 	}
 }
 
 func quizCooldownRemainingSeconds(lastQuizStartedAt time.Time, now time.Time) int {
-	if lastQuizStartedAt.IsZero() {
-		return 0
-	}
-	remaining := quizRequestCooldown - now.UTC().Sub(lastQuizStartedAt.UTC())
-	if remaining <= 0 {
-		return 0
-	}
-	return int(math.Ceil(remaining.Seconds()))
+	return quizflow.CooldownRemainingSeconds(quizRequestCooldown, lastQuizStartedAt, now)
 }
 
 type spawnGroup struct {
@@ -2033,6 +2707,33 @@ func decodeMergeTowerAction(data any) (mergeTowerRequest, error) {
 	return request, nil
 }
 
+func decodeUseConsumableAction(data any) (useConsumableRequest, error) {
+	var request useConsumableRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return useConsumableRequest{}, errors.New("use consumable action data must include item_type and targets")
+	}
+	request.ItemType = strings.TrimSpace(request.ItemType)
+	if request.ItemType == "" {
+		return useConsumableRequest{}, errors.New("item_type is required")
+	}
+	return request, nil
+}
+
+func decodeCommitConsumableAction(data any) (commitConsumableRequest, error) {
+	var request commitConsumableRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return commitConsumableRequest{}, errors.New("commit consumable action data must include deployment_id")
+	}
+	request.DeploymentID = strings.TrimSpace(request.DeploymentID)
+	if request.DeploymentID == "" {
+		return commitConsumableRequest{}, errors.New("deployment_id is required")
+	}
+	if !uuidPattern.MatchString(request.DeploymentID) {
+		return commitConsumableRequest{}, errors.New("deployment_id must be a valid UUID")
+	}
+	return request, nil
+}
+
 func decodeGameExit(data any) (gameExitRequest, error) {
 	var request gameExitRequest
 	if data == nil {
@@ -2062,6 +2763,40 @@ func decodeQuizAnswer(data any) (quizAnswerRequest, error) {
 	}
 	if request.SelectedIndex < 0 {
 		return quizAnswerRequest{}, errors.New("selected_index is out of range")
+	}
+	return request, nil
+}
+
+func decodeConsumableAcquire(data any) (consumableAcquireRequest, error) {
+	var request consumableAcquireRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return consumableAcquireRequest{}, errors.New("game.consumable.acquire data must include item_type")
+	}
+	request.ItemType = strings.TrimSpace(request.ItemType)
+	if request.ItemType == "" {
+		return consumableAcquireRequest{}, errors.New("item_type is required")
+	}
+	return request, nil
+}
+
+func decodeConsumableQuizAnswer(data any) (consumableQuizAnswerRequest, error) {
+	var request consumableQuizAnswerRequest
+	if err := decodeMessageData(data, &request); err != nil {
+		return consumableQuizAnswerRequest{}, errors.New("game.consumable.quiz.answer data must include item_type, quiz_id, and selected_index")
+	}
+	request.ItemType = strings.TrimSpace(request.ItemType)
+	request.QuizID = strings.TrimSpace(request.QuizID)
+	if request.ItemType == "" {
+		return consumableQuizAnswerRequest{}, errors.New("item_type is required")
+	}
+	if request.QuizID == "" {
+		return consumableQuizAnswerRequest{}, errors.New("quiz_id is required")
+	}
+	if !uuidPattern.MatchString(request.QuizID) {
+		return consumableQuizAnswerRequest{}, errors.New("quiz_id must be a valid UUID")
+	}
+	if request.SelectedIndex < 0 {
+		return consumableQuizAnswerRequest{}, errors.New("selected_index is out of range")
 	}
 	return request, nil
 }
@@ -2107,6 +2842,30 @@ func isInsideMap(levelMap mapgen.GeneratedMap, x int, y int) bool {
 	return x >= 0 && y >= 0 && x < levelMap.Width && y < levelMap.Height
 }
 
+func isPositionInsideMap(levelMap mapgen.GeneratedMap, position gameobject.Position) bool {
+	return position.X >= 0 && position.Y >= 0 && position.X < float64(levelMap.Width) && position.Y < float64(levelMap.Height)
+}
+
+func validateAirstrikeTargets(levelMap mapgen.GeneratedMap, targets []gameobject.Position) error {
+	if len(targets) != airstrikeTargetCount {
+		return errors.New("airstrike requires exactly 3 targets")
+	}
+	for i, target := range targets {
+		if math.IsNaN(target.X) || math.IsNaN(target.Y) || math.IsInf(target.X, 0) || math.IsInf(target.Y, 0) {
+			return errors.New("airstrike target must be finite")
+		}
+		if !isPositionInsideMap(levelMap, target) {
+			return errors.New("airstrike target is outside the map")
+		}
+		for j := 0; j < i; j++ {
+			if target.DistanceTo(targets[j]) < 0.001 {
+				return errors.New("airstrike targets must be distinct")
+			}
+		}
+	}
+	return nil
+}
+
 func isEnemyPath(levelMap mapgen.GeneratedMap, x int, y int) bool {
 	for _, tile := range levelMap.EnemyPath {
 		if tile.X == x && tile.Y == y {
@@ -2114,6 +2873,39 @@ func isEnemyPath(levelMap mapgen.GeneratedMap, x int, y int) bool {
 		}
 	}
 	return false
+}
+
+func hasPendingConsumable(pending []ConsumableDeploymentState, itemType string) bool {
+	for _, deployment := range pending {
+		if deployment.ItemType == itemType && deployment.Status == consumableStatusPending {
+			return true
+		}
+	}
+	return false
+}
+
+func pendingConsumableIndex(pending []ConsumableDeploymentState, deploymentID string) int {
+	for i := range pending {
+		if pending[i].DeploymentID == deploymentID && pending[i].Status == consumableStatusPending {
+			return i
+		}
+	}
+	return -1
+}
+
+func isInAnyAirstrikeArea(position gameobject.Position, targets []gameobject.Position) bool {
+	for _, target := range targets {
+		if position.DistanceTo(target) <= airstrikeRadius {
+			return true
+		}
+	}
+	return false
+}
+
+func copyPositions(positions []gameobject.Position) []gameobject.Position {
+	copied := make([]gameobject.Position, len(positions))
+	copy(copied, positions)
+	return copied
 }
 
 func isOccupied(birds []placedBird, x int, y int) bool {
@@ -2207,13 +2999,7 @@ func projectileStates(projectiles []gameobject.Projectile) []ProjectileState {
 }
 
 func quizPromptState(quiz quizcache.CachedQuiz, remaining int) QuizPromptState {
-	return QuizPromptState{
-		QuizID:           quiz.ID,
-		QuizType:         quiz.QuizType,
-		QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
-		OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown),
-		Remaining:        remaining,
-	}
+	return quizflow.PromptState(quiz, remaining)
 }
 
 func storedBirds(birds []placedBird) []gamesession.StoredBird {
@@ -2296,6 +3082,75 @@ func projectilesFromStored(stored []gamesession.StoredProjectile) []gameobject.P
 	return projectiles
 }
 
+func consumablesFromStored(stored gamesession.ConsumableInventory) ConsumableState {
+	return ConsumableState{
+		Airstrike: ConsumableItemState{
+			Status:        normalizeConsumableStatus(stored.Airstrike.Status, stored.Airstrike.Charges, stored.Airstrike.PendingQuizID),
+			Charges:       max(0, stored.Airstrike.Charges),
+			PendingQuizID: strings.TrimSpace(stored.Airstrike.PendingQuizID),
+		},
+	}
+}
+
+func consumablesToStored(state ConsumableState) gamesession.ConsumableInventory {
+	return gamesession.ConsumableInventory{
+		Airstrike: gamesession.ConsumableItemState{
+			Status:        normalizeConsumableStatus(state.Airstrike.Status, state.Airstrike.Charges, state.Airstrike.PendingQuizID),
+			Charges:       max(0, state.Airstrike.Charges),
+			PendingQuizID: strings.TrimSpace(state.Airstrike.PendingQuizID),
+		},
+	}
+}
+
+func pendingConsumablesFromStored(stored []gamesession.PendingConsumableDeployment) []ConsumableDeploymentState {
+	pending := make([]ConsumableDeploymentState, 0, len(stored))
+	for _, deployment := range stored {
+		if deployment.DeploymentID == "" || deployment.ItemType == "" {
+			continue
+		}
+		pending = append(pending, ConsumableDeploymentState{
+			DeploymentID:     deployment.DeploymentID,
+			ItemType:         deployment.ItemType,
+			Targets:          copyPositions(deployment.Targets),
+			PreparedAtTick:   deployment.PreparedAtTick,
+			AutoCommitAtTick: deployment.AutoCommitAtTick,
+			Status:           deployment.Status,
+		})
+	}
+	return pending
+}
+
+func pendingConsumablesToStored(pending []ConsumableDeploymentState) []gamesession.PendingConsumableDeployment {
+	stored := make([]gamesession.PendingConsumableDeployment, 0, len(pending))
+	for _, deployment := range pending {
+		stored = append(stored, gamesession.PendingConsumableDeployment{
+			DeploymentID:     deployment.DeploymentID,
+			ItemType:         deployment.ItemType,
+			Targets:          copyPositions(deployment.Targets),
+			PreparedAtTick:   deployment.PreparedAtTick,
+			AutoCommitAtTick: deployment.AutoCommitAtTick,
+			Status:           deployment.Status,
+		})
+	}
+	return stored
+}
+
+func normalizeConsumableStatus(status string, charges int, pendingQuizID string) string {
+	status = strings.TrimSpace(status)
+	switch status {
+	case consumableStatusReady, consumableStatusPending, consumableStatusQuizPending:
+		return status
+	default:
+		if strings.TrimSpace(pendingQuizID) != "" {
+			return consumableStatusQuizPending
+		}
+		if charges > 0 {
+			return consumableStatusReady
+		}
+		return consumableStatusEmpty
+	}
+}
+
 func placedBirdsFromStored(stored []gamesession.StoredBird) ([]placedBird, error) {
 	birds := make([]placedBird, 0, len(stored))
 	for _, item := range stored {
@@ -2345,6 +3200,13 @@ func writeActionRejected(conn *websocket.Conn, writeMu *sync.Mutex, action strin
 			"action": action,
 			"error":  message,
 		},
+	})
+}
+
+func writeConsumableResolved(conn *websocket.Conn, writeMu *sync.Mutex, resolution consumableResolution) error {
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "game.consumable.resolved",
+		Data: resolution,
 	})
 }
 
