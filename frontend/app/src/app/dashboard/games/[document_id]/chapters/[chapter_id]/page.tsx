@@ -8,6 +8,8 @@ import OrangeSquare from '@/components/OrangeSquare';
 import ButtonWhite from '@/components/ButtonWhite';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { syncAuthCookie } from '@/lib/auth-cookie';
+import ButtonGreen from '@/components/ButtonGreen';
+import ButtonOrange from '@/components/ButtonOrange';
 
 interface SubChapter {
   sub_chapter_id: string;
@@ -55,6 +57,7 @@ export default function LevelsPage({ params }: PageProps) {
   const [docInfo, setDocInfo] = useState<DocumentInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedLevel, setSelectedLevel] = useState<SubChapter | null>(null);
 
   const fetchLevelsData = useCallback(async () => {
     setIsLoading(true);
@@ -82,7 +85,7 @@ export default function LevelsPage({ params }: PageProps) {
       }
 
       const levelsData = levelsRes.data;
-      
+
       // Sort sub-chapters by sub_chapter_index or creation sequence
       const sortedLevels = (levelsData.sub_chapters || []).sort((a: SubChapter, b: SubChapter) => {
         const idxA = a.sub_chapter_index ?? 0;
@@ -121,6 +124,19 @@ export default function LevelsPage({ params }: PageProps) {
     }
   }, [documentId, chapterId, router]);
 
+  const startGame = (mode: "freeplay" | "normal") => {
+    if (!selectedLevel) return;
+
+    const params = new URLSearchParams({
+      document_id: documentId,
+      chapter_id: chapterId,
+      sub_chapter_id: selectedLevel.sub_chapter_id,
+      mode,
+    })
+
+    window.location.href = `/game/${params.toString()}`;
+  }
+
   useEffect(() => {
     let active = true;
     if (active) {
@@ -136,7 +152,7 @@ export default function LevelsPage({ params }: PageProps) {
   return (
     <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-8 flex flex-col justify-center items-center">
       <OrangeSquare className="w-full flex flex-col p-6 sm:p-8 bg-[#fdfaf2] border-4 border-yellow-800 rounded-3xl shadow-2xl relative min-h-[500px]">
-        
+
         {/* Navigation Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-yellow-800/20 pb-4 mb-6">
           <div className="flex items-center gap-4">
@@ -194,7 +210,7 @@ export default function LevelsPage({ params }: PageProps) {
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center pt-6">
-            
+
             {/* Legend / Title */}
             <div className="flex items-center gap-1.5 bg-yellow-800/10 border border-yellow-800/20 px-3.5 py-1.5 rounded-full mb-10 select-none">
               <Star className="w-4 h-4 text-yellow-600 fill-current" />
@@ -205,34 +221,32 @@ export default function LevelsPage({ params }: PageProps) {
 
             {/* Staggered Path Map */}
             <div className="relative w-full py-12 flex flex-col items-center gap-20 min-h-[500px]">
-              
+
               {/* Central Winding Dashed Path Connector Line */}
               <div className="absolute left-1/2 -translate-x-1/2 top-10 bottom-10 w-0 border-l-4 border-dashed border-yellow-800/30 z-0 pointer-events-none" />
 
               {levels.map((level, idx) => {
                 const isLeft = idx % 2 === 0;
                 const levelNum = level.sub_chapter_index !== null ? level.sub_chapter_index : idx + 1;
-                
+
                 return (
                   <div
                     key={level.sub_chapter_id}
                     onClick={() => {
-                      window.location.href = `/game/?document_id=${documentId}&chapter_id=${chapterId}&sub_chapter_id=${level.sub_chapter_id}`;
+                      setSelectedLevel(level);
                     }}
-                    className={`relative z-10 flex flex-col items-center group transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer w-full max-w-[240px] select-none ${
-                      isLeft 
-                        ? '-translate-x-16 sm:-translate-x-28' 
-                        : 'translate-x-16 sm:translate-x-28'
-                    }`}
-                  >
-                    
-                    {/* Horizontal Dashed Connector Arm to the central path */}
-                    <div 
-                      className={`absolute top-10 h-0 border-t-4 border-dashed border-yellow-800/30 z-[-1] pointer-events-none ${
-                        isLeft 
-                          ? 'left-1/2 w-[64px] sm:w-[112px]' 
-                          : 'right-1/2 w-[64px] sm:w-[112px]'
+                    className={`relative z-10 flex flex-col items-center group transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer w-full max-w-[240px] select-none ${isLeft
+                      ? '-translate-x-16 sm:-translate-x-28'
+                      : 'translate-x-16 sm:translate-x-28'
                       }`}
+                  >
+
+                    {/* Horizontal Dashed Connector Arm to the central path */}
+                    <div
+                      className={`absolute top-10 h-0 border-t-4 border-dashed border-yellow-800/30 z-[-1] pointer-events-none ${isLeft
+                        ? 'left-1/2 w-[64px] sm:w-[112px]'
+                        : 'right-1/2 w-[64px] sm:w-[112px]'
+                        }`}
                     />
 
                     {/* Circular Blue Icon Button with Level Index inside */}
@@ -258,6 +272,50 @@ export default function LevelsPage({ params }: PageProps) {
                   </div>
                 );
               })}
+
+              {selectedLevel && (
+                <div className="fixed inset-0 flex z-50 justify-center items-center bg-black/50 flex flex-col">
+                  <OrangeSquare className="relative h-[300px] w-[520px] p-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-yellow-800/20 pb-4 mb-6">
+                      <div className="flex items-center gap-4">
+                        <ButtonWhite
+                          onClick={() => setSelectedLevel(null)}
+                          className="py-1 px-4 font-extrabold text-[12px] uppercase text-yellow-900 border-2 active:scale-95 transition-all flex items-center gap-1.5 shadow-md shrink-0"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5 stroke-[3px]" />
+                          <span>Back</span>
+                        </ButtonWhite>
+                        <div className="flex flex-col">
+                          <span className="text-[10px] sm:text-[11px] font-extrabold text-yellow-600 uppercase tracking-widest leading-none mb-1">
+                            {docInfo?.game_name || "Game Catalog"}
+                          </span>
+                          <h2 className="text-xl sm:text-2xl font-extrabold text-yellow-900 leading-tight">
+                            {activeChapter?.title || "Chapter Levels"}
+                          </h2>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-4">
+                      <ButtonGreen
+                        onClick={() => startGame('normal')}
+                        className="w-[300px] h-[40px active:scale-95 transition-all"
+                      >
+                        <span> Normal mode</span>
+                      </ButtonGreen>
+
+                      <ButtonOrange
+                        onClick={() => startGame('normal')}
+                        className="w-[300px] h-[40px] active:scale-95 transition-all"
+                      >
+                        <span> Free mode</span>
+                      </ButtonOrange>
+
+                    </div>
+                  </OrangeSquare>
+
+                </div>
+              )}
 
             </div>
 
