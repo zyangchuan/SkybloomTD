@@ -1,0 +1,10 @@
+.buttonBlueRound {
+    appearance: none;
+    border: none;
+    background-image: url('/gui/buttons_text/ButtonText_Large_Blue_Round.svg');
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: contain;
+    color: inherit;
+    font: inherit;
+}

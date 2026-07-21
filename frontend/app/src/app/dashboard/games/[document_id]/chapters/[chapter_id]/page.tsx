@@ -2,14 +2,15 @@
 
 import { use, useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Gamepad2, ArrowLeft, RefreshCw, Star } from 'lucide-react';
 import axios from 'axios';
 import OrangeSquare from '@/components/OrangeSquare';
 import ButtonWhite from '@/components/ButtonWhite';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { syncAuthCookie } from '@/lib/auth-cookie';
-import ButtonGreen from '@/components/ButtonGreen';
-import ButtonOrange from '@/components/ButtonOrange';
+import ButtonOrangeRound from '@/components/ButtonOrangRound';
+import ButtonBlueRound from '@/components/ButtonBlueRound';
 
 interface SubChapter {
   sub_chapter_id: string;
@@ -276,7 +277,7 @@ export default function LevelsPage({ params }: PageProps) {
               {selectedLevel && (
                 <div className="fixed inset-0 flex z-50 justify-center items-center bg-black/50 flex flex-col">
                   <OrangeSquare className="relative h-[300px] w-[520px] p-2">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-yellow-800/20 pb-4 mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-yellow-800/20 pb-2 mb-8">
                       <div className="flex items-center gap-4">
                         <ButtonWhite
                           onClick={() => setSelectedLevel(null)}
@@ -296,20 +297,23 @@ export default function LevelsPage({ params }: PageProps) {
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-center gap-4">
-                      <ButtonGreen
+                    <div className="flex flex-col items-center gap-2">
+                      <ButtonOrangeRound
                         onClick={() => startGame('normal')}
-                        className="w-[300px] h-[40px active:scale-95 transition-all"
+                        className="relative w-[200px] aspect-[1158/357] active:scale-95 transition-all flex justify-center items-center"
                       >
-                        <span> Normal mode</span>
-                      </ButtonGreen>
 
-                      <ButtonOrange
+                        <span className="text-[22px] text-zinc-100"> Normal mode</span>
+
+                      </ButtonOrangeRound>
+
+                      <ButtonBlueRound
                         onClick={() => startGame('freeplay')}
-                        className="w-[300px] h-[40px] active:scale-95 transition-all"
+                        className="relative w-[200px] aspect-[1158/357] active:scale-95 transition-all flex justify-center items-center"
                       >
-                        <span> Free mode</span>
-                      </ButtonOrange>
+                          <span className="text-[22px] text-zinc-100"> Free mode</span>
+
+                      </ButtonBlueRound>
 
                     </div>
                   </OrangeSquare>
