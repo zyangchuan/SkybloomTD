@@ -134,7 +134,7 @@ export default function LevelsPage({ params }: PageProps) {
       mode,
     })
 
-    window.location.href = `/game/${params.toString()}`;
+    window.location.href = `/game/?${params.toString()}`;
   }
 
   useEffect(() => {
@@ -305,7 +305,7 @@ export default function LevelsPage({ params }: PageProps) {
                       </ButtonGreen>
 
                       <ButtonOrange
-                        onClick={() => startGame('normal')}
+                        onClick={() => startGame('freeplay')}
                         className="w-[300px] h-[40px] active:scale-95 transition-all"
                       >
                         <span> Free mode</span>

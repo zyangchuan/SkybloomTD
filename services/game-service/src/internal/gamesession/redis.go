@@ -23,11 +23,17 @@ const (
 	InitialWave    = 0
 )
 
+const (
+	ModeNormal = "normal"
+	ModeFreePlay = "freeplay"
+)
+
 type StartOptions struct {
 	UserID       string
 	LevelID      string
 	GenerationID string
 	SubChapterID string
+	Mode 		 string
 }
 
 type State struct {
@@ -36,6 +42,7 @@ type State struct {
 	LevelID      string    `json:"level_id"`
 	GenerationID string    `json:"generation_id"`
 	SubChapterID string    `json:"sub_chapter_id"`
+	Mode 		 string    `json:"mode"`
 	Health       int       `json:"health"`
 	Essence      int       `json:"essence"`
 	Wave         int       `json:"wave"`
@@ -109,6 +116,14 @@ type Store struct {
 	ttl    time.Duration
 }
 
+func NormaliseMode(mode string) string {
+	if mode == ModeFreePlay {
+		return ModeFreePlay
+	}
+
+	return ModeNormal
+}
+
 func New(redisURL string, ttl time.Duration) (*Store, error) {
 	if strings.TrimSpace(redisURL) == "" {
 		return nil, nil
@@ -128,8 +143,8 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 	if s == nil || s.client == nil {
 		return State{}, errors.New("game session store is not configured")
 	}
-	if existing, err := s.getExisting(options.UserID, options.LevelID); err == nil {
-		if err := s.refreshTTL(existing.SessionID, existing.UserID, existing.LevelID); err != nil {
+	if existing, err := s.getExisting(options.UserID, options.LevelID, options.Mode); err == nil {
+		if err := s.refreshTTL(existing.SessionID, existing.UserID, existing.LevelID, options.Mode); err != nil {
 			return State{}, err
 		}
 		return existing, nil
@@ -144,6 +159,7 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		LevelID:      options.LevelID,
 		GenerationID: options.GenerationID,
 		SubChapterID: options.SubChapterID,
+		Mode: 		  options.Mode,
 		Health:       InitialHealth,
 		Essence:      InitialEssence,
 		Wave:         InitialWave,
@@ -157,6 +173,7 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"level_id":             state.LevelID,
 		"generation_id":        state.GenerationID,
 		"sub_chapter_id":       state.SubChapterID,
+		"mode":  				state.Mode,
 		"health":               state.Health,
 		"essence":              state.Essence,
 		"wave":                 state.Wave,
@@ -181,7 +198,7 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 	if _, err := s.client.Do(args...); err != nil {
 		return State{}, err
 	}
-	if err := s.refreshTTL(state.SessionID, state.UserID, state.LevelID); err != nil {
+	if err := s.refreshTTL(state.SessionID, state.UserID, state.LevelID, state.Mode); err != nil {
 		return State{}, err
 	}
 	return state, nil
@@ -306,7 +323,7 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 	if err != nil {
 		return err
 	}
-	return s.refreshTTL(sessionID, state.UserID, state.LevelID)
+	return s.refreshTTL(sessionID, state.UserID, state.LevelID, state.Mode,)
 }
 
 func (s *Store) Delete(ctx context.Context, sessionID string) error {
@@ -325,7 +342,7 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 	values := hashValues(raw)
 	args := []string{"DEL", key(sessionID), mistakesKey(sessionID)}
 	if values["user_id"] != "" && values["level_id"] != "" {
-		args = append(args, indexKey(values["user_id"], values["level_id"]))
+		args = append(args, indexKey(values["user_id"], values["level_id"], NormaliseMode(values["mode"])))
 	}
 	_, err = s.client.Do(args...)
 	return err
@@ -365,7 +382,7 @@ func (s *Store) SaveQuizMistake(ctx context.Context, sessionID string, userID st
 	if _, err := s.client.Do("EXPIRE", redisKey, strconv.Itoa(int(s.ttl.Seconds()))); err != nil {
 		return err
 	}
-	return s.refreshTTL(sessionID, state.UserID, state.LevelID)
+	return s.refreshTTL(sessionID, state.UserID, state.LevelID, state.Mode)
 }
 
 func (s *Store) ListQuizMistakes(ctx context.Context, sessionID string, userID string) ([]QuizMistake, error) {
@@ -437,12 +454,12 @@ func mistakesKey(sessionID string) string {
 	return key(sessionID) + ":mistakes"
 }
 
-func indexKey(userID string, levelID string) string {
-	return "game-session:v1:user:" + userID + ":level:" + levelID
+func indexKey(userID string, levelID string, mode string) string {
+	return "game-session:v1:user:" + userID + ":level:" + levelID + ":mode:" + mode
 }
 
-func (s *Store) getExisting(userID string, levelID string) (State, error) {
-	raw, err := s.client.Do("GET", indexKey(userID, levelID))
+func (s *Store) getExisting(userID string, levelID string, mode string) (State, error) {
+	raw, err := s.client.Do("GET", indexKey(userID, levelID, mode))
 	if errors.Is(err, redisclient.ErrNil) {
 		return State{}, ErrSessionNotFound
 	}
@@ -455,7 +472,7 @@ func (s *Store) getExisting(userID string, levelID string) (State, error) {
 	}
 	state, err := s.getBySessionID(sessionID)
 	if errors.Is(err, ErrSessionNotFound) {
-		_, _ = s.client.Do("DEL", indexKey(userID, levelID))
+		_, _ = s.client.Do("DEL", indexKey(userID, levelID, mode,))
 		return State{}, ErrSessionNotFound
 	}
 	if err != nil {
@@ -479,12 +496,12 @@ func (s *Store) getBySessionID(sessionID string) (State, error) {
 	return parseState(values)
 }
 
-func (s *Store) refreshTTL(sessionID string, userID string, levelID string) error {
+func (s *Store) refreshTTL(sessionID string, userID string, levelID string, mode string) error {
 	if err := s.refreshSessionKeyTTL(sessionID); err != nil {
 		return err
 	}
 	seconds := strconv.Itoa(int(s.ttl.Seconds()))
-	if _, err := s.client.Do("SET", indexKey(userID, levelID), sessionID, "EX", seconds); err != nil {
+	if _, err := s.client.Do("SET", indexKey(userID, levelID, mode,), sessionID, "EX", seconds); err != nil {
 		return err
 	}
 	if _, err := s.client.Do("EXPIRE", mistakesKey(sessionID), seconds); err != nil && !strings.Contains(err.Error(), "no such key") {
@@ -529,6 +546,7 @@ func parseState(values map[string]string) (State, error) {
 		LevelID:      values["level_id"],
 		GenerationID: values["generation_id"],
 		SubChapterID: values["sub_chapter_id"],
+		Mode:		  NormaliseMode(values["mode"]),
 		Health:       health,
 		Essence:      essence,
 		Wave:         wave,

@@ -743,6 +743,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	}
 	var request struct {
 		LevelID string `json:"level_id"`
+		Mode    string `json:"mode"`
 	}
 	if err := decodeMessageData(data, &request); err != nil {
 		return nil, errors.New("game.session.start data must include level_id")
@@ -751,6 +752,10 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	if !uuidPattern.MatchString(levelID) {
 		return nil, errors.New("level_id must be a valid UUID")
 	}
+
+	mode := gamesession.NormaliseMode(
+		request.Mode,
+	)
 
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -778,6 +783,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		LevelID:      level.LevelID,
 		GenerationID: level.GenerationID,
 		SubChapterID: level.SubChapterID,
+		Mode 		: mode,
 	})
 	if err != nil {
 		log.Printf("game session create failed level_id=%s user_id=%s: %v", levelID, userID, err)
@@ -1791,20 +1797,10 @@ func enemySpawnIntervalTicksForWave(wave int) int64 {
 }
 
 func activeWaveDefinition(runtime *runtimeSession) (waveDefinition, bool) {
-	waves := waveDefinitions()
 	if runtime.session.Wave <= 0 || runtime.waveSpawned == 0 {
-		nextIndex := runtime.session.Wave
-		if nextIndex < 0 || nextIndex >= len(waves) {
-			return waveDefinition{}, false
-		}
-		return waves[nextIndex], true
+		return currentWaveDefinition(runtime.session.Wave + 1)
 	}
-	for _, wave := range waves {
-		if wave.Wave == runtime.session.Wave {
-			return wave, true
-		}
-	}
-	return waveDefinition{}, false
+	return currentWaveDefinition(runtime.session.Wave)
 }
 
 func currentWaveDefinition(waveNumber int) (waveDefinition, bool) {
@@ -1813,7 +1809,77 @@ func currentWaveDefinition(waveNumber int) (waveDefinition, bool) {
 			return wave, true
 		}
 	}
+
+	if (waveNumber > len(waveDefinitions())) {
+		return proceduralWaveDefinition(waveNumber), true
+	}
+
 	return waveDefinition{}, false
+}
+
+func proceduralWaveDefinition(
+	wave int,
+) waveDefinition {
+	tier := wave - len(waveDefinitions())
+
+	if (tier >= 15) {
+		tier = 15
+	}
+	smogCount := 20 + tier * 3
+
+	noiseCount := 20 + tier * 5
+
+	junkCount := 3 + tier
+
+	const repeats = 3
+
+	groups := make(
+		[]spawnGroup,
+		0,
+		repeats * 3,
+	)
+
+	for i := 0; i < repeats; i++ {
+		groups = append(
+			groups,
+
+			scaledGroup(
+				wave,
+				gameobject.EnemyTypeJunk,
+				ceilDiv(
+					junkCount,
+					repeats,
+				),
+			),
+
+			scaledGroup(
+				wave,
+				gameobject.EnemyTypeSmog,
+				ceilDiv(
+					smogCount,
+					repeats,
+				),
+			),
+
+			scaledGroup(
+				wave,
+				gameobject.EnemyTypeNoise,
+				ceilDiv(
+					noiseCount,
+					repeats,
+				),
+			),
+		)
+	}
+
+	return waveDefinition{
+		Wave:   wave,
+		Groups: groups,
+	}
+}
+
+func ceilDiv(a, b int) int {
+	return (a + b - 1) / b
 }
 
 func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
@@ -1824,12 +1890,16 @@ func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
 	if !ok || runtime.waveSpawned < currentWave.Count() {
 		return nil
 	}
-	if runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
+	freeplay :=	runtime.session.Mode ==	gamesession.ModeFreePlay
+
+	if !freeplay &&
+		runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
 		return nil
 	}
 
 	events := []GameEvent{{Type: "wave.cleared", Wave: runtime.session.Wave}}
-	if runtime.session.Wave >= len(waveDefinitions()) {
+
+	if !freeplay && runtime.session.Wave >= len(waveDefinitions()) {
 		runtime.nextWaveTick = 0
 		return events
 	}
@@ -1841,6 +1911,10 @@ func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
 }
 
 func gameWon(runtime runtimeSession) bool {
+
+	if runtime.session.Mode == gamesession.ModeFreePlay {
+		return false
+	}
 	if runtime.session.Health <= 0 || runtime.session.Wave < len(waveDefinitions()) || len(runtime.enemies) > 0 {
 		return false
 	}

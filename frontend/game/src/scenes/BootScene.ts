@@ -7,6 +7,7 @@ export default class BootScene extends Phaser.Scene {
   private pollIntervalId: any = null;
   private subChapterId: string | null = null;
   private loadingTween!: Phaser.Tweens.Tween;
+  private mode: string | null = null;
   private levelId: string | null = null; // Stored level ID to pass to GameScene
 
   constructor() {
@@ -16,6 +17,11 @@ export default class BootScene extends Phaser.Scene {
   init() {
     const params = new URLSearchParams(window.location.search);
     this.subChapterId = params.get('sub_chapter_id');
+
+    this.mode = params.get('mode') === "freeplay"
+                ? "freeplay"
+                : "normal";
+
     this.cameras.main.setBackgroundColor('#0f172a');
   }
 
@@ -238,7 +244,8 @@ export default class BootScene extends Phaser.Scene {
         this.scene.start('GameScene', {
           initialState: message.data,
           ws: transferredWs,
-          levelId: this.levelId
+          levelId: this.levelId,
+          mode: this.mode,
         });
         break;
 
