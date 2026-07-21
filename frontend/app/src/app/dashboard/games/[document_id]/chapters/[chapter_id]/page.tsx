@@ -297,23 +297,40 @@ export default function LevelsPage({ params }: PageProps) {
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-center gap-2">
-                      <ButtonOrangeRound
-                        onClick={() => startGame('normal')}
-                        className="relative w-[200px] aspect-[1158/357] active:scale-95 transition-all flex justify-center items-center"
-                      >
+                    <div className="flex flex-col items-center gap-3">
 
-                        <span className="text-[22px] text-zinc-100"> Normal mode</span>
+                      <div className="grid w-full grid-cols-[1fr_200px_1fr] items-center gap-3">
 
-                      </ButtonOrangeRound>
+                        <div />
 
-                      <ButtonBlueRound
-                        onClick={() => startGame('freeplay')}
-                        className="relative w-[200px] aspect-[1158/357] active:scale-95 transition-all flex justify-center items-center"
-                      >
+                        <ButtonOrangeRound
+                          onClick={() => startGame('normal')}
+                          className="w-[200px] aspect-[1158/357] active:scale-95 transition-all flex justify-center items-center"
+                        >
+
+                          <span className="text-[22px] text-zinc-100"> Normal mode</span>
+
+                        </ButtonOrangeRound>
+
+                        <span className="text-[11px] font-bold text-yellow-800/70 tracking-wide">Normal waves, ends in victory or defeat</span>
+
+                      </div>
+
+                       <div className="grid w-full grid-cols-[1fr_200px_1fr] items-center gap-3">
+
+                        <div />
+
+                        <ButtonBlueRound
+                          onClick={() => startGame('freeplay')}
+                          className="w-[200px] aspect-[1158/357] active:scale-95 transition-all flex justify-center items-center"
+                        >
                           <span className="text-[22px] text-zinc-100"> Free mode</span>
 
-                      </ButtonBlueRound>
+                        </ButtonBlueRound>
+
+                            <span className="text-[11px] font-bold text-yellow-800/70 tracking-wide">Infinite wave, survive as long as you can</span>
+
+                      </div>
 
                     </div>
                   </OrangeSquare>
