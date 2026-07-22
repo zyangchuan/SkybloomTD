@@ -5,9 +5,11 @@ export default class BootScene extends Phaser.Scene {
   private detailText!: Phaser.GameObjects.Text;
   private ws: WebSocket | null = null;
   private pollIntervalId: any = null;
+  private chapterId: string | null = null;
   private subChapterId: string | null = null;
   private loadingTween!: Phaser.Tweens.Tween;
   private levelId: string | null = null; // Stored level ID to pass to GameScene
+  private mode: string | null = null;
 
   constructor() {
     super('BootScene');
@@ -15,6 +17,9 @@ export default class BootScene extends Phaser.Scene {
 
   init() {
     const params = new URLSearchParams(window.location.search);
+
+    this.mode = params.get("mode");
+    this.chapterId = params.get("chapter_id");
     this.subChapterId = params.get('sub_chapter_id');
     this.cameras.main.setBackgroundColor('#0f172a');
   }
@@ -152,7 +157,12 @@ export default class BootScene extends Phaser.Scene {
       color: '#78350f',
     }).setOrigin(0.5);
 
-    if (!this.subChapterId) {
+    if (this.mode === "freeplay") {
+      if (!this.chapterId) {
+        this.showError('No chapter specified in URL parameters.');
+        return;
+      }
+    } else if (!this.subChapterId) {
       this.showError('No level specified in URL parameters.');
       return;
     }
@@ -173,7 +183,12 @@ export default class BootScene extends Phaser.Scene {
 
       this.ws.onopen = () => {
         this.detailText.setText('Connected. Starting quiz generation...');
-        this.startGameGeneration();
+        
+        if (this.mode == "freeplay") {
+          this.startGameFreePlay();
+        } else {
+          this.startGameGeneration();
+        }
       };
 
       this.ws.onmessage = (event) => {
@@ -209,6 +224,22 @@ export default class BootScene extends Phaser.Scene {
     };
 
     this.ws.send(JSON.stringify(startMsg));
+  }
+
+  private startGameFreePlay() {
+    if (!this.chapterId) {
+      this.showError("No chapter specified in URL paramter.");
+      return;
+    }
+
+    const startMsg = {
+      type: 'game.freeplay.start',
+      data: {
+        chapter_id: this.chapterId
+      }
+    };
+
+    this.ws?.send(JSON.stringify(startMsg));
   }
 
   private handleWebSocketMessage(message: any) {
@@ -249,7 +280,8 @@ export default class BootScene extends Phaser.Scene {
         this.scene.start('GameScene', {
           initialState: message.data,
           ws: transferredWs,
-          levelId: this.levelId
+          levelId: this.levelId,
+          mode: this.mode
         });
         break;
 

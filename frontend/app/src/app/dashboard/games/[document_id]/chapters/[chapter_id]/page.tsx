@@ -82,7 +82,7 @@ export default function LevelsPage({ params }: PageProps) {
       }
 
       const levelsData = levelsRes.data;
-      
+
       // Sort sub-chapters by sub_chapter_index or creation sequence
       const sortedLevels = (levelsData.sub_chapters || []).sort((a: SubChapter, b: SubChapter) => {
         const idxA = a.sub_chapter_index ?? 0;
@@ -121,6 +121,29 @@ export default function LevelsPage({ params }: PageProps) {
     }
   }, [documentId, chapterId, router]);
 
+
+  const startNormalGame = (level: SubChapter) => {
+    const params = new URLSearchParams({
+      document_id: documentId,
+      chapter_id: chapterId,
+      sub_chapter_id: level.sub_chapter_id,
+      mode: "normal",
+    });
+
+    window.location.href = `/game/?${params.toString()}`;
+  };
+
+  // it should be random by not having a proper sub_chapter_id
+  const startFreeplayGame = () => {
+    const params = new URLSearchParams({
+      document_id: documentId,
+      chapter_id: chapterId,
+      mode: "freeplay",
+    });
+
+    window.location.href = `/game/?${params.toString()}`;
+  };
+
   useEffect(() => {
     let active = true;
     if (active) {
@@ -136,7 +159,7 @@ export default function LevelsPage({ params }: PageProps) {
   return (
     <main className="flex-1 w-full max-w-4xl mx-auto px-4 py-8 flex flex-col justify-center items-center">
       <OrangeSquare className="w-full flex flex-col p-6 sm:p-8 bg-[#fdfaf2] border-4 border-yellow-800 rounded-3xl shadow-2xl relative min-h-[500px]">
-        
+
         {/* Navigation Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b-2 border-yellow-800/20 pb-4 mb-6">
           <div className="flex items-center gap-4">
@@ -194,7 +217,7 @@ export default function LevelsPage({ params }: PageProps) {
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center pt-6">
-            
+
             {/* Legend / Title */}
             <div className="flex items-center gap-1.5 bg-yellow-800/10 border border-yellow-800/20 px-3.5 py-1.5 rounded-full mb-10 select-none">
               <Star className="w-4 h-4 text-yellow-600 fill-current" />
@@ -205,34 +228,30 @@ export default function LevelsPage({ params }: PageProps) {
 
             {/* Staggered Path Map */}
             <div className="relative w-full py-12 flex flex-col items-center gap-20 min-h-[500px]">
-              
+
               {/* Central Winding Dashed Path Connector Line */}
               <div className="absolute left-1/2 -translate-x-1/2 top-10 bottom-10 w-0 border-l-4 border-dashed border-yellow-800/30 z-0 pointer-events-none" />
 
               {levels.map((level, idx) => {
                 const isLeft = idx % 2 === 0;
                 const levelNum = level.sub_chapter_index !== null ? level.sub_chapter_index : idx + 1;
-                
+
                 return (
                   <div
                     key={level.sub_chapter_id}
-                    onClick={() => {
-                      window.location.href = `/game/?document_id=${documentId}&chapter_id=${chapterId}&sub_chapter_id=${level.sub_chapter_id}`;
-                    }}
-                    className={`relative z-10 flex flex-col items-center group transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer w-full max-w-[240px] select-none ${
-                      isLeft 
-                        ? '-translate-x-16 sm:-translate-x-28' 
-                        : 'translate-x-16 sm:translate-x-28'
-                    }`}
-                  >
-                    
-                    {/* Horizontal Dashed Connector Arm to the central path */}
-                    <div 
-                      className={`absolute top-10 h-0 border-t-4 border-dashed border-yellow-800/30 z-[-1] pointer-events-none ${
-                        isLeft 
-                          ? 'left-1/2 w-[64px] sm:w-[112px]' 
-                          : 'right-1/2 w-[64px] sm:w-[112px]'
+                    onClick={() => startNormalGame(level)}
+                    className={`relative z-10 flex flex-col items-center group transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer w-full max-w-[240px] select-none ${isLeft
+                      ? '-translate-x-16 sm:-translate-x-28'
+                      : 'translate-x-16 sm:translate-x-28'
                       }`}
+                  >
+
+                    {/* Horizontal Dashed Connector Arm to the central path */}
+                    <div
+                      className={`absolute top-10 h-0 border-t-4 border-dashed border-yellow-800/30 z-[-1] pointer-events-none ${isLeft
+                        ? 'left-1/2 w-[64px] sm:w-[112px]'
+                        : 'right-1/2 w-[64px] sm:w-[112px]'
+                        }`}
                     />
 
                     {/* Circular Blue Icon Button with Level Index inside */}
@@ -259,9 +278,35 @@ export default function LevelsPage({ params }: PageProps) {
                 );
               })}
 
+
             </div>
 
-          </div>
+              <div className='flex flex-col'>
+
+                <button
+                  onClick={startFreeplayGame}
+                  type="button"
+                  className="-translate-y-[40px] w-20 h-20 flex items-center justify-center text-white hover:brightness-110 active:scale-95 transition-all cursor-pointer select-none bg-transparent shrink-0 drop-shadow-[0_6px_8px_rgba(0,0,0,0.25)] group-hover:drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
+                  style={{
+                    backgroundImage: "url('/gui/buttons_icons/IconButton_Large_Blue_Circle.svg')",
+                    backgroundSize: '100% 100%',
+                    backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
+                  }}
+                >
+                  <span className="text-2xl font-extrabold text-white drop-shadow-[0_2.5px_0_rgba(0,0,0,0.4)] -mt-1.5">
+                    Free Mode
+                  </span>
+
+                </button>
+
+                <span className="mt-3 -translate-y-[40px] text-xs sm:text-sm text-[#4a1900] font-extrabold text-center drop-shadow-[0_1px_0_rgba(255,255,255,0.4)] group-hover:text-yellow-900 transition-colors max-w-[160px] leading-tight break-words px-1">
+                  Random Level
+                </span>
+
+              </div>
+
+            </div>
         )}
 
       </OrangeSquare>
