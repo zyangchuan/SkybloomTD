@@ -35,8 +35,7 @@ const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
 const mergeTowerAction = "merge_tower"
-const prepareConsumableAction = "prepare_consumable"
-const commitConsumableAction = "commit_consumable"
+const useConsumableAction = "use_consumable"
 const grantConsumableAction = "grant_consumable"
 const validateConsumableAcquireAction = "validate_consumable_acquire"
 const markConsumableQuizPendingAction = "mark_consumable_quiz_pending"
@@ -48,22 +47,22 @@ const resumeGameAction = "resume_game"
 const startGameAction = "start_game"
 
 const (
-	waveClearDelayTicks         = int64(60)
-	enemySpawnIntervalTicks     = int64(22)
-	minEnemySpawnIntervalTicks  = int64(8)
-	groupGapTicks               = int64(160)
-	baseHealthDamage            = 10
-	correctQuizEssenceAward     = 50
-	quizRequestCooldown         = 20 * time.Second
-	airstrikeItemType           = "airstrike"
-	consumableStatusEmpty       = "empty"
-	consumableStatusReady       = "ready"
-	consumableStatusPending     = "pending"
-	consumableStatusQuizPending = "quiz_pending"
-	airstrikeTargetCount        = 3
-	airstrikeDamage             = 80.0
-	airstrikeRadius             = 1.35
-	airstrikeAutoCommitTicks    = int64(40)
+	waveClearDelayTicks          = int64(60)
+	enemySpawnIntervalTicks      = int64(22)
+	minEnemySpawnIntervalTicks   = int64(8)
+	groupGapTicks                = int64(160)
+	baseHealthDamage             = 10
+	correctQuizEssenceAward      = 50
+	quizRequestCooldown          = 30 * time.Second
+	airstrikeUseCooldown         = 30 * time.Second
+	airstrikeWrongAnswerCooldown = 15 * time.Second
+	airstrikeItemType            = "airstrike"
+	consumableStatusEmpty        = "empty"
+	consumableStatusReady        = "ready"
+	consumableStatusQuizPending  = "quiz_pending"
+	airstrikeTargetCount         = 3
+	airstrikeDamage              = 80.0
+	airstrikeRadius              = 2.0
 )
 
 type LevelRepository interface {
@@ -135,24 +134,23 @@ type InitialState struct {
 }
 
 type GameState struct {
-	SessionID                    string                      `json:"session_id"`
-	LevelID                      string                      `json:"level_id"`
-	Health                       int                         `json:"health"`
-	Essence                      int                         `json:"essence"`
-	Wave                         int                         `json:"wave"`
-	Tick                         int64                       `json:"tick"`
-	ServerTime                   time.Time                   `json:"server_time"`
-	LoopStarted                  bool                        `json:"loop_started"`
-	LoopPaused                   bool                        `json:"loop_paused"`
-	QuizCooldownRemainingSeconds int                         `json:"quiz_cooldown_remaining_seconds"`
-	BirdTypes                    []BirdTypeInfo              `json:"bird_types,omitempty"`
-	EnemyTypes                   []EnemyTypeInfo             `json:"enemy_types,omitempty"`
-	Birds                        []PlacedBirdState           `json:"birds"`
-	Enemies                      []EnemyState                `json:"enemies"`
-	Projectiles                  []ProjectileState           `json:"projectiles"`
-	Consumables                  ConsumableState             `json:"consumables"`
-	PendingConsumables           []ConsumableDeploymentState `json:"pending_consumables,omitempty"`
-	Events                       []GameEvent                 `json:"events,omitempty"`
+	SessionID                    string            `json:"session_id"`
+	LevelID                      string            `json:"level_id"`
+	Health                       int               `json:"health"`
+	Essence                      int               `json:"essence"`
+	Wave                         int               `json:"wave"`
+	Tick                         int64             `json:"tick"`
+	ServerTime                   time.Time         `json:"server_time"`
+	LoopStarted                  bool              `json:"loop_started"`
+	LoopPaused                   bool              `json:"loop_paused"`
+	QuizCooldownRemainingSeconds int               `json:"quiz_cooldown_remaining_seconds"`
+	BirdTypes                    []BirdTypeInfo    `json:"bird_types,omitempty"`
+	EnemyTypes                   []EnemyTypeInfo   `json:"enemy_types,omitempty"`
+	Birds                        []PlacedBirdState `json:"birds"`
+	Enemies                      []EnemyState      `json:"enemies"`
+	Projectiles                  []ProjectileState `json:"projectiles"`
+	Consumables                  ConsumableState   `json:"consumables"`
+	Events                       []GameEvent       `json:"events,omitempty"`
 }
 
 type BirdTypeInfo struct {
@@ -200,18 +198,16 @@ type ConsumableState struct {
 }
 
 type ConsumableItemState struct {
-	Status        string `json:"status"`
-	Charges       int    `json:"charges"`
-	PendingQuizID string `json:"pending_quiz_id,omitempty"`
+	Status                   string `json:"status"`
+	Charges                  int    `json:"charges"`
+	PendingQuizID            string `json:"pending_quiz_id,omitempty"`
+	CooldownRemainingSeconds int    `json:"cooldown_remaining_seconds"`
 }
 
 type ConsumableDeploymentState struct {
-	DeploymentID     string                `json:"deployment_id"`
-	ItemType         string                `json:"item_type"`
-	Targets          []gameobject.Position `json:"targets"`
-	PreparedAtTick   int64                 `json:"prepared_at_tick"`
-	AutoCommitAtTick int64                 `json:"auto_commit_at_tick"`
-	Status           string                `json:"status"`
+	DeploymentID string                `json:"deployment_id"`
+	ItemType     string                `json:"item_type"`
+	Targets      []gameobject.Position `json:"targets"`
 }
 
 type GameEvent struct {
@@ -316,10 +312,6 @@ type consumableQuizAnswerRequest struct {
 	SelectedIndex int    `json:"selected_index"`
 }
 
-type commitConsumableRequest struct {
-	DeploymentID string `json:"deployment_id"`
-}
-
 type grantConsumableRequest struct {
 	ItemType string
 	Charges  int
@@ -357,7 +349,6 @@ type clientAction struct {
 	PlaceTower           placeTowerRequest
 	MergeTower           mergeTowerRequest
 	UseConsumable        useConsumableRequest
-	CommitConsumable     commitConsumableRequest
 	GrantConsumable      grantConsumableRequest
 	ConsumableQuiz       consumableQuizPendingRequest
 	FinishConsumableQuiz finishConsumableQuizRequest
@@ -381,6 +372,7 @@ type runningGameLoop struct {
 	currentQuizID           string
 	currentConsumableQuizID string
 	lastQuizStartedAt       time.Time
+	consumableCooldownUntil time.Time
 	loopStarted             bool
 	stop                    context.CancelFunc
 	actions                 chan clientAction
@@ -411,18 +403,18 @@ func stopGameLoop(loop *runningGameLoop) {
 }
 
 type runtimeSession struct {
-	session            gamesession.State
-	economy            gamesession.Economy
-	birds              []placedBird
-	enemies            []gameobject.Enemy
-	projectiles        []gameobject.Projectile
-	consumables        ConsumableState
-	pendingConsumables []ConsumableDeploymentState
-	levelMap           mapgen.GeneratedMap
-	path               []gameobject.Position
-	loopStarted        bool
-	loopPaused         bool
-	lastQuizStartedAt  time.Time
+	session                 gamesession.State
+	economy                 gamesession.Economy
+	birds                   []placedBird
+	enemies                 []gameobject.Enemy
+	projectiles             []gameobject.Projectile
+	consumables             ConsumableState
+	levelMap                mapgen.GeneratedMap
+	path                    []gameobject.Position
+	loopStarted             bool
+	loopPaused              bool
+	lastQuizStartedAt       time.Time
+	consumableCooldownUntil time.Time
 
 	waveStartedAtTick int64
 	waveSpawned       int
@@ -783,7 +775,7 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 		case "game.action.use_consumable":
 			action, err := decodeUseConsumableAction(message.Data)
 			if err != nil {
-				if writeErr := writeActionRejected(conn, writeMu, prepareConsumableAction, err.Error()); writeErr != nil {
+				if writeErr := writeActionRejected(conn, writeMu, useConsumableAction, err.Error()); writeErr != nil {
 					log.Printf("websocket action rejection write failed: %v", writeErr)
 					return
 				}
@@ -791,41 +783,16 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 			}
 			if gameLoop == nil || gameLoop.stopped() {
 				gameLoop = nil
-				if writeErr := writeActionRejected(conn, writeMu, prepareConsumableAction, "game session is not running"); writeErr != nil {
+				if writeErr := writeActionRejected(conn, writeMu, useConsumableAction, "game session is not running"); writeErr != nil {
 					log.Printf("websocket action rejection write failed: %v", writeErr)
 					return
 				}
 				continue
 			}
 			select {
-			case gameLoop.actions <- clientAction{Type: prepareConsumableAction, UseConsumable: action}:
+			case gameLoop.actions <- clientAction{Type: useConsumableAction, UseConsumable: action}:
 			default:
-				if writeErr := writeActionRejected(conn, writeMu, prepareConsumableAction, "action queue is full"); writeErr != nil {
-					log.Printf("websocket action rejection write failed: %v", writeErr)
-					return
-				}
-			}
-		case "game.action.commit_consumable":
-			action, err := decodeCommitConsumableAction(message.Data)
-			if err != nil {
-				if writeErr := writeActionRejected(conn, writeMu, commitConsumableAction, err.Error()); writeErr != nil {
-					log.Printf("websocket action rejection write failed: %v", writeErr)
-					return
-				}
-				continue
-			}
-			if gameLoop == nil || gameLoop.stopped() {
-				gameLoop = nil
-				if writeErr := writeActionRejected(conn, writeMu, commitConsumableAction, "game session is not running"); writeErr != nil {
-					log.Printf("websocket action rejection write failed: %v", writeErr)
-					return
-				}
-				continue
-			}
-			select {
-			case gameLoop.actions <- clientAction{Type: commitConsumableAction, CommitConsumable: action}:
-			default:
-				if writeErr := writeActionRejected(conn, writeMu, commitConsumableAction, "action queue is full"); writeErr != nil {
+				if writeErr := writeActionRejected(conn, writeMu, useConsumableAction, "action queue is full"); writeErr != nil {
 					log.Printf("websocket action rejection write failed: %v", writeErr)
 					return
 				}
@@ -988,22 +955,22 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	session.Tick = storedRuntime.Tick
 
 	runtime := runtimeSession{
-		session:            session,
-		economy:            gamesession.NewEconomy(session.Essence),
-		birds:              restoredBirds,
-		enemies:            enemiesFromStored(storedRuntime.Enemies),
-		projectiles:        projectilesFromStored(storedRuntime.Projectiles),
-		consumables:        consumablesFromStored(storedRuntime.Consumables),
-		pendingConsumables: pendingConsumablesFromStored(storedRuntime.PendingConsumables),
-		levelMap:           levelMap,
-		path:               gamePath(levelMap),
-		loopStarted:        storedRuntime.LoopStarted,
-		loopPaused:         storedRuntime.LoopPaused,
+		session:     session,
+		economy:     gamesession.NewEconomy(session.Essence),
+		birds:       restoredBirds,
+		enemies:     enemiesFromStored(storedRuntime.Enemies),
+		projectiles: projectilesFromStored(storedRuntime.Projectiles),
+		consumables: consumablesFromStored(storedRuntime.Consumables),
+		levelMap:    levelMap,
+		path:        gamePath(levelMap),
+		loopStarted: storedRuntime.LoopStarted,
+		loopPaused:  storedRuntime.LoopPaused,
 
-		lastQuizStartedAt: storedRuntime.LastQuizStartedAt,
-		waveStartedAtTick: storedRuntime.WaveStartedAtTick,
-		waveSpawned:       storedRuntime.WaveSpawned,
-		nextWaveTick:      storedRuntime.NextWaveTick,
+		lastQuizStartedAt:       storedRuntime.LastQuizStartedAt,
+		consumableCooldownUntil: storedRuntime.ConsumableCooldownUntil,
+		waveStartedAtTick:       storedRuntime.WaveStartedAtTick,
+		waveSpawned:             storedRuntime.WaveSpawned,
+		nextWaveTick:            storedRuntime.NextWaveTick,
 	}
 	if runtime.session.Health > 0 && !gameWon(runtime) {
 		runtime.loopStarted = false
@@ -1051,6 +1018,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		currentQuizID:           currentQuizID,
 		currentConsumableQuizID: runtime.consumables.Airstrike.PendingQuizID,
 		lastQuizStartedAt:       runtime.lastQuizStartedAt,
+		consumableCooldownUntil: runtime.consumableCooldownUntil,
 		loopStarted:             runtime.loopStarted,
 		stop:                    stop,
 		actions:                 make(chan clientAction, 64),
@@ -1087,37 +1055,14 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 					log.Printf("websocket action accepted write failed: %v", err)
 					return
 				}
-			case prepareConsumableAction:
-				deployment, err := s.prepareConsumableDeployment(ctx, &runtime, action.UseConsumable)
+			case useConsumableAction:
+				_, err := resolveConsumableAction(&runtime, action.UseConsumable)
 				if err != nil {
 					if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
 						log.Printf("websocket action rejection write failed: %v", writeErr)
 						return
 					}
 					continue
-				}
-				if err := writeWebsocketJSON(conn, writeMu, Message{
-					Type: "game.consumable.prepared",
-					Data: map[string]any{
-						"deployment":  deployment,
-						"consumables": runtime.consumables,
-					},
-				}); err != nil {
-					log.Printf("websocket consumable prepared write failed: %v", err)
-					return
-				}
-			case commitConsumableAction:
-				resolution, err := s.resolveConsumableDeployment(ctx, &runtime, action.CommitConsumable.DeploymentID)
-				if err != nil {
-					if writeErr := writeActionRejected(conn, writeMu, action.Type, err.Error()); writeErr != nil {
-						log.Printf("websocket action rejection write failed: %v", writeErr)
-						return
-					}
-					continue
-				}
-				if err := writeConsumableResolved(conn, writeMu, resolution); err != nil {
-					log.Printf("websocket consumable resolved write failed: %v", err)
-					return
 				}
 			case grantConsumableAction:
 				err := s.grantConsumable(ctx, &runtime, action.GrantConsumable)
@@ -1167,11 +1112,10 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 				continue
 			}
 			events := advanceRuntimeTick(&runtime, now)
-			events = append(events, s.resolveDueConsumableDeployments(ctx, &runtime)...)
 			if err := s.saveRuntimeState(ctx, runtime); err != nil {
 				log.Printf("game session runtime save failed session_id=%s: %v", runtime.session.SessionID, err)
 			}
-			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, loop, runtime.session.UpdatedAt, nil, nil, events)}); err != nil {
+			if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.state", Data: gameStateFromRuntime(runtime, loop, now, nil, nil, events)}); err != nil {
 				log.Printf("game state write failed session_id=%s: %v", runtime.session.SessionID, err)
 				return
 			}
@@ -1766,99 +1710,39 @@ func (s *Server) processClientAction(ctx context.Context, runtime *runtimeSessio
 	}
 }
 
-func (s *Server) prepareConsumableDeployment(ctx context.Context, runtime *runtimeSession, request useConsumableRequest) (ConsumableDeploymentState, error) {
-	if runtime == nil {
-		return ConsumableDeploymentState{}, errors.New("game session is not running")
-	}
-	if !runtime.loopStarted || runtime.session.Health <= 0 || gameWon(*runtime) {
-		return ConsumableDeploymentState{}, errors.New("game session is not running")
-	}
-	if strings.TrimSpace(request.ItemType) != airstrikeItemType {
-		return ConsumableDeploymentState{}, errors.New("unknown consumable type")
-	}
-	if err := validateAirstrikeTargets(runtime.levelMap, request.Targets); err != nil {
-		return ConsumableDeploymentState{}, err
-	}
-	if runtime.consumables.Airstrike.Status != consumableStatusReady || runtime.consumables.Airstrike.Charges <= 0 {
-		return ConsumableDeploymentState{}, errors.New("airstrike is not ready")
-	}
-	if hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) {
-		return ConsumableDeploymentState{}, errors.New("airstrike deployment is already pending")
-	}
-
-	previousConsumables := runtime.consumables
-	previousPending := runtime.pendingConsumables
-
-	runtime.consumables.Airstrike.Charges--
-	if runtime.consumables.Airstrike.Charges <= 0 {
-		runtime.consumables.Airstrike.Charges = 0
-		runtime.consumables.Airstrike.Status = consumableStatusPending
-	}
-	deployment := ConsumableDeploymentState{
-		DeploymentID:     uuid.NewString(),
-		ItemType:         airstrikeItemType,
-		Targets:          copyPositions(request.Targets),
-		PreparedAtTick:   runtime.session.Tick,
-		AutoCommitAtTick: runtime.session.Tick + airstrikeAutoCommitTicks,
-		Status:           consumableStatusPending,
-	}
-	runtime.pendingConsumables = append(append([]ConsumableDeploymentState{}, runtime.pendingConsumables...), deployment)
-
-	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
-		runtime.consumables = previousConsumables
-		runtime.pendingConsumables = previousPending
-		return ConsumableDeploymentState{}, errors.New("failed to save consumable deployment")
-	}
-	return deployment, nil
-}
-
-func (s *Server) resolveConsumableDeployment(ctx context.Context, runtime *runtimeSession, deploymentID string) (consumableResolution, error) {
+func resolveConsumableAction(runtime *runtimeSession, request useConsumableRequest) (consumableResolution, error) {
 	if runtime == nil {
 		return consumableResolution{}, errors.New("game session is not running")
 	}
-	index := pendingConsumableIndex(runtime.pendingConsumables, deploymentID)
-	if index < 0 {
-		return consumableResolution{}, errors.New("consumable deployment is not pending")
+	if !runtime.loopStarted || runtime.session.Health <= 0 || gameWon(*runtime) {
+		return consumableResolution{}, errors.New("game session is not running")
 	}
-	resolution := resolvePendingConsumableAt(runtime, index)
-	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
-		return consumableResolution{}, errors.New("failed to save consumable resolution")
+	if strings.TrimSpace(request.ItemType) != airstrikeItemType {
+		return consumableResolution{}, errors.New("unknown consumable type")
 	}
-	return resolution, nil
-}
+	if err := validateAirstrikeTargets(runtime.levelMap, request.Targets); err != nil {
+		return consumableResolution{}, err
+	}
+	if consumableCooldownRemainingSeconds(runtime.consumableCooldownUntil, time.Now().UTC()) > 0 {
+		return consumableResolution{}, errors.New("airstrike is on cooldown")
+	}
+	if runtime.consumables.Airstrike.Status != consumableStatusReady || runtime.consumables.Airstrike.Charges <= 0 {
+		return consumableResolution{}, errors.New("airstrike is not ready")
+	}
 
-func (s *Server) resolveDueConsumableDeployments(ctx context.Context, runtime *runtimeSession) []GameEvent {
-	_ = ctx
-	if runtime == nil || len(runtime.pendingConsumables) == 0 {
-		return nil
-	}
-	events := make([]GameEvent, 0)
-	for i := 0; i < len(runtime.pendingConsumables); {
-		deployment := runtime.pendingConsumables[i]
-		if deployment.Status != consumableStatusPending || runtime.session.Tick < deployment.AutoCommitAtTick {
-			i++
-			continue
-		}
-		resolution := resolvePendingConsumableAt(runtime, i)
-		events = append(events, resolution.Events...)
-	}
-	return events
-}
-
-func resolvePendingConsumableAt(runtime *runtimeSession, index int) consumableResolution {
-	deployment := runtime.pendingConsumables[index]
-	runtime.pendingConsumables = append(runtime.pendingConsumables[:index], runtime.pendingConsumables[index+1:]...)
-
-	events := make([]GameEvent, 0)
-	switch deployment.ItemType {
-	case airstrikeItemType:
-		events = append(events, applyAirstrikeDeployment(runtime, deployment)...)
+	runtime.consumables.Airstrike.Charges--
+	runtime.consumableCooldownUntil = time.Now().UTC().Add(airstrikeUseCooldown)
+	if runtime.consumables.Airstrike.Charges <= 0 {
+		runtime.consumables.Airstrike.Charges = 0
 		runtime.consumables.Airstrike.Status = consumableStatusEmpty
-		if runtime.consumables.Airstrike.Charges > 0 {
-			runtime.consumables.Airstrike.Status = consumableStatusReady
-		}
 	}
-	return consumableResolution{
+	deployment := ConsumableDeploymentState{
+		DeploymentID: uuid.NewString(),
+		ItemType:     airstrikeItemType,
+		Targets:      copyPositions(request.Targets),
+	}
+	events := applyAirstrikeDeployment(runtime, deployment)
+	resolution := consumableResolution{
 		DeploymentID: deployment.DeploymentID,
 		ItemType:     deployment.ItemType,
 		Targets:      deployment.Targets,
@@ -1866,6 +1750,8 @@ func resolvePendingConsumableAt(runtime *runtimeSession, index int) consumableRe
 		Enemies:      enemyStates(runtime.enemies),
 		Events:       events,
 	}
+
+	return resolution, nil
 }
 
 func applyAirstrikeDeployment(runtime *runtimeSession, deployment ConsumableDeploymentState) []GameEvent {
@@ -1878,29 +1764,32 @@ func applyAirstrikeDeployment(runtime *runtimeSession, deployment ConsumableDepl
 		ItemType:     deployment.ItemType,
 		Targets:      deployment.Targets,
 	}}
-	damaged := map[string]bool{}
 	for i := range runtime.enemies {
 		enemy := &runtime.enemies[i]
-		if !enemy.IsAlive() || damaged[enemy.ID] || !isInAnyAirstrikeArea(enemy.Position, deployment.Targets) {
-			continue
-		}
-		damaged[enemy.ID] = true
-		beforeHealth := enemy.Health
-		enemy.TakeDamage(airstrikeDamage)
-		damage := float64(beforeHealth - enemy.Health)
-		if damage <= 0 {
-			continue
-		}
-		events = append(events, GameEvent{
-			Type:         "enemy.damage",
-			EnemyID:      enemy.ID,
-			DeploymentID: deployment.DeploymentID,
-			ItemType:     deployment.ItemType,
-			Damage:       damage,
-			Health:       enemy.Health,
-		})
 		if !enemy.IsAlive() {
-			awardEssenceForEnemyKill(runtime, enemy.Type)
+			continue
+		}
+		for _, target := range deployment.Targets {
+			if !enemy.IsAlive() || enemy.Position.DistanceTo(target) > airstrikeRadius {
+				continue
+			}
+			beforeHealth := enemy.Health
+			enemy.TakeDamage(airstrikeDamage)
+			damage := float64(beforeHealth - enemy.Health)
+			if damage <= 0 {
+				continue
+			}
+			events = append(events, GameEvent{
+				Type:         "enemy.damage",
+				EnemyID:      enemy.ID,
+				DeploymentID: deployment.DeploymentID,
+				ItemType:     deployment.ItemType,
+				Damage:       damage,
+				Health:       enemy.Health,
+			})
+			if !enemy.IsAlive() {
+				awardEssenceForEnemyKill(runtime, enemy.Type)
+			}
 		}
 	}
 	runtime.enemies = aliveEnemies(runtime.enemies)
@@ -1920,9 +1809,7 @@ func (s *Server) grantConsumable(ctx context.Context, runtime *runtimeSession, r
 	}
 	previousConsumables := runtime.consumables
 	runtime.consumables.Airstrike.Charges += charges
-	if !hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) {
-		runtime.consumables.Airstrike.Status = consumableStatusReady
-	}
+	runtime.consumables.Airstrike.Status = consumableStatusReady
 	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
 		runtime.consumables = previousConsumables
 		return errors.New("failed to save consumable reward")
@@ -1943,8 +1830,8 @@ func validateConsumableAcquire(runtime *runtimeSession, itemType string) error {
 	if runtime.consumables.Airstrike.Charges > 0 || runtime.consumables.Airstrike.Status == consumableStatusReady {
 		return errors.New("airstrike is already ready")
 	}
-	if hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) || runtime.consumables.Airstrike.Status == consumableStatusPending {
-		return errors.New("airstrike deployment is already pending")
+	if consumableCooldownRemainingSeconds(runtime.consumableCooldownUntil, time.Now().UTC()) > 0 {
+		return errors.New("airstrike is on cooldown")
 	}
 	return nil
 }
@@ -1981,6 +1868,7 @@ func (s *Server) finishConsumableQuiz(ctx context.Context, runtime *runtimeSessi
 	}
 
 	previousConsumables := runtime.consumables
+	previousCooldownUntil := runtime.consumableCooldownUntil
 	runtime.consumables.Airstrike.PendingQuizID = ""
 	if request.Correct {
 		charges := request.Charges
@@ -1988,10 +1876,9 @@ func (s *Server) finishConsumableQuiz(ctx context.Context, runtime *runtimeSessi
 			charges = 1
 		}
 		runtime.consumables.Airstrike.Charges += charges
-		if !hasPendingConsumable(runtime.pendingConsumables, airstrikeItemType) {
-			runtime.consumables.Airstrike.Status = consumableStatusReady
-		}
+		runtime.consumables.Airstrike.Status = consumableStatusReady
 	} else {
+		runtime.consumableCooldownUntil = time.Now().UTC().Add(airstrikeWrongAnswerCooldown)
 		runtime.consumables.Airstrike.Status = consumableStatusEmpty
 		if runtime.consumables.Airstrike.Charges > 0 {
 			runtime.consumables.Airstrike.Status = consumableStatusReady
@@ -1999,6 +1886,7 @@ func (s *Server) finishConsumableQuiz(ctx context.Context, runtime *runtimeSessi
 	}
 	if err := s.saveRuntimeState(ctx, *runtime); err != nil {
 		runtime.consumables = previousConsumables
+		runtime.consumableCooldownUntil = previousCooldownUntil
 		return previousConsumables, errors.New("failed to save consumable quiz result")
 	}
 	return runtime.consumables, nil
@@ -2210,21 +2098,21 @@ func (s *Server) awardEssence(ctx context.Context, runtime *runtimeSession, amou
 
 func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) error {
 	return s.sessions.SaveRuntimeState(ctx, runtime.session.SessionID, gamesession.RuntimeState{
-		Health:             runtime.session.Health,
-		Essence:            runtime.economy.Essence,
-		Wave:               runtime.session.Wave,
-		Tick:               runtime.session.Tick,
-		LoopStarted:        runtime.loopStarted,
-		LoopPaused:         false,
-		WaveStartedAtTick:  runtime.waveStartedAtTick,
-		WaveSpawned:        runtime.waveSpawned,
-		NextWaveTick:       runtime.nextWaveTick,
-		LastQuizStartedAt:  runtime.lastQuizStartedAt,
-		Birds:              storedBirds(runtime.birds),
-		Enemies:            storedEnemies(runtime.enemies),
-		Projectiles:        storedProjectiles(runtime.projectiles),
-		Consumables:        consumablesToStored(runtime.consumables),
-		PendingConsumables: pendingConsumablesToStored(runtime.pendingConsumables),
+		Health:                  runtime.session.Health,
+		Essence:                 runtime.economy.Essence,
+		Wave:                    runtime.session.Wave,
+		Tick:                    runtime.session.Tick,
+		LoopStarted:             runtime.loopStarted,
+		LoopPaused:              false,
+		WaveStartedAtTick:       runtime.waveStartedAtTick,
+		WaveSpawned:             runtime.waveSpawned,
+		NextWaveTick:            runtime.nextWaveTick,
+		LastQuizStartedAt:       runtime.lastQuizStartedAt,
+		ConsumableCooldownUntil: runtime.consumableCooldownUntil,
+		Birds:                   storedBirds(runtime.birds),
+		Enemies:                 storedEnemies(runtime.enemies),
+		Projectiles:             storedProjectiles(runtime.projectiles),
+		Consumables:             consumablesToStored(runtime.consumables),
 	})
 }
 
@@ -2233,6 +2121,10 @@ func gameStateFromRuntime(runtime runtimeSession, loop *runningGameLoop, serverT
 	cooldown := 0
 	if loop != nil && loop.currentQuizID == "" {
 		cooldown = quizCooldownRemainingSeconds(runtime.lastQuizStartedAt, serverTime)
+	}
+	consumables := runtime.consumables
+	if loop == nil || loop.currentConsumableQuizID == "" {
+		consumables.Airstrike.CooldownRemainingSeconds = consumableCooldownRemainingSeconds(runtime.consumableCooldownUntil, serverTime)
 	}
 
 	return GameState{
@@ -2251,14 +2143,20 @@ func gameStateFromRuntime(runtime runtimeSession, loop *runningGameLoop, serverT
 		Birds:                        placedBirdStates(runtime.birds),
 		Enemies:                      enemyStates(runtime.enemies),
 		Projectiles:                  projectileStates(runtime.projectiles),
-		Consumables:                  runtime.consumables,
-		PendingConsumables:           runtime.pendingConsumables,
+		Consumables:                  consumables,
 		Events:                       events,
 	}
 }
 
 func quizCooldownRemainingSeconds(lastQuizStartedAt time.Time, now time.Time) int {
 	return quizflow.CooldownRemainingSeconds(quizRequestCooldown, lastQuizStartedAt, now)
+}
+
+func consumableCooldownRemainingSeconds(cooldownUntil time.Time, now time.Time) int {
+	if cooldownUntil.IsZero() || !now.Before(cooldownUntil) {
+		return 0
+	}
+	return int(math.Ceil(cooldownUntil.Sub(now).Seconds()))
 }
 
 type spawnGroup struct {
@@ -2719,21 +2617,6 @@ func decodeUseConsumableAction(data any) (useConsumableRequest, error) {
 	return request, nil
 }
 
-func decodeCommitConsumableAction(data any) (commitConsumableRequest, error) {
-	var request commitConsumableRequest
-	if err := decodeMessageData(data, &request); err != nil {
-		return commitConsumableRequest{}, errors.New("commit consumable action data must include deployment_id")
-	}
-	request.DeploymentID = strings.TrimSpace(request.DeploymentID)
-	if request.DeploymentID == "" {
-		return commitConsumableRequest{}, errors.New("deployment_id is required")
-	}
-	if !uuidPattern.MatchString(request.DeploymentID) {
-		return commitConsumableRequest{}, errors.New("deployment_id must be a valid UUID")
-	}
-	return request, nil
-}
-
 func decodeGameExit(data any) (gameExitRequest, error) {
 	var request gameExitRequest
 	if data == nil {
@@ -2869,33 +2752,6 @@ func validateAirstrikeTargets(levelMap mapgen.GeneratedMap, targets []gameobject
 func isEnemyPath(levelMap mapgen.GeneratedMap, x int, y int) bool {
 	for _, tile := range levelMap.EnemyPath {
 		if tile.X == x && tile.Y == y {
-			return true
-		}
-	}
-	return false
-}
-
-func hasPendingConsumable(pending []ConsumableDeploymentState, itemType string) bool {
-	for _, deployment := range pending {
-		if deployment.ItemType == itemType && deployment.Status == consumableStatusPending {
-			return true
-		}
-	}
-	return false
-}
-
-func pendingConsumableIndex(pending []ConsumableDeploymentState, deploymentID string) int {
-	for i := range pending {
-		if pending[i].DeploymentID == deploymentID && pending[i].Status == consumableStatusPending {
-			return i
-		}
-	}
-	return -1
-}
-
-func isInAnyAirstrikeArea(position gameobject.Position, targets []gameobject.Position) bool {
-	for _, target := range targets {
-		if position.DistanceTo(target) <= airstrikeRadius {
 			return true
 		}
 	}
@@ -3102,43 +2958,10 @@ func consumablesToStored(state ConsumableState) gamesession.ConsumableInventory 
 	}
 }
 
-func pendingConsumablesFromStored(stored []gamesession.PendingConsumableDeployment) []ConsumableDeploymentState {
-	pending := make([]ConsumableDeploymentState, 0, len(stored))
-	for _, deployment := range stored {
-		if deployment.DeploymentID == "" || deployment.ItemType == "" {
-			continue
-		}
-		pending = append(pending, ConsumableDeploymentState{
-			DeploymentID:     deployment.DeploymentID,
-			ItemType:         deployment.ItemType,
-			Targets:          copyPositions(deployment.Targets),
-			PreparedAtTick:   deployment.PreparedAtTick,
-			AutoCommitAtTick: deployment.AutoCommitAtTick,
-			Status:           deployment.Status,
-		})
-	}
-	return pending
-}
-
-func pendingConsumablesToStored(pending []ConsumableDeploymentState) []gamesession.PendingConsumableDeployment {
-	stored := make([]gamesession.PendingConsumableDeployment, 0, len(pending))
-	for _, deployment := range pending {
-		stored = append(stored, gamesession.PendingConsumableDeployment{
-			DeploymentID:     deployment.DeploymentID,
-			ItemType:         deployment.ItemType,
-			Targets:          copyPositions(deployment.Targets),
-			PreparedAtTick:   deployment.PreparedAtTick,
-			AutoCommitAtTick: deployment.AutoCommitAtTick,
-			Status:           deployment.Status,
-		})
-	}
-	return stored
-}
-
 func normalizeConsumableStatus(status string, charges int, pendingQuizID string) string {
 	status = strings.TrimSpace(status)
 	switch status {
-	case consumableStatusReady, consumableStatusPending, consumableStatusQuizPending:
+	case consumableStatusReady, consumableStatusQuizPending:
 		return status
 	default:
 		if strings.TrimSpace(pendingQuizID) != "" {
@@ -3200,13 +3023,6 @@ func writeActionRejected(conn *websocket.Conn, writeMu *sync.Mutex, action strin
 			"action": action,
 			"error":  message,
 		},
-	})
-}
-
-func writeConsumableResolved(conn *websocket.Conn, writeMu *sync.Mutex, resolution consumableResolution) error {
-	return writeWebsocketJSON(conn, writeMu, Message{
-		Type: "game.consumable.resolved",
-		Data: resolution,
 	})
 }
 

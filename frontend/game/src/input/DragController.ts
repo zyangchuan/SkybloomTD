@@ -65,6 +65,9 @@ export class DragController {
   }
 
   private onDragStart(pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) {
+    if ((this.scene as any).airstrike?.isAiming()) {
+      return;
+    }
     let birdType: string | null = null;
     const isTower = gameObject instanceof Tower || ((gameObject as any).birdType !== undefined && (gameObject as any).id !== undefined);
 

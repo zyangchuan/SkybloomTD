@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"skybloom/game-service/internal/gameobject"
 	"skybloom/game-service/internal/gamesession"
@@ -42,104 +43,118 @@ func (s *fakeSessionStore) Delete(context.Context, string) error {
 	return nil
 }
 
-func TestPrepareAirstrikeReservesDeployment(t *testing.T) {
-	store := &fakeSessionStore{}
-	server := &Server{sessions: store}
+func TestUseAirstrikeImmediatelyAppliesDamageAndConsumesCharge(t *testing.T) {
 	runtime := consumableTestRuntime()
-
-	deployment, err := server.prepareConsumableDeployment(context.Background(), &runtime, useConsumableRequest{
-		ItemType: airstrikeItemType,
-		Targets: []gameobject.Position{
-			{X: 2, Y: 2},
-			{X: 4, Y: 4},
-			{X: 6, Y: 6},
-		},
-	})
-	if err != nil {
-		t.Fatalf("prepareConsumableDeployment failed: %v", err)
-	}
-
-	if deployment.DeploymentID == "" || deployment.AutoCommitAtTick != runtime.session.Tick+airstrikeAutoCommitTicks {
-		t.Fatalf("unexpected deployment: %#v", deployment)
-	}
-	if runtime.consumables.Airstrike.Status != consumableStatusPending || runtime.consumables.Airstrike.Charges != 0 {
-		t.Fatalf("expected airstrike to be reserved, got %#v", runtime.consumables.Airstrike)
-	}
-	if len(runtime.pendingConsumables) != 1 {
-		t.Fatalf("expected one pending deployment, got %d", len(runtime.pendingConsumables))
-	}
-	if store.saved.Consumables.Airstrike.Status != consumableStatusPending {
-		t.Fatalf("expected reserved consumable to be saved, got %#v", store.saved.Consumables)
-	}
-}
-
-func TestCommitAirstrikeAppliesDamageAndClearsPendingDeployment(t *testing.T) {
-	store := &fakeSessionStore{}
-	server := &Server{sessions: store}
-	runtime := consumableTestRuntime()
-	runtime.consumables.Airstrike = ConsumableItemState{Status: consumableStatusPending}
-	runtime.pendingConsumables = []ConsumableDeploymentState{{
-		DeploymentID:     "11111111-1111-1111-1111-111111111111",
-		ItemType:         airstrikeItemType,
-		Targets:          []gameobject.Position{{X: 2, Y: 2}, {X: 6, Y: 6}, {X: 10, Y: 10}},
-		PreparedAtTick:   10,
-		AutoCommitAtTick: 50,
-		Status:           consumableStatusPending,
-	}}
 	runtime.enemies = []gameobject.Enemy{
 		{ID: "enemy-1", Type: gameobject.EnemyTypeSmog, Health: 20, Position: gameobject.Position{X: 2.2, Y: 2.2}},
 		{ID: "enemy-2", Type: gameobject.EnemyTypeSmog, Health: 20, Position: gameobject.Position{X: 14, Y: 10}},
 	}
 
-	resolution, err := server.resolveConsumableDeployment(context.Background(), &runtime, "11111111-1111-1111-1111-111111111111")
+	resolution, err := resolveConsumableAction(&runtime, useConsumableRequest{
+		ItemType: airstrikeItemType,
+		Targets:  []gameobject.Position{{X: 2, Y: 2}, {X: 6, Y: 6}, {X: 10, Y: 10}},
+	})
 	if err != nil {
-		t.Fatalf("resolveConsumableDeployment failed: %v", err)
+		t.Fatalf("resolveConsumableAction failed: %v", err)
 	}
 
-	if len(runtime.pendingConsumables) != 0 {
-		t.Fatalf("expected pending deployment to clear, got %#v", runtime.pendingConsumables)
+	if resolution.DeploymentID == "" || len(resolution.Events) < 2 || resolution.Events[0].Type != "airstrike.impact" {
+		t.Fatalf("expected immediate impact resolution, got %#v", resolution)
+	}
+	if runtime.consumables.Airstrike.Status != consumableStatusEmpty || runtime.consumables.Airstrike.Charges != 0 {
+		t.Fatalf("expected airstrike charge to be consumed, got %#v", runtime.consumables.Airstrike)
 	}
 	if len(runtime.enemies) != 1 || runtime.enemies[0].ID != "enemy-2" {
-		t.Fatalf("expected only outside enemy to remain, got %#v", runtime.enemies)
-	}
-	if len(resolution.Events) < 2 || resolution.Events[0].Type != "airstrike.impact" {
-		t.Fatalf("expected impact and damage events, got %#v", resolution.Events)
-	}
-	if runtime.consumables.Airstrike.Status != consumableStatusEmpty {
-		t.Fatalf("expected airstrike to become empty, got %#v", runtime.consumables.Airstrike)
-	}
-	if len(store.saved.PendingConsumables) != 0 {
-		t.Fatalf("expected cleared pending deployment to be saved, got %#v", store.saved.PendingConsumables)
+		t.Fatalf("expected damage to be applied immediately, got %#v", runtime.enemies)
 	}
 }
 
-func TestAirstrikeAutoResolvesWhenCommitDoesNotArrive(t *testing.T) {
-	server := &Server{}
+func TestUseAirstrikeRejectsUnavailableChargeWithoutDamage(t *testing.T) {
 	runtime := consumableTestRuntime()
-	runtime.session.Tick = 50
-	runtime.consumables.Airstrike = ConsumableItemState{Status: consumableStatusPending}
-	runtime.pendingConsumables = []ConsumableDeploymentState{{
-		DeploymentID:     "22222222-2222-2222-2222-222222222222",
-		ItemType:         airstrikeItemType,
-		Targets:          []gameobject.Position{{X: 2, Y: 2}, {X: 6, Y: 6}, {X: 10, Y: 10}},
-		PreparedAtTick:   10,
-		AutoCommitAtTick: 50,
-		Status:           consumableStatusPending,
+	runtime.consumables.Airstrike = ConsumableItemState{Status: consumableStatusEmpty}
+	runtime.enemies = []gameobject.Enemy{{
+		ID: "enemy-1", Type: gameobject.EnemyTypeSmog, Health: 100,
+		Position: gameobject.Position{X: 2, Y: 2},
 	}}
-	runtime.enemies = []gameobject.Enemy{
-		{ID: "enemy-1", Type: gameobject.EnemyTypeSmog, Health: 20, Position: gameobject.Position{X: 2.2, Y: 2.2}},
+
+	_, err := resolveConsumableAction(&runtime, useConsumableRequest{
+		ItemType: airstrikeItemType,
+		Targets:  []gameobject.Position{{X: 2, Y: 2}, {X: 6, Y: 6}, {X: 10, Y: 10}},
+	})
+
+	if err == nil {
+		t.Fatal("expected unavailable airstrike to be rejected")
+	}
+	if runtime.enemies[0].Health != 100 {
+		t.Fatalf("expected rejected action not to deal damage, got %#v", runtime.enemies)
+	}
+}
+
+func TestUseAirstrikeRejectsActiveCooldown(t *testing.T) {
+	runtime := consumableTestRuntime()
+	runtime.consumableCooldownUntil = time.Now().UTC().Add(airstrikeUseCooldown)
+	runtime.enemies = []gameobject.Enemy{{
+		ID: "enemy-1", Type: gameobject.EnemyTypeSmog, Health: 100,
+		Position: gameobject.Position{X: 2, Y: 2},
+	}}
+
+	_, err := resolveConsumableAction(&runtime, useConsumableRequest{
+		ItemType: airstrikeItemType,
+		Targets:  []gameobject.Position{{X: 2, Y: 2}, {X: 6, Y: 6}, {X: 10, Y: 10}},
+	})
+
+	if err == nil {
+		t.Fatal("expected active Airstrike cooldown to reject damage")
+	}
+	if runtime.enemies[0].Health != 100 || runtime.consumables.Airstrike.Charges != 1 {
+		t.Fatalf("expected rejected cooldown action not to mutate state")
+	}
+}
+
+func TestAirstrikeOverlappingAreasApplyDamagePerArea(t *testing.T) {
+	runtime := consumableTestRuntime()
+	runtime.enemies = []gameobject.Enemy{{
+		ID: "enemy-overlap", Type: gameobject.EnemyTypeSmog, Health: 300,
+		Position: gameobject.Position{X: 2.5, Y: 2},
+	}}
+	deployment := ConsumableDeploymentState{
+		DeploymentID: "55555555-5555-5555-5555-555555555555",
+		ItemType:     airstrikeItemType,
+		Targets:      []gameobject.Position{{X: 2, Y: 2}, {X: 3, Y: 2}, {X: 10, Y: 10}},
 	}
 
-	events := server.resolveDueConsumableDeployments(context.Background(), &runtime)
+	events := applyAirstrikeDeployment(&runtime, deployment)
 
-	if len(events) < 2 || events[0].Type != "airstrike.impact" {
-		t.Fatalf("expected auto-resolve impact and damage events, got %#v", events)
+	if len(runtime.enemies) != 1 || runtime.enemies[0].Health != 140 {
+		t.Fatalf("expected two overlapping hits for 160 total damage, got %#v", runtime.enemies)
 	}
-	if len(runtime.pendingConsumables) != 0 {
-		t.Fatalf("expected pending deployment to clear, got %#v", runtime.pendingConsumables)
+	damageEvents := 0
+	for _, event := range events {
+		if event.Type == "enemy.damage" && event.EnemyID == "enemy-overlap" {
+			damageEvents++
+		}
 	}
-	if len(runtime.enemies) != 0 {
-		t.Fatalf("expected enemy to be removed by airstrike, got %#v", runtime.enemies)
+	if damageEvents != 2 {
+		t.Fatalf("expected two damage events, got %#v", events)
+	}
+}
+
+func TestAirstrikeDamageRadiusIsTwoTiles(t *testing.T) {
+	runtime := consumableTestRuntime()
+	runtime.enemies = []gameobject.Enemy{{
+		ID: "enemy-edge", Type: gameobject.EnemyTypeSmog, Health: 100,
+		Position: gameobject.Position{X: 4, Y: 2},
+	}}
+	deployment := ConsumableDeploymentState{
+		DeploymentID: "66666666-6666-6666-6666-666666666666",
+		ItemType:     airstrikeItemType,
+		Targets:      []gameobject.Position{{X: 2, Y: 2}, {X: 10, Y: 2}, {X: 10, Y: 10}},
+	}
+
+	applyAirstrikeDeployment(&runtime, deployment)
+
+	if len(runtime.enemies) != 1 || runtime.enemies[0].Health != 20 {
+		t.Fatalf("expected enemy at radius boundary to take one hit, got %#v", runtime.enemies)
 	}
 }
 
@@ -195,11 +210,56 @@ func TestFinishAirstrikeQuizCorrectGrantsReadyCharge(t *testing.T) {
 	}
 }
 
+func TestFinishAirstrikeQuizWrongStartsCooldown(t *testing.T) {
+	store := &fakeSessionStore{}
+	server := &Server{sessions: store}
+	runtime := consumableTestRuntime()
+	runtime.consumables.Airstrike = ConsumableItemState{
+		Status:        consumableStatusQuizPending,
+		PendingQuizID: "77777777-7777-7777-7777-777777777777",
+	}
+
+	_, err := server.finishConsumableQuiz(context.Background(), &runtime, finishConsumableQuizRequest{
+		ItemType: airstrikeItemType,
+		QuizID:   "77777777-7777-7777-7777-777777777777",
+		Correct:  false,
+	})
+	if err != nil {
+		t.Fatalf("finishConsumableQuiz failed: %v", err)
+	}
+	if got := consumableCooldownRemainingSeconds(runtime.consumableCooldownUntil, time.Now().UTC()); got < 14 || got > 15 {
+		t.Fatal("expected wrong answer to start Airstrike cooldown")
+	}
+	if !store.saved.ConsumableCooldownUntil.Equal(runtime.consumableCooldownUntil) {
+		t.Fatal("expected wrong-answer cooldown to be persisted")
+	}
+}
+
+func TestAirstrikeCooldownRemainingSeconds(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	if got := consumableCooldownRemainingSeconds(now.Add(airstrikeUseCooldown), now.Add(5*time.Second)); got != 25 {
+		t.Fatalf("expected 25 seconds remaining, got %d", got)
+	}
+	if got := consumableCooldownRemainingSeconds(now.Add(airstrikeUseCooldown), now.Add(airstrikeUseCooldown)); got != 0 {
+		t.Fatalf("expected cooldown to expire, got %d", got)
+	}
+}
+
 func TestValidateAirstrikeAcquireRejectsReadyCharge(t *testing.T) {
 	runtime := consumableTestRuntime()
 
 	if err := validateConsumableAcquire(&runtime, airstrikeItemType); err == nil {
 		t.Fatalf("expected ready airstrike acquisition to be rejected")
+	}
+}
+
+func TestValidateAirstrikeAcquireRejectsCooldown(t *testing.T) {
+	runtime := consumableTestRuntime()
+	runtime.consumables.Airstrike = ConsumableItemState{Status: consumableStatusEmpty}
+	runtime.consumableCooldownUntil = time.Now().UTC().Add(airstrikeUseCooldown)
+
+	if err := validateConsumableAcquire(&runtime, airstrikeItemType); err == nil {
+		t.Fatal("expected airstrike acquisition during cooldown to be rejected")
 	}
 }
 
