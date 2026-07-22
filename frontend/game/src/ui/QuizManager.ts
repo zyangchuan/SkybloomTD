@@ -6,71 +6,173 @@ function isMobileDevice(): boolean {
     || (navigator.maxTouchPoints > 2 && /Macintosh/.test(ua));
 }
 
+export class QuizHUDButton {
+  public button: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image;
+  public labelBg: Phaser.GameObjects.NineSlice;
+  public label: Phaser.GameObjects.Text;
+  public cooldownText: Phaser.GameObjects.Text | null = null;
+  public cooldownRemaining = 0;
+  public isGameStarted = false;
+  private baseScale = 1.0;
+
+  constructor(
+    private scene: Phaser.Scene,
+    private config: {
+      x: number;
+      y: number;
+      textureKey: string;
+      hoverTextureKey?: string;
+      labelText: string;
+      size: number;
+      isSprite?: boolean;
+      labelYOffset?: number;
+      flipX?: boolean;
+      onClick: () => void;
+    }
+  ) {
+    const { x, y, textureKey, hoverTextureKey, labelText, size, isSprite, labelYOffset, flipX, onClick } = config;
+
+    // Create button
+    if (isSprite) {
+      this.button = this.scene.add.sprite(x, y, textureKey).setDepth(30);
+    } else {
+      this.button = this.scene.add.image(x, y, textureKey).setDepth(31);
+    }
+    this.button.setInteractive({ useHandCursor: true });
+    if (flipX) {
+      this.button.setFlipX(true);
+    }
+
+    this.baseScale = size / this.button.width;
+    this.button.setScale(this.baseScale);
+
+    // Create label background
+    const labelY = y + (labelYOffset !== undefined ? labelYOffset : (size * 0.61));
+    this.labelBg = this.scene.add.nineslice(x, labelY, 'box_white_outline_square', undefined, 210, 48, 16, 16, 16, 16)
+      .setDepth(31).setAlpha(0.5);
+
+    // Create label
+    this.label = this.scene.add.text(x, labelY, labelText, {
+      fontFamily: '"Concert One", system-ui, sans-serif',
+      fontSize: '22px',
+      color: '#64748b',
+    }).setOrigin(0.5).setDepth(32);
+
+    // Hover listeners
+    const onOver = () => {
+      if (!this.isGameStarted || this.cooldownRemaining > 0) return;
+      if (hoverTextureKey) {
+        this.button.setTexture(hoverTextureKey);
+      }
+      this.button.setScale(this.baseScale * 1.08);
+      this.labelBg.setScale(1.08);
+      this.label.setScale(1.08).setColor('#fef3c7');
+    };
+
+    const onOut = () => {
+      const active = this.isGameStarted && this.cooldownRemaining === 0;
+      if (hoverTextureKey) {
+        this.button.setTexture(textureKey);
+      }
+      this.button.setScale(this.baseScale).setAlpha(active ? 1.0 : 0.5);
+      this.labelBg.setScale(1.0).setAlpha(active ? 1.0 : 0.5);
+      this.label.setScale(1.0).setColor(active ? '#ffffff' : '#64748b');
+    };
+
+    this.button.on('pointerover', onOver);
+    this.button.on('pointerout', onOut);
+    this.button.on('pointerdown', onClick);
+
+    this.labelBg.setInteractive({ useHandCursor: true });
+    this.labelBg.on('pointerover', onOver);
+    this.labelBg.on('pointerout', onOut);
+    this.labelBg.on('pointerdown', onClick);
+  }
+
+  setGameStarted(started: boolean) {
+    this.isGameStarted = started;
+    this.updateCooldown(this.cooldownRemaining);
+  }
+
+  private resetVisuals() {
+    if (this.config.hoverTextureKey) {
+      this.button.setTexture(this.config.textureKey);
+    }
+    this.button.setScale(this.baseScale);
+    this.labelBg.setScale(1.0);
+    this.label.setScale(1.0);
+  }
+
+  updateCooldown(seconds: number) {
+    this.cooldownRemaining = Math.max(0, seconds);
+    const active = this.isGameStarted && this.cooldownRemaining === 0;
+
+    this.button.setAlpha(active ? 1.0 : 0.5);
+    this.labelBg.setAlpha(active ? 1.0 : 0.5);
+    this.label.setColor(active ? '#ffffff' : '#64748b');
+
+    if (active) {
+      this.button.setInteractive({ useHandCursor: true });
+      this.labelBg.setInteractive({ useHandCursor: true });
+      this.cooldownText?.setVisible(false);
+    } else {
+      this.resetVisuals();
+      this.button.disableInteractive();
+      this.labelBg.disableInteractive();
+
+      if (this.isGameStarted && this.cooldownRemaining > 0) {
+        if (!this.cooldownText) {
+          this.cooldownText = this.scene.add.text(this.button.x, this.button.y, '', {
+            fontFamily: '"Concert One", system-ui, sans-serif',
+            fontSize: '48px',
+            color: '#ffffff',
+            fontStyle: 'bold',
+          }).setOrigin(0.5).setDepth(34);
+        }
+        this.cooldownText.setText(String(this.cooldownRemaining)).setVisible(true);
+      } else {
+        this.cooldownText?.setVisible(false);
+      }
+    }
+  }
+
+  destroy() {
+    this.button.destroy();
+    this.labelBg.destroy();
+    this.label.destroy();
+    this.cooldownText?.destroy();
+  }
+}
+
 export class QuizManager {
   private currentQuizId = '';
   private quizAnswered = false;
   private promptContainer: Phaser.GameObjects.Container | null = null;
   private messageHandler: ((e: MessageEvent) => void) | null = null;
-
-  private quizBtn!: Phaser.GameObjects.Sprite;
-  private labelBg!: Phaser.GameObjects.NineSlice;
-  private quizLabel!: Phaser.GameObjects.Text;
-  private cooldownText: Phaser.GameObjects.Text | null = null;
-  private cooldownRemaining = 0;
-  private isGameStarted = false;
+  private hudBtn!: QuizHUDButton;
 
   constructor(
     private scene: Phaser.Scene,
     private ws: WebSocket | null,
   ) {}
 
-  /** Creates the floating "answer a quiz to start" prompt and the QUIZ button. */
   createHUD() {
     const width = this.scene.scale.width;
     const height = this.scene.scale.height;
-    const rightX = width - 130;
+    const rightX = width - 100;
     const centerY = height / 2;
-    const birdY = centerY - 30;
-    const labelY = centerY + 115;
+    const birdY = centerY - 100;
 
-    this.quizBtn = this.scene.add.sprite(rightX, birdY, 'bird_wisdom_1')
-      .setDepth(30).setScale(0.5).setAlpha(0.5);
-
-    this.labelBg = this.scene.add.nineslice(rightX, labelY, 'box_white_outline_square', undefined, 270, 66, 32, 32, 32, 32)
-      .setDepth(31).setAlpha(0.5);
-
-    this.quizLabel = this.scene.add.text(rightX, labelY, 'Bird of Wisdom', {
-      fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '30px', color: '#64748b',
-    }).setOrigin(0.5).setDepth(32);
-
-    const onOver = () => {
-      if (this.cooldownRemaining > 0) return;
-      this.quizBtn.setTexture('bird_wisdom_2');
-      this.labelBg.setScale(1.08);
-      this.quizLabel.setScale(1.08).setColor('#fef3c7');
-    };
-    const onOut = () => {
-      if (this.cooldownRemaining > 0) return;
-      this.quizBtn.setTexture('bird_wisdom_1');
-      this.labelBg.setScale(1.0);
-      this.quizLabel.setScale(1.0).setColor('#cbd5e1');
-    };
-    const onDown = () => {
-      if (this.cooldownRemaining > 0) return;
-      this.resetButtonVisuals();
-      this.quizLabel.setColor('#cbd5e1');
-      this.hidePrompt();
-      this.request();
-    };
-
-    this.quizBtn.on('pointerover', onOver);
-    this.quizBtn.on('pointerout', onOut);
-    this.quizBtn.on('pointerdown', onDown);
-
-    this.labelBg.on('pointerover', onOver);
-    this.labelBg.on('pointerout', onOut);
-    this.labelBg.on('pointerdown', onDown);
+    this.hudBtn = new QuizHUDButton(this.scene, {
+      x: rightX,
+      y: birdY,
+      textureKey: 'bird_wisdom_1',
+      hoverTextureKey: 'bird_wisdom_2',
+      labelText: 'Bird of Wisdom',
+      size: 200,
+      isSprite: true,
+      onClick: () => this.activate(),
+    });
   }
 
   hidePrompt() {
@@ -102,8 +204,9 @@ export class QuizManager {
       }
     }
     this.removeMessageHandler();
-    this.resetButtonVisuals();
-    this.quizLabel.setColor(this.isGameStarted ? '#cbd5e1' : '#64748b');
+    if (this.hudBtn) {
+      this.hudBtn.label.setColor(this.hudBtn.cooldownRemaining === 0 ? '#ffffff' : '#64748b');
+    }
     this.quizAnswered = false;
   }
 
@@ -181,19 +284,16 @@ export class QuizManager {
 
   destroy() {
     this.clear();
-    this.cooldownText?.destroy();
-    this.cooldownText = null;
+    this.hudBtn?.destroy();
   }
 
   setCooldownActive() {
-    this.cooldownRemaining = 15;
-    this.updateCooldown(15);
+    this.updateCooldown(30);
   }
 
   setGameStarted(started: boolean) {
-    this.isGameStarted = started;
-    this.updateCooldown(this.cooldownRemaining);
-    if (started && this.cooldownRemaining === 0) {
+    this.hudBtn?.setGameStarted(started);
+    if (started && this.hudBtn?.cooldownRemaining === 0) {
       this.showPrompt();
     }
   }
@@ -207,7 +307,7 @@ export class QuizManager {
     const container = this.scene.add.container(rightX - 70, centerY - 250).setDepth(35).setScale(1.25).setAlpha(0);
     container.add([
       this.scene.add.image(0, 0, 'textbox_blank_side').setFlipX(true).setOrigin(0.5),
-      this.scene.add.text(0, -10, 'Click on me\nto answer a quiz\nand earn more essence!', {
+      this.scene.add.text(0, -10, 'Click on me to\nanswer a quiz and\nearn more sky essence!', {
         fontFamily: '"Concert One", system-ui, sans-serif',
         fontSize: '23px', color: '#000000ff', align: 'center',
       }).setOrigin(0.5),
@@ -226,65 +326,17 @@ export class QuizManager {
     });
   }
 
-  private resetButtonVisuals() {
-    if (!this.quizBtn || !this.labelBg || !this.quizLabel) return;
-    this.quizBtn.setTexture('bird_wisdom_1');
-    this.labelBg.setScale(1.0);
-    this.quizLabel.setScale(1.0);
+  private activate() {
+    if (!this.hudBtn || !this.hudBtn.button.active) return;
+    if (this.hudBtn.cooldownRemaining > 0) return;
+    this.hidePrompt();
+    this.request();
   }
 
   updateCooldown(seconds: number) {
-    this.cooldownRemaining = seconds;
-    if (!this.quizBtn || !this.labelBg || !this.quizLabel) return;
-
-    const rightX = this.scene.scale.width - 130;
-    const centerY = this.scene.scale.height / 2;
-    const birdY = centerY - 30;
-
-    if (!this.isGameStarted) {
-      this.resetButtonVisuals();
-      this.quizBtn.disableInteractive();
-      this.labelBg.disableInteractive();
-      this.quizBtn.setAlpha(0.5);
-      this.labelBg.setAlpha(0.5);
-      this.quizLabel.setColor('#64748b');
-      if (this.cooldownText) {
-        this.cooldownText.setVisible(false);
-      }
-      return;
-    }
-
-    if (seconds > 0) {
-      this.resetButtonVisuals();
-      this.quizBtn.disableInteractive();
-      this.labelBg.disableInteractive();
-      this.quizBtn.setAlpha(0.5);
-      this.labelBg.setAlpha(0.5);
-      this.quizLabel.setColor('#64748b');
-
-      if (!this.cooldownText) {
-        this.cooldownText = this.scene.add.text(rightX, birdY, '', {
-          fontFamily: '"Concert One", system-ui, sans-serif',
-          fontSize: '44px', color: '#ffffff',
-          fontStyle: 'bold'
-        }).setOrigin(0.5).setDepth(34);
-      }
-      this.cooldownText.setText(String(seconds)).setVisible(true);
-    } else {
-      this.quizBtn.setInteractive({ useHandCursor: true });
-      this.labelBg.setInteractive({ useHandCursor: true });
-      this.quizBtn.setAlpha(1.0);
-      this.labelBg.setAlpha(1.0);
-      this.quizLabel.setColor('#cbd5e1');
-
-      if (this.cooldownText) {
-        this.cooldownText.setVisible(false);
-      }
-
-      // Show prompt if the game has started and is running
-      if (this.isGameStarted) {
-        this.showPrompt();
-      }
+    this.hudBtn?.updateCooldown(seconds);
+    if (this.hudBtn && this.hudBtn.cooldownRemaining === 0 && this.hudBtn.isGameStarted) {
+      this.showPrompt();
     }
   }
 

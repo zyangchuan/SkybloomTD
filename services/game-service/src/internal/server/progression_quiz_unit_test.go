@@ -60,8 +60,8 @@ func TestQuizRequestCooldown(t *testing.T) {
 	if got := quizCooldownRemainingSeconds(time.Time{}, startedAt); got != 0 {
 		t.Fatalf("expected no cooldown before first quiz, got %d", got)
 	}
-	if got := quizCooldownRemainingSeconds(startedAt, startedAt.Add(5*time.Second)); got != 15 {
-		t.Fatalf("expected 15 seconds remaining, got %d", got)
+	if got := quizCooldownRemainingSeconds(startedAt, startedAt.Add(5*time.Second)); got != 25 {
+		t.Fatalf("expected 25 seconds remaining, got %d", got)
 	}
 	if got := quizCooldownRemainingSeconds(startedAt, startedAt.Add(quizRequestCooldown)); got != 0 {
 		t.Fatalf("expected cooldown to expire, got %d", got)

@@ -73,21 +73,33 @@ type StoredProjectile struct {
 	HitRadius       float64                   `json:"hit_radius"`
 }
 
+type ConsumableInventory struct {
+	Airstrike ConsumableItemState `json:"airstrike"`
+}
+
+type ConsumableItemState struct {
+	Status        string `json:"status"`
+	Charges       int    `json:"charges"`
+	PendingQuizID string `json:"pending_quiz_id,omitempty"`
+}
+
 type RuntimeState struct {
-	GenerationID      string
-	Health            int
-	Essence           int
-	Wave              int
-	Tick              int64
-	LoopStarted       bool
-	LoopPaused        bool
-	WaveStartedAtTick int64
-	WaveSpawned       int
-	NextWaveTick      int64
-	LastQuizStartedAt time.Time
-	Birds             []StoredBird
-	Enemies           []StoredEnemy
-	Projectiles       []StoredProjectile
+	GenerationID            string
+	Health                  int
+	Essence                 int
+	Wave                    int
+	Tick                    int64
+	LoopStarted             bool
+	LoopPaused              bool
+	WaveStartedAtTick       int64
+	WaveSpawned             int
+	NextWaveTick            int64
+	LastQuizStartedAt       time.Time
+	ConsumableCooldownUntil time.Time
+	Birds                   []StoredBird
+	Enemies                 []StoredEnemy
+	Projectiles             []StoredProjectile
+	Consumables             ConsumableInventory
 }
 
 type QuizMistake struct {
@@ -170,6 +182,7 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"birds":                "[]",
 		"enemies":              "[]",
 		"projectiles":          "[]",
+		"consumables":          "{}",
 		"started_at":           state.StartedAt.Format(time.RFC3339Nano),
 		"updated_at":           state.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -209,26 +222,32 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 	if err := unmarshalStoredSlice(values["projectiles"], &projectiles); err != nil {
 		return RuntimeState{}, err
 	}
+	var consumables ConsumableInventory
+	if err := unmarshalStoredObject(values["consumables"], &consumables); err != nil {
+		return RuntimeState{}, err
+	}
 
 	state, err := parseState(values)
 	if err != nil {
 		return RuntimeState{}, err
 	}
 	return RuntimeState{
-		GenerationID:      state.GenerationID,
-		Health:            state.Health,
-		Essence:           state.Essence,
-		Wave:              state.Wave,
-		Tick:              state.Tick,
-		LoopStarted:       boolValue(values["loop_started"], false),
-		LoopPaused:        boolValue(values["loop_paused"], false),
-		WaveStartedAtTick: int64Value(values["wave_started_at_tick"], 0),
-		WaveSpawned:       intValue(values["wave_spawned"], 0),
-		NextWaveTick:      int64Value(values["next_wave_tick"], 0),
-		LastQuizStartedAt: timeValue(values["last_quiz_started_at"]),
-		Birds:             birds,
-		Enemies:           enemies,
-		Projectiles:       projectiles,
+		GenerationID:            state.GenerationID,
+		Health:                  state.Health,
+		Essence:                 state.Essence,
+		Wave:                    state.Wave,
+		Tick:                    state.Tick,
+		LoopStarted:             boolValue(values["loop_started"], false),
+		LoopPaused:              boolValue(values["loop_paused"], false),
+		WaveStartedAtTick:       int64Value(values["wave_started_at_tick"], 0),
+		WaveSpawned:             intValue(values["wave_spawned"], 0),
+		NextWaveTick:            int64Value(values["next_wave_tick"], 0),
+		LastQuizStartedAt:       timeValue(values["last_quiz_started_at"]),
+		ConsumableCooldownUntil: timeValue(values["consumable_cooldown_until"]),
+		Birds:                   birds,
+		Enemies:                 enemies,
+		Projectiles:             projectiles,
+		Consumables:             consumables,
 	}, nil
 }
 
@@ -260,6 +279,10 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 	if err != nil {
 		return err
 	}
+	consumablesBody, err := json.Marshal(runtime.Consumables)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	redisKey := key(sessionID)
 	args := []string{
@@ -287,12 +310,16 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 		strconv.FormatInt(runtime.NextWaveTick, 10),
 		"last_quiz_started_at",
 		formatOptionalTime(runtime.LastQuizStartedAt),
+		"consumable_cooldown_until",
+		formatOptionalTime(runtime.ConsumableCooldownUntil),
 		"birds",
 		string(birdsBody),
 		"enemies",
 		string(enemiesBody),
 		"projectiles",
 		string(projectilesBody),
+		"consumables",
+		string(consumablesBody),
 		"updated_at",
 		now.Format(time.RFC3339Nano),
 	}
@@ -557,6 +584,13 @@ func hashValues(raw any) map[string]string {
 func unmarshalStoredSlice(body string, target any) error {
 	if strings.TrimSpace(body) == "" {
 		body = "[]"
+	}
+	return json.Unmarshal([]byte(body), target)
+}
+
+func unmarshalStoredObject(body string, target any) error {
+	if strings.TrimSpace(body) == "" {
+		body = "{}"
 	}
 	return json.Unmarshal([]byte(body), target)
 }

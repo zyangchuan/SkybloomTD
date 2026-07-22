@@ -109,6 +109,17 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_kingfisher', '/game/assets/birds/kingfisher_projectile.png');
     this.load.image('projectile_phoenix', '/game/assets/birds/pheonix_projectile.png');
     this.load.image('projectile_sun_god', '/game/assets/birds/sun_god_projectile.png');
+
+    // Preload airstrike consumable assets
+    this.load.svg('btn_bg_circle', '/game/assets/gui/buttons_icons/IconButton_Large_Blue_Circle.svg', { width: 80, height: 80 });
+    this.load.image('consumable_airstrike_icon', '/game/assets/consumables/airstrike/icon.png');
+    this.load.image('consumable_airstrike_aim_marker', '/game/assets/consumables/airstrike/aim_marker.png');
+    this.load.image('consumable_airstrike_plane', '/game/assets/consumables/airstrike/plane.png');
+    this.load.image('consumable_airstrike_bomb', '/game/assets/consumables/airstrike/bomb.png');
+    this.load.spritesheet('consumable_airstrike_explosion', '/game/assets/consumables/airstrike/explosion.png', {
+      frameWidth: 317,
+      frameHeight: 330
+    });
   }
 
   create() {
