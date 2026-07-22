@@ -33,6 +33,11 @@ class Document(Base):
         server_default=sql_text("false"),
         default=False,
     )
+    is_public: Mapped[bool] = mapped_column(
+        Boolean,
+        server_default=sql_text("true"),
+        default=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.current_timestamp(),
@@ -124,8 +129,23 @@ def ensure_schema() -> None:
         "UPDATE documents SET is_ready = false WHERE is_ready IS NULL",
         "ALTER TABLE documents ALTER COLUMN is_ready SET DEFAULT false",
         "ALTER TABLE documents ALTER COLUMN is_ready SET NOT NULL",
+        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true",
+        "UPDATE documents SET is_public = true WHERE is_public IS NULL",
+        "ALTER TABLE documents ALTER COLUMN is_public SET DEFAULT true",
+        "ALTER TABLE documents ALTER COLUMN is_public SET NOT NULL",
+        """
+        CREATE TABLE IF NOT EXISTS starred_games (
+            user_id UUID NOT NULL,
+            document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, document_id)
+        )
+        """,
         "CREATE INDEX IF NOT EXISTS documents_task_id_idx ON documents(task_id)",
         "CREATE INDEX IF NOT EXISTS documents_user_id_idx ON documents(user_id)",
+        "CREATE INDEX IF NOT EXISTS documents_public_ready_created_idx ON documents(is_public, is_ready, created_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS documents_user_public_idx ON documents(user_id, is_public)",
+        "CREATE INDEX IF NOT EXISTS starred_games_user_created_idx ON starred_games(user_id, created_at DESC, document_id DESC)",
     ]
 
     with db_engine.begin() as conn:

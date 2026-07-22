@@ -151,8 +151,8 @@ it automatically to the reverse proxy, Nginx verifies it through user-service,
 and private services receive trusted user headers.
 
 Document uploads require multipart `file` and `game_name` fields. They return
-a durable `document_id`, the stored `game_name`, the main `task_id`, and
-`is_ready: false`. Clients can poll:
+a durable `document_id`, the stored `game_name`, the main `task_id`,
+`is_ready: false`, and `is_public: true`. Clients can poll:
 
 ```text
 GET /api/document-content/tasks/{task_id}/status
@@ -170,6 +170,27 @@ To delete a document and its generated content:
 
 ```text
 DELETE /api/document-content/documents/{document_id}
+```
+
+Games are public by default. To toggle a game between public and private:
+
+```text
+PATCH /api/document-content/documents/{document_id}/visibility
+```
+
+The shared library and starred-game lists are cursor-paginated with a fixed
+page size of 10:
+
+```text
+GET /api/document-content/library/games
+GET /api/document-content/library/starred
+```
+
+To star or unstar a game:
+
+```text
+POST /api/document-content/library/games/{document_id}/star
+DELETE /api/document-content/library/games/{document_id}/star
 ```
 
 To browse indexed document structure:

@@ -69,7 +69,10 @@ func NewLevelRepository(db *gorm.DB) *LevelRepository {
 func (r *LevelRepository) GetBootstrap(ctx context.Context, levelID string, userID string) (LevelBootstrap, error) {
 	var level models.Level
 	err := r.db.WithContext(ctx).
-		Where("id = ? AND user_id = ?", levelID, userID).
+		Table("levels").
+		Select("levels.*").
+		Joins("JOIN documents ON documents.id = levels.document_id").
+		Where("levels.id = ? AND (levels.user_id = ? OR (documents.is_public = true AND documents.is_ready = true))", levelID, userID).
 		First(&level).
 		Error
 	if err == gorm.ErrRecordNotFound {

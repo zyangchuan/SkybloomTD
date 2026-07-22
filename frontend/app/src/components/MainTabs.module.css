@@ -1,0 +1,37 @@
+.tab {
+    appearance: none;
+    border: 12px solid transparent;
+    border-image-source: url('../../public/gui/boxes_banners/Box_Square.svg');
+    border-image-slice: 80 fill;
+    border-image-repeat: stretch;
+    cursor: pointer;
+    font-weight: 800;
+    color: rgba(253, 250, 242, 0.6); /* Slightly faded warm text */
+    transition: all 0.15s ease;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tab:hover {
+    color: rgba(253, 250, 242, 0.95);
+    transform: translateY(-2px);
+}
+
+.tabActive {
+    appearance: none;
+    border: 12px solid transparent;
+    border-image-source: url('../../public/gui/boxes_banners/Box_WhiteOutline_Square.svg');
+    border-image-slice: 80 fill;
+    border-image-repeat: stretch;
+    cursor: pointer;
+    font-weight: 800;
+    color: #fdfaf2; /* Bright warm text */
+    transition: all 0.15s ease;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
