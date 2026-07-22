@@ -112,6 +112,7 @@ export default class BootScene extends Phaser.Scene {
 
     // Preload airstrike consumable assets
     this.load.svg('btn_bg_circle', '/game/assets/gui/buttons_icons/IconButton_Large_Blue_Circle.svg', { width: 80, height: 80 });
+    this.load.svg('btn_check', '/game/assets/gui/buttons_text/PremadeButtons_Check.svg', { width: 80, height: 80 });
     this.load.image('consumable_airstrike_icon', '/game/assets/consumables/airstrike/icon.png');
     this.load.image('consumable_airstrike_aim_marker', '/game/assets/consumables/airstrike/aim_marker.png');
     this.load.image('consumable_airstrike_plane', '/game/assets/consumables/airstrike/plane.png');

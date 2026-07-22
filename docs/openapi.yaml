@@ -30,6 +30,8 @@ tags:
     description: User profile persistence backed by `private.users`.
   - name: Document Content
     description: PDF/document upload and OCR workflow entrypoints.
+  - name: Game Library
+    description: Shared public game library, visibility, and starred-game endpoints.
   - name: Game Service
     description: Authoritative game websocket and level generation workflow.
 
@@ -427,13 +429,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/document-content/documents/{document_id}/visibility:
+    patch:
+      tags: [Game Library]
+      summary: Toggle a game's public visibility
+      description: |
+        Updates the authenticated user's game visibility. Games are public by
+        default when uploaded. Only the document owner can change visibility.
+        Private games are hidden from other users' library and starred-game
+        lists, while public ready games can be listed and played by others.
+      operationId: updateDocumentVisibility
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVisibilityRequest"
+            example:
+              is_public: false
+      responses:
+        "200":
+          description: Visibility was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSummary"
+        "400":
+          description: Invalid document id or request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Document was not found for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database update failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/document-content/documents/{document_id}/chapters:
     get:
       tags: [Document Content]
       summary: List chapters for a document
       description: |
-        Returns indexed chapters for a document owned by the authenticated user.
-        A document that is not ready yet may return an empty chapter list.
+        Returns indexed chapters for a document owned by the authenticated user
+        or for a public ready game owned by another user. A document that is
+        not ready yet may return an empty chapter list for its owner.
       operationId: listDocumentChapters
       security:
         - cookieAuth: []
@@ -459,7 +516,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Document was not found for the authenticated user.
+          description: Document was not found or is private to another user.
           content:
             application/json:
               schema:
@@ -475,7 +532,7 @@ paths:
     get:
       tags: [Document Content]
       summary: List sub-chapters for a chapter
-      description: Returns indexed sub-chapters for a chapter owned by the authenticated user.
+      description: Returns indexed sub-chapters for a chapter owned by the authenticated user or from a public ready game.
       operationId: listChapterSubChapters
       security:
         - cookieAuth: []
@@ -501,13 +558,161 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Chapter was not found for the authenticated user.
+          description: Chapter was not found or belongs to a private game owned by another user.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/library/games:
+    get:
+      tags: [Game Library]
+      summary: List public games
+      description: |
+        Returns ready games whose owners have left them public. Results are
+        cursor-paginated with a fixed page size of 10.
+      operationId: listPublicGames
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Public game library page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListGameLibraryResponse"
+        "400":
+          description: Invalid cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/library/starred:
+    get:
+      tags: [Game Library]
+      summary: List games starred by the current user
+      description: |
+        Returns games the authenticated user has starred. A game is included
+        when it is owned by the authenticated user, or when it is public and
+        ready. Results are cursor-paginated with a fixed page size of 10.
+      operationId: listStarredGames
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Starred game page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListGameLibraryResponse"
+        "400":
+          description: Invalid cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/library/games/{document_id}/star:
+    post:
+      tags: [Game Library]
+      summary: Star a game
+      description: |
+        Saves a game to the authenticated user's starred list. The operation is
+        idempotent. Users can star their own games, or games that are public
+        and ready.
+      operationId: starGame
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "204":
+          description: Game is starred.
+        "400":
+          description: Invalid document id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Game was not found or is not available to star.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database write failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Game Library]
+      summary: Unstar a game
+      description: Removes a game from the authenticated user's starred list. The operation is idempotent.
+      operationId: unstarGame
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "204":
+          description: Game is no longer starred.
+        "400":
+          description: Invalid document id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database write failed.
           content:
             application/json:
               schema:
@@ -843,6 +1048,13 @@ components:
       schema:
         type: string
         pattern: "^[a-f0-9]{32}$"
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor returned as `next_cursor` from the previous page.
+      schema:
+        type: string
 
   schemas:
     HealthResponse:
@@ -943,6 +1155,7 @@ components:
         - document_id
         - game_name
         - is_ready
+        - is_public
       properties:
         message:
           type: string
@@ -967,6 +1180,10 @@ components:
           type: boolean
           description: Durable document readiness flag. It is `false` until indexing succeeds.
           example: false
+        is_public:
+          type: boolean
+          description: Public visibility flag. New games are public by default.
+          example: true
 
     ListDocumentsResponse:
       type: object
@@ -982,9 +1199,10 @@ components:
       type: object
       required:
         - document_id
-        - filename
+        - source_filename
         - game_name
         - is_ready
+        - is_public
         - task_id
         - created_at
         - updated_at
@@ -992,7 +1210,7 @@ components:
         document_id:
           type: string
           format: uuid
-        filename:
+        source_filename:
           type: string
           example: lesson.pdf
         game_name:
@@ -1001,10 +1219,79 @@ components:
         is_ready:
           type: boolean
           description: Durable document readiness flag. `true` only after indexing succeeds.
+        is_public:
+          type: boolean
+          description: Whether this game appears in the shared public library once ready.
         task_id:
           type: string
           pattern: "^[a-f0-9]{32}$"
           description: Main document processing task id.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateVisibilityRequest:
+      type: object
+      required: [is_public]
+      properties:
+        is_public:
+          type: boolean
+          description: Set to `true` to make the game public, or `false` to make it private.
+
+    ListGameLibraryResponse:
+      type: object
+      required:
+        - games
+      properties:
+        games:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/GameLibrarySummary"
+        next_cursor:
+          type: string
+          description: Opaque cursor for the next page. Omitted when there are no more results.
+
+    GameLibrarySummary:
+      type: object
+      required:
+        - document_id
+        - user_id
+        - source_filename
+        - game_name
+        - is_ready
+        - is_public
+        - starred_by_me
+        - created_at
+        - updated_at
+      properties:
+        document_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: Owner id for the game.
+        source_filename:
+          type: string
+          example: lesson.pdf
+        game_name:
+          type: string
+          example: Linear Algebra TD
+        is_ready:
+          type: boolean
+          description: Durable game readiness flag.
+          example: true
+        is_public:
+          type: boolean
+          description: Public visibility flag.
+          example: true
+        starred_by_me:
+          type: boolean
+          description: Whether the authenticated user has starred this game.
         created_at:
           type: string
           format: date-time

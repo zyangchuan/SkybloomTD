@@ -66,6 +66,7 @@ func TestNewDocumentSummaryMapsDocumentFields(t *testing.T) {
 		got.SourceFilename != document.SourceFilename ||
 		got.GameName != document.GameName ||
 		got.IsReady != document.IsReady ||
+		got.IsPublic != document.IsPublic ||
 		got.TaskID != document.TaskID ||
 		!got.CreatedAt.Equal(createdAt) ||
 		!got.UpdatedAt.Equal(updatedAt) {
@@ -118,7 +119,8 @@ func TestNewQueuedDocumentBuildsUploadDocument(t *testing.T) {
 		document.SourceFilename != source.SourceFilename ||
 		document.GameName != "SkybloomTD" ||
 		document.TaskID != "task-1" ||
-		document.IsReady {
+		document.IsReady ||
+		!document.IsPublic {
 		t.Fatalf("unexpected queued document: %#v", document)
 	}
 }

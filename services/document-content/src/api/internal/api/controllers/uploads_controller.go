@@ -113,6 +113,7 @@ func (s *Controller) UploadFile(c *gin.Context) {
 		"document_id": documentID,
 		"game_name":   gameName,
 		"is_ready":    false,
+		"is_public":   document.IsPublic,
 	})
 }
 

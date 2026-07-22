@@ -40,8 +40,7 @@ export class AirstrikeManager {
   private markers: Phaser.GameObjects.Image[] = [];
   private cursorMarker: Phaser.GameObjects.Image | null = null;
   private hudBtn!: QuizHUDButton;
-  private countBadge!: Phaser.GameObjects.Text;
-  private countBadgeBg!: Phaser.GameObjects.Image;
+  private checkIcon!: Phaser.GameObjects.Image;
   private messageHandler: ((event: MessageEvent) => void) | null = null;
   private escapeHandler: (() => void) | null = null;
 
@@ -66,15 +65,10 @@ export class AirstrikeManager {
       onClick: () => this.activate(),
     });
 
-    this.countBadgeBg = this.scene.add.image(x - 82, y - 70, 'btn_bg_circle')
-      .setScale(0.65)
-      .setDepth(32);
-
-    this.countBadge = this.scene.add.text(x - 82, y - 70, '0', {
-      fontFamily: '"Concert One", system-ui, sans-serif',
-      fontSize: '24px',
-      color: '#ffffff',
-    }).setOrigin(0.5).setDepth(33);
+    this.checkIcon = this.scene.add.image(x - 82, y - 70, 'btn_check')
+      .setScale(1.1)
+      .setDepth(32)
+      .setVisible(false);
 
     this.updateHUD();
   }
@@ -197,8 +191,7 @@ export class AirstrikeManager {
     this.cancelAiming();
     this.clearQuiz(false);
     this.hudBtn?.destroy();
-    this.countBadge?.destroy();
-    this.countBadgeBg?.destroy();
+    this.checkIcon?.destroy();
   }
 
   private activate() {
@@ -231,7 +224,7 @@ export class AirstrikeManager {
     this.scene.input.on('pointerdown', this.selectTarget, this);
     this.escapeHandler = () => this.cancelAiming();
     this.scene.input.keyboard?.on('keydown-ESC', this.escapeHandler);
-    this.hudBtn.label.setText('Select 3 targets').setColor('#fef08a');
+    this.hudBtn.label.setText('Airstrike').setColor('#fef08a');
   }
 
   private moveCursor(pointer: Phaser.Input.Pointer) {
@@ -259,14 +252,13 @@ export class AirstrikeManager {
       repeat: -1,
     });
     this.markers.push(marker);
-    this.hudBtn.label.setText(`${3 - this.targets.length} targets left`);
     if (this.targets.length === 3) {
       this.awaitingPrepare = true;
       this.aiming = false;
       this.stopAimingInput();
       this.charges = Math.max(0, this.charges - 1);
       this.updateHUD();
-      this.hudBtn.label.setText('Airstrike inbound').setColor('#fef08a');
+      this.hudBtn.label.setText('Airstrike').setColor('#fef08a');
       this.playDeployment([...this.targets], 1500);
     }
   }
@@ -411,15 +403,12 @@ export class AirstrikeManager {
 
   private updateHUD() {
     if (!this.hudBtn) return;
-    this.countBadge.setText(String(this.charges));
     this.hudBtn.updateCooldown(this.cooldownRemaining);
 
-    const enabled = this.gameStarted && !this.awaitingPrepare && this.cooldownRemaining === 0;
-    const alphaVal = enabled ? 1.0 : 0.5;
-    this.countBadge.setAlpha(alphaVal);
-    this.countBadgeBg.setAlpha(alphaVal);
+    const isReady = this.charges > 0 && this.cooldownRemaining === 0;
+    this.checkIcon.setVisible(isReady);
 
-    if (this.aiming) return;
-    this.hudBtn.label.setText('Airstrike');
+    if (this.aiming || this.awaitingPrepare) return;
+    this.hudBtn.label.setText('Airstrike').setColor('#ffffff');
   }
 }

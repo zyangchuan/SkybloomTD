@@ -42,6 +42,7 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 			game_name TEXT NOT NULL DEFAULT 'Untitled Game',
 			task_id TEXT,
 			is_ready BOOLEAN NOT NULL DEFAULT false,
+			is_public BOOLEAN NOT NULL DEFAULT true,
 			created_at TIMESTAMPTZ,
 			updated_at TIMESTAMPTZ
 		)`,
@@ -55,6 +56,16 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 		`UPDATE documents SET is_ready = false WHERE is_ready IS NULL`,
 		`ALTER TABLE documents ALTER COLUMN is_ready SET DEFAULT false`,
 		`ALTER TABLE documents ALTER COLUMN is_ready SET NOT NULL`,
+		`ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true`,
+		`UPDATE documents SET is_public = true WHERE is_public IS NULL`,
+		`ALTER TABLE documents ALTER COLUMN is_public SET DEFAULT true`,
+		`ALTER TABLE documents ALTER COLUMN is_public SET NOT NULL`,
+		`CREATE TABLE IF NOT EXISTS starred_games (
+			user_id UUID NOT NULL,
+			document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, document_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS chapters (
 			id UUID PRIMARY KEY,
 			document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -76,6 +87,9 @@ func Migrate(ctx context.Context, db *gorm.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS documents_task_id_idx ON documents(task_id)`,
 		`CREATE INDEX IF NOT EXISTS documents_user_id_idx ON documents(user_id)`,
+		`CREATE INDEX IF NOT EXISTS documents_public_ready_created_idx ON documents(is_public, is_ready, created_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS documents_user_public_idx ON documents(user_id, is_public)`,
+		`CREATE INDEX IF NOT EXISTS starred_games_user_created_idx ON starred_games(user_id, created_at DESC, document_id DESC)`,
 		`CREATE INDEX IF NOT EXISTS chapters_document_id_idx ON chapters(document_id)`,
 		`CREATE INDEX IF NOT EXISTS sub_chapters_document_id_idx ON sub_chapters(document_id)`,
 		`CREATE INDEX IF NOT EXISTS sub_chapters_chapter_id_idx ON sub_chapters(chapter_id)`,

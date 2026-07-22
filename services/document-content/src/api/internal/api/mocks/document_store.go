@@ -53,6 +53,106 @@ func (_m *DocumentStore) ListUserDocuments(ctx context.Context, userID uuid.UUID
 	return r0, r1
 }
 
+func (_m *DocumentStore) ListPublicGames(ctx context.Context, userID uuid.UUID, cursor string) (models.ListGameLibraryResponse, error) {
+	ret := _m.Called(ctx, userID, cursor)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListPublicGames")
+	}
+
+	var r0 models.ListGameLibraryResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, string) models.ListGameLibraryResponse); ok {
+		r0 = rf(ctx, userID, cursor)
+	} else {
+		r0 = ret.Get(0).(models.ListGameLibraryResponse)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, string) error); ok {
+		r1 = rf(ctx, userID, cursor)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *DocumentStore) ListStarredGames(ctx context.Context, userID uuid.UUID, cursor string) (models.ListGameLibraryResponse, error) {
+	ret := _m.Called(ctx, userID, cursor)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListStarredGames")
+	}
+
+	var r0 models.ListGameLibraryResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, string) models.ListGameLibraryResponse); ok {
+		r0 = rf(ctx, userID, cursor)
+	} else {
+		r0 = ret.Get(0).(models.ListGameLibraryResponse)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, string) error); ok {
+		r1 = rf(ctx, userID, cursor)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *DocumentStore) SetDocumentVisibility(ctx context.Context, documentID uuid.UUID, userID uuid.UUID, isPublic bool) (models.DocumentSummary, error) {
+	ret := _m.Called(ctx, documentID, userID, isPublic)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SetDocumentVisibility")
+	}
+
+	var r0 models.DocumentSummary
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID, bool) models.DocumentSummary); ok {
+		r0 = rf(ctx, documentID, userID, isPublic)
+	} else {
+		r0 = ret.Get(0).(models.DocumentSummary)
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, uuid.UUID, uuid.UUID, bool) error); ok {
+		r1 = rf(ctx, documentID, userID, isPublic)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *DocumentStore) StarGame(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error {
+	ret := _m.Called(ctx, documentID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StarGame")
+	}
+
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) error); ok {
+		return rf(ctx, documentID, userID)
+	}
+
+	return ret.Error(0)
+}
+
+func (_m *DocumentStore) UnstarGame(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error {
+	ret := _m.Called(ctx, documentID, userID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for UnstarGame")
+	}
+
+	if rf, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID) error); ok {
+		return rf(ctx, documentID, userID)
+	}
+
+	return ret.Error(0)
+}
+
 func (_m *DocumentStore) ListDocumentChapters(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) ([]models.ChapterSummary, error) {
 	ret := _m.Called(ctx, documentID, userID)
 

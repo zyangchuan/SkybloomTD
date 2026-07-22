@@ -36,6 +36,11 @@ type StorageClient interface {
 type DocumentStore interface {
 	CreateQueuedDocument(ctx context.Context, document models.Document) error
 	ListUserDocuments(ctx context.Context, userID uuid.UUID) ([]models.DocumentSummary, error)
+	ListPublicGames(ctx context.Context, userID uuid.UUID, cursor string) (models.ListGameLibraryResponse, error)
+	ListStarredGames(ctx context.Context, userID uuid.UUID, cursor string) (models.ListGameLibraryResponse, error)
+	SetDocumentVisibility(ctx context.Context, documentID uuid.UUID, userID uuid.UUID, isPublic bool) (models.DocumentSummary, error)
+	StarGame(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error
+	UnstarGame(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error
 	ListDocumentChapters(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) ([]models.ChapterSummary, error)
 	ListChapterSubChapters(ctx context.Context, chapterID uuid.UUID, userID uuid.UUID) ([]models.SubChapterSummary, error)
 	LoadUserDocument(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) (models.Document, error)

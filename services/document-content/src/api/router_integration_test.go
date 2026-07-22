@@ -59,7 +59,8 @@ func TestUploadFileHappyPath(t *testing.T) {
 			document.SourceFilename == source.SourceFilename &&
 			document.GameName == "SkybloomTD" &&
 			document.TaskID != "" &&
-			!document.IsReady
+			!document.IsReady &&
+			document.IsPublic
 	})).Return(nil).Once()
 	deps.taskStatus.On("Set", mock.Anything, mock.MatchedBy(func(status models.TaskStatus) bool {
 		return status.TaskID != "" &&
@@ -86,8 +87,87 @@ func TestUploadFileHappyPath(t *testing.T) {
 	assert.Equal(t, storageUserID, body["user_id"])
 	assert.Equal(t, "SkybloomTD", body["game_name"])
 	assert.Equal(t, false, body["is_ready"])
+	assert.Equal(t, true, body["is_public"])
 	assert.NotEmpty(t, body["task_id"])
 	assert.NotEmpty(t, body["document_id"])
+}
+
+func TestListPublicGamesUsesCursor(t *testing.T) {
+	deps := newAPIMocks(t)
+	router := newTestRouter(deps)
+	userUUID := models.DatabaseUUID(testUserID, "user")
+	responseBody := models.ListGameLibraryResponse{
+		Games: []models.GameLibrarySummary{
+			{
+				DocumentID:  uuid.New(),
+				UserID:      uuid.New(),
+				GameName:    "Public Game",
+				IsReady:     true,
+				IsPublic:    true,
+				StarredByMe: true,
+			},
+		},
+		NextCursor: "next-page",
+	}
+
+	deps.documents.On("ListPublicGames", mock.Anything, userUUID, "cursor-1").Return(responseBody, nil).Once()
+
+	request := httptest.NewRequest(http.MethodGet, "/library/games?cursor=cursor-1", nil)
+	request.Header.Set("X-Authenticated-User-Id", testUserID)
+	response := performRequest(router, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var body models.ListGameLibraryResponse
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	assert.Len(t, body.Games, 1)
+	assert.Equal(t, "Public Game", body.Games[0].GameName)
+	assert.Equal(t, "next-page", body.NextCursor)
+}
+
+func TestUpdateDocumentVisibilityOwnerOnlyStorePath(t *testing.T) {
+	deps := newAPIMocks(t)
+	router := newTestRouter(deps)
+	documentID := uuid.New()
+	userUUID := models.DatabaseUUID(testUserID, "user")
+	updated := models.DocumentSummary{
+		DocumentID: documentID,
+		GameName:   "SkybloomTD",
+		IsReady:    true,
+		IsPublic:   false,
+	}
+
+	deps.documents.On("SetDocumentVisibility", mock.Anything, documentID, userUUID, false).Return(updated, nil).Once()
+
+	request := httptest.NewRequest(http.MethodPatch, "/documents/"+documentID.String()+"/visibility", bytes.NewBufferString(`{"is_public":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Authenticated-User-Id", testUserID)
+	response := performRequest(router, request)
+
+	require.Equal(t, http.StatusOK, response.Code)
+	var body models.DocumentSummary
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	assert.Equal(t, documentID, body.DocumentID)
+	assert.False(t, body.IsPublic)
+}
+
+func TestStarAndUnstarGame(t *testing.T) {
+	deps := newAPIMocks(t)
+	router := newTestRouter(deps)
+	documentID := uuid.New()
+	userUUID := models.DatabaseUUID(testUserID, "user")
+
+	deps.documents.On("StarGame", mock.Anything, documentID, userUUID).Return(nil).Once()
+	deps.documents.On("UnstarGame", mock.Anything, documentID, userUUID).Return(nil).Once()
+
+	starRequest := httptest.NewRequest(http.MethodPost, "/library/games/"+documentID.String()+"/star", nil)
+	starRequest.Header.Set("X-Authenticated-User-Id", testUserID)
+	starResponse := performRequest(router, starRequest)
+	require.Equal(t, http.StatusNoContent, starResponse.Code)
+
+	unstarRequest := httptest.NewRequest(http.MethodDelete, "/library/games/"+documentID.String()+"/star", nil)
+	unstarRequest.Header.Set("X-Authenticated-User-Id", testUserID)
+	unstarResponse := performRequest(router, unstarRequest)
+	require.Equal(t, http.StatusNoContent, unstarResponse.Code)
 }
 
 func TestUploadFilePublisherFailureMarksTaskFailed(t *testing.T) {
