@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	levelLLMQuizCount           = 5
+	levelLLMQuizCount           = 15
 	levelLLMVerifierConcurrency = 6
 	levelQuizRefillThreshold    = 2
 	levelQuizRefillLeaseTTL     = 300 * time.Second
