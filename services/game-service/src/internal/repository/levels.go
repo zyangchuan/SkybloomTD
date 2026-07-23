@@ -226,6 +226,58 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 	}, nil
 }
 
+func (r *LevelRepository) FindPlayableLevelsByChapter(ctx context.Context, userID string, chapterID string) ([]models.ReusableLevel, error) {
+	var rows []struct {
+		LevelID                string
+		UserID                 string
+		DocumentID             string
+		SubChapterID           string
+		GenerationID           *string
+		MapSeed                *int64
+		MapAlgorithmVersion    *int
+		GenerationRecordExists bool
+		QuizCount              int
+	}
+	result := r.db.WithContext(ctx).
+		Table("levels").
+		Select(`
+			levels.id AS level_id,
+			levels.user_id AS user_id,
+			levels.document_id AS document_id,
+			levels.sub_chapter_id AS sub_chapter_id,
+			levels.generation_id AS generation_id,
+			levels.map_seed AS map_seed,
+			levels.map_algorithm_version AS map_algorithm_version,
+			level_generation_jobs.id IS NOT NULL AS generation_record_exists,
+			(SELECT COUNT(*) FROM quizzes WHERE quizzes.level_id = levels.id) AS quiz_count
+		`).
+		Joins("LEFT JOIN level_generation_jobs ON level_generation_jobs.id = levels.generation_id").
+		Where("levels.user_id = ? AND levels.chapter_id = ?", userID, chapterID).
+		Scan(&rows)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	levels := make([]models.ReusableLevel, 0, len(rows))
+	for _, row := range rows {
+		level := models.ReusableLevel{
+			LevelID:                row.LevelID,
+			UserID:                 row.UserID,
+			DocumentID:             row.DocumentID,
+			SubChapterID:           row.SubChapterID,
+			GenerationID:           row.GenerationID,
+			MapSeed:                row.MapSeed,
+			MapAlgorithmVersion:    row.MapAlgorithmVersion,
+			GenerationRecordExists: row.GenerationRecordExists,
+			QuizCount:              row.QuizCount,
+		}
+		if level.HasPlayableMap() {
+			levels = append(levels, level)
+		}
+	}
+	return levels, nil
+}
+
 func (r *LevelRepository) AttachGenerationToLevel(ctx context.Context, generationID string, levelID string, options LevelInsertOptions) (SavedLevel, error) {
 	var saved SavedLevel
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

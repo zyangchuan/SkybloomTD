@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
@@ -67,6 +68,7 @@ const (
 
 type LevelRepository interface {
 	GetBootstrap(ctx context.Context, levelID string, userID string) (repository.LevelBootstrap, error)
+	FindPlayableLevelsByChapter(ctx context.Context, userID string, chapterID string) ([]models.ReusableLevel, error)
 	Ping(ctx context.Context) error
 }
 
@@ -368,6 +370,7 @@ type runningGameLoop struct {
 	levelID                 string
 	generationID            string
 	subChapterID            string
+	mode                    string
 	userID                  string
 	currentQuizID           string
 	currentConsumableQuizID string
@@ -601,6 +604,14 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 		case "game.load":
 			if err := s.handleLoad(ctx, conn, writeMu, userID, message.Data); err != nil {
 				log.Printf("game.load failed user_id=%s: %v", userID, err)
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+			}
+		case "game.freeplay.start":
+			if err := s.handleFreeplayStart(ctx, conn, writeMu, userID, message.Data); err != nil {
+				log.Printf("game.freeplay.start failed user_id=%s: %v", userID, err)
 				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
 					log.Printf("websocket error write failed: %v", writeErr)
 					return
@@ -846,6 +857,43 @@ func (s *Server) handleStart(ctx context.Context, conn *websocket.Conn, writeMu 
 	return writeWebsocketJSON(conn, writeMu, Message{Type: "level_generation.started", Data: result})
 }
 
+func (s *Server) handleFreeplayStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
+	var request struct {
+		ChapterID string `json:"chapter_id"`
+	}
+	if err := decodeMessageData(data, &request); err != nil {
+		return errors.New("game.freeplay.start data must include chapter_id")
+	}
+	chapterID := strings.TrimSpace(request.ChapterID)
+	if !uuidPattern.MatchString(chapterID) {
+		return errors.New("chapter_id must be a valid UUID")
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	candidates, err := s.levels.FindPlayableLevelsByChapter(callCtx, userID, chapterID)
+	if err != nil {
+		log.Printf("freeplay level lookup failed chapter_id=%s user_id=%s: %v", chapterID, userID, err)
+		return errors.New("failed to look up chapter levels")
+	}
+	if len(candidates) == 0 {
+		return errors.New("no playable levels found for this chapter yet")
+	}
+
+	chosen := candidates[rand.Intn(len(candidates))]
+	if chosen.QuizCount == 0 {
+		return errors.New("the selected level does not have any available quizzes yet")
+	}
+
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "level_generation.started",
+		Data: struct {
+			LevelID string `json:"level_id"`
+		}{LevelID: chosen.LevelID},
+	})
+}
+
 func (s *Server) handleLoad(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
 	var request struct {
 		LevelID string `json:"level_id"`
@@ -895,10 +943,12 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	}
 	var request struct {
 		LevelID string `json:"level_id"`
+		Mode    string `json:"mode"`
 	}
 	if err := decodeMessageData(data, &request); err != nil {
 		return nil, errors.New("game.session.start data must include level_id")
 	}
+	mode := gamesession.NormaliseMode(request.Mode)
 	levelID := strings.TrimSpace(request.LevelID)
 	if !uuidPattern.MatchString(levelID) {
 		return nil, errors.New("level_id must be a valid UUID")
@@ -930,6 +980,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		LevelID:      level.LevelID,
 		GenerationID: level.GenerationID,
 		SubChapterID: level.SubChapterID,
+		Mode:         mode,
 	})
 	if err != nil {
 		log.Printf("game session create failed level_id=%s user_id=%s: %v", levelID, userID, err)
@@ -1014,6 +1065,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		levelID:                 runtime.session.LevelID,
 		generationID:            runtime.session.GenerationID,
 		subChapterID:            runtime.session.SubChapterID,
+		mode:                    runtime.session.Mode,
 		userID:                  runtime.session.UserID,
 		currentQuizID:           currentQuizID,
 		currentConsumableQuizID: runtime.consumables.Airstrike.PendingQuizID,
@@ -1202,6 +1254,9 @@ func (s *Server) cleanupQuizCacheAfterGameEnd(ctx context.Context, runtime runti
 
 func (s *Server) maybeTriggerQuizRefill(loop *runningGameLoop, remaining int) {
 	if loop == nil || s.quizzes == nil {
+		return
+	}
+	if loop.mode == gamesession.ModeFreePlay {
 		return
 	}
 	if s.refills == nil {
