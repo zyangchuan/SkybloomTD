@@ -281,32 +281,32 @@ export default function LevelsPage({ params }: PageProps) {
 
             </div>
 
-              <div className='flex flex-col'>
+            <div className="group items-center flex flex-col -translate-y-[40px] hover:scale-105 active:scale-95 transition-all cursor-pointer select-none">
 
-                <button
-                  onClick={startFreeplayGame}
-                  type="button"
-                  className="-translate-y-[40px] w-20 h-20 flex items-center justify-center text-white hover:brightness-110 active:scale-95 transition-all cursor-pointer select-none bg-transparent shrink-0 drop-shadow-[0_6px_8px_rgba(0,0,0,0.25)] group-hover:drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
-                  style={{
-                    backgroundImage: "url('/gui/buttons_icons/IconButton_Large_Blue_Circle.svg')",
-                    backgroundSize: '100% 100%',
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                  }}
-                >
-                  <span className="text-2xl font-extrabold text-white drop-shadow-[0_2.5px_0_rgba(0,0,0,0.4)] -mt-1.5">
-                    Free Mode
-                  </span>
-
-                </button>
-
-                <span className="mt-3 -translate-y-[40px] text-xs sm:text-sm text-[#4a1900] font-extrabold text-center drop-shadow-[0_1px_0_rgba(255,255,255,0.4)] group-hover:text-yellow-900 transition-colors max-w-[160px] leading-tight break-words px-1">
-                  Random Level
+              <button
+                onClick={startFreeplayGame}
+                type="button"
+                className="cursor-pointer w-20 h-20 flex items-center justify-center text-white hover:brightness-110 active:scale-95 transition-all bg-transparent shrink-0 drop-shadow-[0_6px_8px_rgba(0,0,0,0.25)] group-hover:drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
+                style={{
+                  backgroundImage: "url('/gui/buttons_icons/IconButton_Large_Blue_Circle.svg')",
+                  backgroundSize: '100% 100%',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                }}
+              >
+                <span className="text-2xl font-extrabold text-white drop-shadow-[0_2.5px_0_rgba(0,0,0,0.4)] -mt-1.5">
+                  Free Mode
                 </span>
 
-              </div>
+              </button>
+
+              <span className="mt-3 text-xs sm:text-sm text-[#4a1900] font-extrabold text-center drop-shadow-[0_1px_0_rgba(255,255,255,0.4)] group-hover:text-yellow-900 transition-colors max-w-[160px] leading-tight break-words px-1">
+                Random Level
+              </span>
 
             </div>
+
+          </div>
         )}
 
       </OrangeSquare>
