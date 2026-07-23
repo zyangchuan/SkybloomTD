@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -12,6 +13,7 @@ type Publisher struct {
 	conn  *amqp.Connection
 	ch    *amqp.Channel
 	queue string
+	mu    sync.Mutex
 }
 
 func NewPublisher(url string, queue string) (*Publisher, error) {
@@ -39,6 +41,8 @@ func (p *Publisher) Publish(ctx context.Context, messageID string, value any) er
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.ch.PublishWithContext(ctx, "", p.queue, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,

@@ -43,8 +43,6 @@ export class EntitySync {
     private offsetY: number,
   ) { }
 
-  // ─── Sync from server state ──────────────────────────────────────────────────
-
   syncTowers(birdsList: any[]) {
     const activeIds = new Set<string>();
     birdsList.forEach(({ id, type, position, stats }) => {
@@ -135,8 +133,6 @@ export class EntitySync {
     // Deprecated: client now simulates projectiles locally
   }
 
-  // ─── Event Processing ────────────────────────────────────────────────────────
-
   processEvents(events: any[]) {
     events.forEach(event => {
       if (event.type === 'bird.attack') {
@@ -175,15 +171,12 @@ export class EntitySync {
     };
 
     if (stats && stats.attack === 'SPLASH') {
-      // Spawn 3 projectiles fanning out to cover range of attack
-      const offsets = [-0.22, 0, 0.22]; // angle offsets in radians (~12.5 degrees)
+      const offsets = [-0.22, 0, 0.22];
       offsets.forEach(offset => createSingleProjectile(offset));
     } else {
       createSingleProjectile(0);
     }
   }
-
-  // ─── Per-frame interpolation & simulation ────────────────────────────────────
 
   interpolate(deltaMs: number = 16.66) {
     this.towers.forEach((tower) => tower.update());
@@ -233,7 +226,6 @@ export class EntitySync {
         p.lastTargetY = ty;
       }
 
-      // Fan out tracking positions relative to the source tower
       if (p.angleOffset !== 0) {
         const dx = tx - p.towerX;
         const dy = ty - p.towerY;
@@ -274,8 +266,6 @@ export class EntitySync {
 
     this.clientProjectiles = active;
   }
-
-  // ─── Cleanup ─────────────────────────────────────────────────────────────────
 
   destroy() {
     this.towers.forEach((t) => t.destroy());

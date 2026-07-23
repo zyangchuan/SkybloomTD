@@ -64,9 +64,10 @@ export class DragController {
     this.scene.input.on('dragend',   this.onDragEnd,   this);
   }
 
-  // ─── Event handlers ─────────────────────────────────────────────────────────
-
   private onDragStart(pointer: Phaser.Input.Pointer, gameObject: Phaser.GameObjects.GameObject) {
+    if ((this.scene as any).airstrike?.isAiming()) {
+      return;
+    }
     let birdType: string | null = null;
     const isTower = gameObject instanceof Tower || ((gameObject as any).birdType !== undefined && (gameObject as any).id !== undefined);
 
@@ -182,8 +183,6 @@ export class DragController {
     this.gridHighlightGraphics.clear().setAlpha(1.0);
     this.closestCellHighlight.clear();
   }
-
-  // ─── Drag helpers ────────────────────────────────────────────────────────────
 
   private updateRangeCircle(pointer: Phaser.Input.Pointer) {
     if (!this.dragRangeGraphics || !this.activeDragBirdType) return;
@@ -406,7 +405,6 @@ export class DragController {
       fontFamily: '"Concert One", system-ui, sans-serif', fontSize: '34px', color: stats.color,
     }).setOrigin(0.5));
 
-    // Add respective bird head image next to stats
     const headImage = this.scene.add.image(-90, 15, `head_${resultType}`).setDisplaySize(95, 95);
     tooltip.add(headImage);
 

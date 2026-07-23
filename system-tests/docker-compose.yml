@@ -1,0 +1,13 @@
+services:
+  playwright-system-tests:
+    container_name: playwright
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    volumes:
+      - ./specs:/work/specs:ro
+      - ./testpdf.pdf:/work/testpdf.pdf:ro
+      - ./playwright-report:/work/playwright-report
+      - ./test-results:/work/test-results

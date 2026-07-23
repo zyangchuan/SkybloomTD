@@ -6,11 +6,13 @@ import { QuizManager } from '../ui/QuizManager';
 import { GameOverlay } from '../ui/GameOverlay';
 import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
+import { AirstrikeManager } from '../ui/AirstrikeManager';
 
 export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
+  private mode = '';
 
   // Grid params
   private tileSize = 0;
@@ -27,17 +29,18 @@ export default class GameScene extends Phaser.Scene {
   private overlay!: GameOverlay;
   private drag!: DragController;
   private entities!: EntitySync;
+  private airstrike!: AirstrikeManager;
   private startBtn: Phaser.GameObjects.Sprite | null = null;
   private startLabel: Phaser.GameObjects.Text | null = null;
   private startArrow: Phaser.GameObjects.Sprite | null = null;
 
   constructor() { super('GameScene'); }
 
-  // ─── Lifecycle ───────────────────────────────────────────────────────────────
-
-  create(data: { initialState: any, ws: WebSocket, levelId: string }) {
+  create(data: { initialState: any, ws: WebSocket, levelId: string, mode: string }) {
     this.ws = data.ws;
     this.levelId = data.levelId;
+    this.mode = data.mode;
+
     const mapData = data.initialState?.map;
     if (!mapData) { console.error('No map data in initial state.'); return; }
 
@@ -60,6 +63,13 @@ export default class GameScene extends Phaser.Scene {
     );
     this.drag.setup();
 
+    this.airstrike = new AirstrikeManager(
+      this,
+      (type, data) => this.sendWs(type, data),
+      { tileSize: this.tileSize, offsetX: this.offsetX, offsetY: this.offsetY, gridWidth: this.gridWidth, gridHeight: this.gridHeight }
+    );
+    this.airstrike.createHUD();
+
     new BirdTray(this, () => this.drag.isDragging());
     this.setupWebSocket(data.levelId);
     this.setupShutdown();
@@ -69,8 +79,6 @@ export default class GameScene extends Phaser.Scene {
     if (this.overlay.isPaused()) return;
     this.entities.interpolate(delta);
   }
-
-  // ─── Grid ────────────────────────────────────────────────────────────────────
 
   private initGrid(mapData: any) {
     this.gridWidth  = mapData.width  || 18;
@@ -82,8 +90,6 @@ export default class GameScene extends Phaser.Scene {
     this.obstacles  = mapData.objects    || [];
   }
 
-  // ─── WebSocket ───────────────────────────────────────────────────────────────
-
   private setupWebSocket(levelId: string) {
     if (!this.ws) return;
     this.ws.onmessage = null;
@@ -91,7 +97,7 @@ export default class GameScene extends Phaser.Scene {
       try { this.handleServerMessage(JSON.parse(event.data)); }
       catch (err) { console.error('Failed to parse WebSocket message:', err); }
     };
-    this.ws.send(JSON.stringify({ type: 'game.session.start', data: { level_id: levelId } }));
+    this.ws.send(JSON.stringify({ type: 'game.session.start', data: { level_id: levelId, mode: this.mode } }));
   }
 
   private handleServerMessage(msg: any) {
@@ -100,20 +106,35 @@ export default class GameScene extends Phaser.Scene {
       case 'game.session.started':
         if (!this.overlay.isPaused()) this.updateFromState(msg.data);
         break;
-      case 'game.action.rejected':  this.showRejectMessage(msg.data?.error || 'ACTION REJECTED'); break;
+      case 'game.action.rejected':
+        this.showRejectMessage(msg.data?.error || 'ACTION REJECTED');
+        if (msg.data?.action === 'use_consumable') {
+          this.airstrike.handleRejected();
+        }
+        break;
       case 'game.over':             this.overlay.showMistakesSummaryWindow(false); break;
       case 'game.victory':          this.overlay.showMistakesSummaryWindow(true);  break;
       case 'game.quiz.presented':   this.quiz.showWindow(msg.data); break;
-      case 'game.quiz.unavailable':
-        this.quiz.clear();
+      case 'game.quiz.unavailable': {
+        const consumableQuiz = this.airstrike.isQuizPending();
+        if (consumableQuiz) {
+          this.airstrike.handleQuizUnavailable();
+        } else {
+          this.quiz.clear();
+        }
         if (msg.data && msg.data.reason === 'quiz_cooldown') {
-          this.quiz.setCooldownActive();
+          const seconds = msg.data.retry_after_seconds || 30;
+          if (consumableQuiz) this.airstrike.updateCooldown(seconds);
+          else this.quiz.updateCooldown(seconds);
           this.showRejectMessage('QUIZ ON COOLDOWN');
         } else {
           this.showRejectMessage('NO QUIZZES REMAINING');
         }
         break;
+      }
       case 'game.quiz.result':      this.quiz.handleResult(msg.data); break;
+      case 'game.consumable.quiz.presented': this.airstrike.showQuiz(msg.data); break;
+      case 'game.consumable.quiz.result':    this.airstrike.handleQuizResult(msg.data); break;
       case 'game.exited':           this.overlay.completePendingExit(); break;
     }
   }
@@ -124,10 +145,9 @@ export default class GameScene extends Phaser.Scene {
       this.quiz.destroy();
       this.entities.destroy();
       this.overlay.destroy();
+      this.airstrike.destroy();
     });
   }
-
-  // ─── State sync ──────────────────────────────────────────────────────────────
 
   private updateFromState(state: any) {
     if (!state) return;
@@ -139,6 +159,7 @@ export default class GameScene extends Phaser.Scene {
     if (state.enemies     !== undefined) this.entities.syncEnemies(state.enemies);
     if (state.loop_started !== undefined) {
       this.quiz.setGameStarted(state.loop_started);
+      this.airstrike.setGameStarted(state.loop_started);
       if (state.loop_started) {
         this.destroyStartButton();
       } else {
@@ -148,9 +169,10 @@ export default class GameScene extends Phaser.Scene {
     if (state.quiz_cooldown_remaining_seconds !== undefined) {
       this.quiz.updateCooldown(state.quiz_cooldown_remaining_seconds);
     }
+    if (state.consumables !== undefined) {
+      this.airstrike.updateInventory(state.consumables);
+    }
   }
-
-  // ─── UI feedback ─────────────────────────────────────────────────────────────
 
   private showRejectMessage(errorText: string) {
     const pointer = this.input.activePointer;
@@ -163,8 +185,6 @@ export default class GameScene extends Phaser.Scene {
       duration: 1600, ease: 'Quad.easeOut', onComplete: () => warning.destroy(),
     });
   }
-
-  // ─── Utility ─────────────────────────────────────────────────────────────────
 
   private showStartButton() {
     if (this.startBtn) return;
@@ -186,7 +206,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.startArrow = this.add.sprite(leftX + 250, btnY, 'icon_arrow')
       .setScale(1.8)
-      .setDepth(30);
+      .setDepth(30)
+      .setAngle(180);
 
     this.startBtn.on('pointerover', () => {
       this.startBtn?.setScale(0.85);

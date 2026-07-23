@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+const (
+	levelLLMQuizCount           = 15
+	levelLLMVerifierConcurrency = 6
+	levelQuizRefillThreshold    = 2
+	levelQuizRefillLeaseTTL     = 300 * time.Second
+	levelMaxQuizzesPerLevel     = 30
+)
+
 type Config struct {
 	Port                       string
 	RabbitMQURL                string
@@ -28,6 +36,11 @@ type Config struct {
 	Temperature                float64
 	Timeout                    time.Duration
 	MaxRetries                 int
+	QuizCount                  int
+	VerifierConcurrency        int
+	QuizRefillThreshold        int
+	QuizRefillLeaseTTL         time.Duration
+	MaxQuizzesPerLevel         int
 	LevelSourceMaxChars        int32
 	DocumentContentGRPCAddr    string
 	DocumentContentGRPCTimeout time.Duration
@@ -60,6 +73,11 @@ func Load() (Config, error) {
 		Temperature:                envFloat("LEVEL_LLM_TEMPERATURE", 0.2),
 		Timeout:                    time.Duration(envFloat("LEVEL_LLM_TIMEOUT_SECONDS", 60)) * time.Second,
 		MaxRetries:                 envInt("LEVEL_LLM_MAX_RETRIES", 3),
+		QuizCount:                  levelLLMQuizCount,
+		VerifierConcurrency:        levelLLMVerifierConcurrency,
+		QuizRefillThreshold:        levelQuizRefillThreshold,
+		QuizRefillLeaseTTL:         levelQuizRefillLeaseTTL,
+		MaxQuizzesPerLevel:         levelMaxQuizzesPerLevel,
 		LevelSourceMaxChars:        int32(envInt("LEVEL_SOURCE_MAX_CHARS", 24000)),
 		DocumentContentGRPCAddr:    "document-content-grpc:50051",
 		DocumentContentGRPCTimeout: time.Duration(envFloat("DOCUMENT_CONTENT_GRPC_TIMEOUT_SECONDS", envFloat("OCR_CONTENT_GRPC_TIMEOUT_SECONDS", 30))) * time.Second,

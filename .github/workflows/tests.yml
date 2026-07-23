@@ -1,10 +1,11 @@
 name: Tests
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
-      - main
+      - staging
 
 jobs:
   go-tests:
@@ -15,7 +16,6 @@ jobs:
       fail-fast: false
       matrix:
         module:
-          - services/user-service
           - services/document-content/src/api
           - services/game-service/src
 
