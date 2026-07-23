@@ -18,6 +18,7 @@ class Base(DeclarativeBase):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = {"schema": "private"}
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -46,11 +47,12 @@ class Document(Base):
 
 class Chapter(Base):
     __tablename__ = "chapters"
+    __table_args__ = {"schema": "private"}
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
+        ForeignKey("private.documents.id", ondelete="CASCADE"),
         index=True,
     )
     chapter_index: Mapped[int | None] = mapped_column(Integer)
@@ -65,16 +67,17 @@ class Chapter(Base):
 
 class SubChapter(Base):
     __tablename__ = "sub_chapters"
+    __table_args__ = {"schema": "private"}
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
     document_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("documents.id", ondelete="CASCADE"),
+        ForeignKey("private.documents.id", ondelete="CASCADE"),
         index=True,
     )
     chapter_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("chapters.id", ondelete="CASCADE"),
+        ForeignKey("private.chapters.id", ondelete="CASCADE"),
     )
     sub_chapter_index: Mapped[int | None] = mapped_column(Integer)
     title: Mapped[str | None] = mapped_column(Text)
@@ -112,40 +115,71 @@ def engine():
 def ensure_schema() -> None:
     db_engine = engine()
 
+    migration_statements = [
+        "CREATE SCHEMA IF NOT EXISTS private",
+        "REVOKE ALL ON SCHEMA private FROM PUBLIC",
+        """
+        DO $$
+        BEGIN
+            IF to_regclass('private.documents') IS NULL AND to_regclass('public.documents') IS NOT NULL THEN
+                ALTER TABLE public.documents SET SCHEMA private;
+            END IF;
+            IF to_regclass('private.starred_games') IS NULL AND to_regclass('public.starred_games') IS NOT NULL THEN
+                ALTER TABLE public.starred_games SET SCHEMA private;
+            END IF;
+            IF to_regclass('private.chapters') IS NULL AND to_regclass('public.chapters') IS NOT NULL THEN
+                ALTER TABLE public.chapters SET SCHEMA private;
+            END IF;
+            IF to_regclass('private.sub_chapters') IS NULL AND to_regclass('public.sub_chapters') IS NOT NULL THEN
+                ALTER TABLE public.sub_chapters SET SCHEMA private;
+            END IF;
+        END;
+        $$;
+        """,
+    ]
+
+    with db_engine.begin() as conn:
+        for statement in migration_statements:
+            conn.execute(sql_text(statement))
+
     Base.metadata.create_all(db_engine)
 
     statements = [
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS source_filename TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS game_name TEXT",
+        "ALTER TABLE private.documents ADD COLUMN IF NOT EXISTS source_filename TEXT",
+        "ALTER TABLE private.documents ADD COLUMN IF NOT EXISTS game_name TEXT",
         """
-        UPDATE documents
+        UPDATE private.documents
         SET game_name = COALESCE(NULLIF(game_name, ''), NULLIF(source_filename, ''), 'Untitled Game')
         WHERE game_name IS NULL OR game_name = ''
         """,
-        "ALTER TABLE documents ALTER COLUMN game_name SET DEFAULT 'Untitled Game'",
-        "ALTER TABLE documents ALTER COLUMN game_name SET NOT NULL",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS task_id TEXT",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_ready BOOLEAN DEFAULT false",
-        "UPDATE documents SET is_ready = false WHERE is_ready IS NULL",
-        "ALTER TABLE documents ALTER COLUMN is_ready SET DEFAULT false",
-        "ALTER TABLE documents ALTER COLUMN is_ready SET NOT NULL",
-        "ALTER TABLE documents ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true",
-        "UPDATE documents SET is_public = true WHERE is_public IS NULL",
-        "ALTER TABLE documents ALTER COLUMN is_public SET DEFAULT true",
-        "ALTER TABLE documents ALTER COLUMN is_public SET NOT NULL",
+        "ALTER TABLE private.documents ALTER COLUMN game_name SET DEFAULT 'Untitled Game'",
+        "ALTER TABLE private.documents ALTER COLUMN game_name SET NOT NULL",
+        "ALTER TABLE private.documents ADD COLUMN IF NOT EXISTS task_id TEXT",
+        "ALTER TABLE private.documents ADD COLUMN IF NOT EXISTS is_ready BOOLEAN DEFAULT false",
+        "UPDATE private.documents SET is_ready = false WHERE is_ready IS NULL",
+        "ALTER TABLE private.documents ALTER COLUMN is_ready SET DEFAULT false",
+        "ALTER TABLE private.documents ALTER COLUMN is_ready SET NOT NULL",
+        "ALTER TABLE private.documents ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true",
+        "UPDATE private.documents SET is_public = true WHERE is_public IS NULL",
+        "ALTER TABLE private.documents ALTER COLUMN is_public SET DEFAULT true",
+        "ALTER TABLE private.documents ALTER COLUMN is_public SET NOT NULL",
         """
-        CREATE TABLE IF NOT EXISTS starred_games (
+        CREATE TABLE IF NOT EXISTS private.starred_games (
             user_id UUID NOT NULL,
-            document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            document_id UUID NOT NULL REFERENCES private.documents(id) ON DELETE CASCADE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, document_id)
         )
         """,
-        "CREATE INDEX IF NOT EXISTS documents_task_id_idx ON documents(task_id)",
-        "CREATE INDEX IF NOT EXISTS documents_user_id_idx ON documents(user_id)",
-        "CREATE INDEX IF NOT EXISTS documents_public_ready_created_idx ON documents(is_public, is_ready, created_at DESC, id DESC)",
-        "CREATE INDEX IF NOT EXISTS documents_user_public_idx ON documents(user_id, is_public)",
-        "CREATE INDEX IF NOT EXISTS starred_games_user_created_idx ON starred_games(user_id, created_at DESC, document_id DESC)",
+        "CREATE INDEX IF NOT EXISTS documents_task_id_idx ON private.documents(task_id)",
+        "CREATE INDEX IF NOT EXISTS documents_user_id_idx ON private.documents(user_id)",
+        "CREATE INDEX IF NOT EXISTS documents_public_ready_created_idx ON private.documents(is_public, is_ready, created_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS documents_user_public_idx ON private.documents(user_id, is_public)",
+        "CREATE INDEX IF NOT EXISTS starred_games_user_created_idx ON private.starred_games(user_id, created_at DESC, document_id DESC)",
+        "REVOKE ALL ON TABLE private.documents FROM PUBLIC",
+        "REVOKE ALL ON TABLE private.starred_games FROM PUBLIC",
+        "REVOKE ALL ON TABLE private.chapters FROM PUBLIC",
+        "REVOKE ALL ON TABLE private.sub_chapters FROM PUBLIC",
     ]
 
     with db_engine.begin() as conn:

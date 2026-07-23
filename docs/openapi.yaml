@@ -192,6 +192,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user profile by id
+      description: Returns a stored user profile from `private.users` by Supabase user id.
+      operationId: getUserById
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Supabase user id stored in `private.users.id`.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User profile was found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: User id is not a valid UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User profile was not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/users/me:
     post:
       tags: [Users]

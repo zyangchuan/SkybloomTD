@@ -59,7 +59,7 @@ export default function GameCardItem({
             {doc.game_name}
           </span>
           <span className="text-[12px] text-white/45 font-mono mt-0.5">
-            Uploaded: {new Date(doc.created_at).toLocaleString()}
+            Uploaded: {new Date(doc.created_at).toLocaleDateString()}
           </span>
         </div>
 

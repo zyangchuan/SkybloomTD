@@ -24,7 +24,7 @@ type Level struct {
 }
 
 func (Level) TableName() string {
-	return "levels"
+	return "private.levels"
 }
 
 type Quiz struct {
@@ -39,7 +39,7 @@ type Quiz struct {
 }
 
 func (Quiz) TableName() string {
-	return "quizzes"
+	return "private.quizzes"
 }
 
 type ReusableLevel struct {

@@ -46,6 +46,10 @@ type Document struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+func (Document) TableName() string {
+	return "private.documents"
+}
+
 type DocumentSummary struct {
 	DocumentID     uuid.UUID `json:"document_id"`
 	SourceFilename string    `json:"source_filename"`

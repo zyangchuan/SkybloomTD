@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import OrangeSquare from '@/components/OrangeSquare';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { syncAuthCookie } from '@/lib/auth-cookie';
+import { upsertAuthenticatedUserProfile } from '@/lib/user-profile';
 
 const authRedirectStorageKey = 'skybloom.auth.redirectPath';
 
@@ -32,9 +33,15 @@ export default function AuthCallbackPage() {
       if (code) {
         const { data } = await supabase.auth.exchangeCodeForSession(code);
         await syncAuthCookie(data.session);
+        await upsertAuthenticatedUserProfile(data.session).catch((error) => {
+          console.error('Failed to store user profile:', error);
+        });
       } else {
         const { data } = await supabase.auth.getSession();
         await syncAuthCookie(data.session);
+        await upsertAuthenticatedUserProfile(data.session).catch((error) => {
+          console.error('Failed to store user profile:', error);
+        });
       }
 
       if (isMounted) {

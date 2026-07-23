@@ -21,6 +21,7 @@ import LibraryGameCard, { GameLibrarySummary } from '@/components/LibraryGameCar
 import UploadDocumentModal from '@/components/UploadDocumentModal';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
+import { upsertAuthenticatedUserProfile } from '@/lib/user-profile';
 import tabStyles from '@/components/MainTabs.module.css';
 
 interface DocumentSummary {
@@ -334,6 +335,9 @@ export default function DashboardPage() {
 
       if (data.session) {
         await syncAuthCookie(data.session);
+        await upsertAuthenticatedUserProfile(data.session).catch((error) => {
+          console.error('Failed to store user profile:', error);
+        });
         setSession(data.session);
         setIsLoading(false);
       } else {
@@ -349,6 +353,9 @@ export default function DashboardPage() {
       if (!isMounted) return;
 
       await syncAuthCookie(nextSession);
+      await upsertAuthenticatedUserProfile(nextSession).catch((error) => {
+        console.error('Failed to store user profile:', error);
+      });
       setSession(nextSession);
       setIsLoading(false);
       if (!nextSession) {

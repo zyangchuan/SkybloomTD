@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -23,6 +24,15 @@ func (r *UserRepository) Ping(ctx context.Context) error {
 		return err
 	}
 	return sqlDB.PingContext(ctx)
+}
+
+func (r *UserRepository) GetByID(ctx context.Context, userID uuid.UUID) (models.User, error) {
+	var user models.User
+	err := r.db.WithContext(ctx).First(&user, "id = ?", userID).Error
+	if err != nil {
+		return models.User{}, err
+	}
+	return user, nil
 }
 
 func (r *UserRepository) Upsert(ctx context.Context, user models.User) (models.User, error) {

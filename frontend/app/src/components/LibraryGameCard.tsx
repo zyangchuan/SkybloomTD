@@ -53,7 +53,7 @@ export default function LibraryGameCard({
             {game.game_name}
           </span>
           <span className="text-[12px] text-white/45 font-mono mt-0.5 flex gap-2 items-center flex-wrap">
-            <span>Uploaded: {new Date(game.created_at).toLocaleString()}</span>
+            <span>Uploaded: {new Date(game.created_at).toLocaleDateString()}</span>
             {isOwner ? (
               <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 text-[10px] font-bold">
                 Owned

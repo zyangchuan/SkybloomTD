@@ -51,7 +51,7 @@ type LevelGenerationRecord struct {
 }
 
 func (LevelGenerationRecord) TableName() string {
-	return "level_generation_jobs"
+	return "private.level_generation_jobs"
 }
 
 type GenerationStatus struct {

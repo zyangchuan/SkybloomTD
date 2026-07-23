@@ -57,6 +57,8 @@ jobs:
             git fetch origin staging
             git reset --hard origin/staging
 
+            docker system prune -f
+
             docker compose \
               -f docker-compose.yml \
               -f docker-compose.staging.yml \

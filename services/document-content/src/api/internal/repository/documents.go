@@ -19,6 +19,14 @@ type DocumentRepository struct {
 }
 
 const gameLibraryPageSize = 10
+const (
+	documentsTable    = "private.documents"
+	starredGamesTable = "private.starred_games"
+	chaptersTable     = "private.chapters"
+	subChaptersTable  = "private.sub_chapters"
+	levelsTable       = "private.levels"
+	quizzesTable      = "private.quizzes"
+)
 
 type gameCursor struct {
 	SortTime   time.Time
@@ -86,7 +94,7 @@ func (r *DocumentRepository) SetDocumentVisibility(ctx context.Context, document
 func (r *DocumentRepository) ListPublicGames(ctx context.Context, userID uuid.UUID, cursor string) (models.ListGameLibraryResponse, error) {
 	var rows []gameLibraryRow
 	query := r.db.WithContext(ctx).
-		Table("documents AS d").
+		Table(documentsTable+" AS d").
 		Select(`
 			d.id AS document_id,
 			d.user_id,
@@ -96,9 +104,9 @@ func (r *DocumentRepository) ListPublicGames(ctx context.Context, userID uuid.UU
 			d.is_public,
 			d.created_at,
 			d.updated_at,
-			starred_games.user_id IS NOT NULL AS starred_by_me
+			sg.user_id IS NOT NULL AS starred_by_me
 		`).
-		Joins("LEFT JOIN starred_games ON starred_games.document_id = d.id AND starred_games.user_id = ?", userID).
+		Joins("LEFT JOIN "+starredGamesTable+" AS sg ON sg.document_id = d.id AND sg.user_id = ?", userID).
 		Where("d.is_public = true AND d.is_ready = true")
 
 	if cursor != "" {
@@ -122,7 +130,7 @@ func (r *DocumentRepository) ListPublicGames(ctx context.Context, userID uuid.UU
 func (r *DocumentRepository) ListStarredGames(ctx context.Context, userID uuid.UUID, cursor string) (models.ListGameLibraryResponse, error) {
 	var rows []gameLibraryRow
 	query := r.db.WithContext(ctx).
-		Table("starred_games AS sg").
+		Table(starredGamesTable+" AS sg").
 		Select(`
 			d.id AS document_id,
 			d.user_id,
@@ -135,7 +143,7 @@ func (r *DocumentRepository) ListStarredGames(ctx context.Context, userID uuid.U
 			true AS starred_by_me,
 			sg.created_at AS starred_at
 		`).
-		Joins("JOIN documents AS d ON d.id = sg.document_id").
+		Joins("JOIN "+documentsTable+" AS d ON d.id = sg.document_id").
 		Where("sg.user_id = ?", userID).
 		Where("d.user_id = ? OR (d.is_public = true AND d.is_ready = true)", userID)
 
@@ -169,7 +177,7 @@ func (r *DocumentRepository) StarGame(ctx context.Context, documentID uuid.UUID,
 			return models.ErrDocumentNotFound
 		}
 		return tx.Exec(`
-			INSERT INTO starred_games (user_id, document_id)
+			INSERT INTO private.starred_games (user_id, document_id)
 			VALUES (?, ?)
 			ON CONFLICT (user_id, document_id) DO NOTHING
 		`, userID, documentID).Error
@@ -178,7 +186,7 @@ func (r *DocumentRepository) StarGame(ctx context.Context, documentID uuid.UUID,
 
 func (r *DocumentRepository) UnstarGame(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).
-		Exec("DELETE FROM starred_games WHERE user_id = ? AND document_id = ?", userID, documentID).
+		Exec("DELETE FROM private.starred_games WHERE user_id = ? AND document_id = ?", userID, documentID).
 		Error
 }
 
@@ -260,7 +268,7 @@ func (r *DocumentRepository) ListDocumentChapters(ctx context.Context, documentI
 
 	var chapters []models.ChapterSummary
 	if err := r.db.WithContext(ctx).
-		Table("chapters AS c").
+		Table(chaptersTable+" AS c").
 		Select(`
 			c.id AS chapter_id,
 			c.document_id,
@@ -281,8 +289,8 @@ func (r *DocumentRepository) ListDocumentChapters(ctx context.Context, documentI
 func (r *DocumentRepository) ListChapterSubChapters(ctx context.Context, chapterID uuid.UUID, userID uuid.UUID) ([]models.SubChapterSummary, error) {
 	var count int64
 	if err := r.db.WithContext(ctx).
-		Table("chapters AS c").
-		Joins("JOIN documents AS d ON d.id = c.document_id").
+		Table(chaptersTable+" AS c").
+		Joins("JOIN "+documentsTable+" AS d ON d.id = c.document_id").
 		Where("c.id = ? AND (d.user_id = ? OR (d.is_public = true AND d.is_ready = true))", chapterID, userID).
 		Count(&count).Error; err != nil {
 		return nil, err
@@ -293,7 +301,7 @@ func (r *DocumentRepository) ListChapterSubChapters(ctx context.Context, chapter
 
 	var subChapters []models.SubChapterSummary
 	if err := r.db.WithContext(ctx).
-		Table("sub_chapters AS sc").
+		Table(subChaptersTable+" AS sc").
 		Select(`
 			sc.id AS sub_chapter_id,
 			sc.document_id,
@@ -315,24 +323,24 @@ func (r *DocumentRepository) ListChapterSubChapters(ctx context.Context, chapter
 func (r *DocumentRepository) DeleteDocumentCascade(ctx context.Context, documentID uuid.UUID, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec(
-			`DELETE FROM quizzes
+			`DELETE FROM `+quizzesTable+`
 			WHERE level_id IN (
-				SELECT id FROM levels WHERE document_id = ?
+				SELECT id FROM `+levelsTable+` WHERE document_id = ?
 			)`,
 			documentID,
 		).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`DELETE FROM levels WHERE document_id = ?`, documentID).Error; err != nil {
+		if err := tx.Exec(`DELETE FROM `+levelsTable+` WHERE document_id = ?`, documentID).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`DELETE FROM starred_games WHERE document_id = ?`, documentID).Error; err != nil {
+		if err := tx.Exec(`DELETE FROM `+starredGamesTable+` WHERE document_id = ?`, documentID).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`DELETE FROM sub_chapters WHERE document_id = ?`, documentID).Error; err != nil {
+		if err := tx.Exec(`DELETE FROM `+subChaptersTable+` WHERE document_id = ?`, documentID).Error; err != nil {
 			return err
 		}
-		if err := tx.Exec(`DELETE FROM chapters WHERE document_id = ?`, documentID).Error; err != nil {
+		if err := tx.Exec(`DELETE FROM `+chaptersTable+` WHERE document_id = ?`, documentID).Error; err != nil {
 			return err
 		}
 

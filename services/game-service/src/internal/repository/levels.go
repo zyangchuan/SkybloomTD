@@ -19,6 +19,13 @@ type LevelRepository struct {
 	db *gorm.DB
 }
 
+const (
+	documentsTable           = "private.documents"
+	levelsTable              = "private.levels"
+	quizzesTable             = "private.quizzes"
+	levelGenerationJobsTable = "private.level_generation_jobs"
+)
+
 type LevelBootstrap struct {
 	LevelID             string     `json:"level_id"`
 	UserID              string     `json:"user_id"`
@@ -69,9 +76,9 @@ func NewLevelRepository(db *gorm.DB) *LevelRepository {
 func (r *LevelRepository) GetBootstrap(ctx context.Context, levelID string, userID string) (LevelBootstrap, error) {
 	var level models.Level
 	err := r.db.WithContext(ctx).
-		Table("levels").
+		Table(levelsTable).
 		Select("levels.*").
-		Joins("JOIN documents ON documents.id = levels.document_id").
+		Joins("JOIN "+documentsTable+" AS documents ON documents.id = levels.document_id").
 		Where("levels.id = ? AND (levels.user_id = ? OR (documents.is_public = true AND documents.is_ready = true))", levelID, userID).
 		First(&level).
 		Error
@@ -192,7 +199,7 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 		QuizCount              int
 	}
 	result := r.db.WithContext(ctx).
-		Table("levels").
+		Table(levelsTable).
 		Select(`
 			levels.id AS level_id,
 			levels.user_id AS user_id,
@@ -202,11 +209,11 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 			levels.map_seed AS map_seed,
 			levels.map_algorithm_version AS map_algorithm_version,
 			level_generation_jobs.id IS NOT NULL AS generation_record_exists,
-			(SELECT COUNT(*) FROM quizzes WHERE quizzes.level_id = levels.id) AS quiz_count
+			(SELECT COUNT(*) FROM private.quizzes AS quizzes WHERE quizzes.level_id = levels.id) AS quiz_count
 		`).
-		Joins("LEFT JOIN level_generation_jobs ON level_generation_jobs.id = levels.generation_id").
+		Joins("LEFT JOIN "+levelGenerationJobsTable+" AS level_generation_jobs ON level_generation_jobs.id = levels.generation_id").
 		Where("levels.user_id = ? AND levels.sub_chapter_id = ?", userID, subChapterID).
-		Where("EXISTS (SELECT 1 FROM quizzes WHERE quizzes.level_id = levels.id)").
+		Where("EXISTS (SELECT 1 FROM " + quizzesTable + " AS quizzes WHERE quizzes.level_id = levels.id)").
 		Order("levels.created_at DESC NULLS LAST, levels.id DESC").
 		Limit(1).
 		Scan(&row)
