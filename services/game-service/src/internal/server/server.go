@@ -31,6 +31,7 @@ import (
 var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 const gameTickInterval = 50 * time.Millisecond
+const fastGameTickInterval = time.Second / 40
 const gameTicksPerSecond = 20.0
 
 const placeTowerAction = "place_tower"
@@ -45,6 +46,8 @@ const markQuizStartedAction = "mark_quiz_started"
 const pauseGameAction = "pause_game"
 const resumeGameAction = "resume_game"
 const startGameAction = "start_game"
+const speedNormalGameAction = "speed_normal_game"
+const speedOneAndHalfGameAction = "speed_1_5x_game"
 
 const (
 	waveClearDelayTicks          = int64(60)
@@ -714,6 +717,20 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 				default:
 				}
 			}
+		case "game.speed.fast":
+			if gameLoop != nil && !gameLoop.stopped() {
+				select {
+				case gameLoop.actions <- clientAction{Type: speedOneAndHalfGameAction}:
+				default:
+				}
+			}
+		case "game.speed.normal":
+			if gameLoop != nil && !gameLoop.stopped() {
+				select {
+				case gameLoop.actions <- clientAction{Type: speedNormalGameAction}:
+				default:
+				}
+			}
 		case "game.session.run":
 			if gameLoop != nil && !gameLoop.stopped() {
 				select {
@@ -1102,6 +1119,10 @@ func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu 
 			case startGameAction:
 				runtime.loopStarted = true
 				s.saveRuntimeState(ctx, runtime)
+			case speedNormalGameAction:
+				ticker.Reset(gameTickInterval)
+			case speedOneAndHalfGameAction:
+				ticker.Reset(fastGameTickInterval)
 			default:
 				if action.Result != nil {
 					action.Result <- actionResult{Err: errors.New("unsupported action")}
@@ -2458,20 +2479,27 @@ func fireBirds(runtime *runtimeSession) []GameEvent {
 		if !bird.CanAttack(runtime.session.Tick, gameTicksPerSecond) {
 			continue
 		}
-		targetIndex := targetEnemyIndex(*bird, runtime.enemies)
-		if targetIndex < 0 {
-			continue
+		targetIndex := -1
+		target := gameobject.Enemy{}
+		if bird.AttackBehaviour.RequiresTarget() {
+			targetIndex = targetEnemyIndex(*bird, runtime.enemies)
+			if targetIndex < 0 {
+				continue
+			}
+			target = runtime.enemies[targetIndex]
 		}
-		target := runtime.enemies[targetIndex]
 		hits := bird.Attack(target, runtime.enemies, runtime.session.Tick)
 		if len(hits) == 0 {
 			continue
 		}
-		events = append(events, GameEvent{
-			Type:    "bird.attack",
-			BirdID:  bird.ID,
-			EnemyID: target.ID,
-		})
+		attackEvent := GameEvent{
+			Type:   "bird.attack",
+			BirdID: bird.ID,
+		}
+		if targetIndex >= 0 {
+			attackEvent.EnemyID = target.ID
+		}
+		events = append(events, attackEvent)
 		events = append(events, applyAttackHits(runtime, hits)...)
 	}
 	return events

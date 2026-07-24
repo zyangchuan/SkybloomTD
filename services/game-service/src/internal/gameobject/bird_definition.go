@@ -1,6 +1,11 @@
 package gameobject
 
-import "errors"
+import (
+	"errors"
+	"math"
+
+	"skybloom/game-service/internal/mapgen"
+)
 
 const (
 	BirdTypeSparrow    = "sparrow"
@@ -14,8 +19,10 @@ const (
 
 	AttackTypeSingle = "single"
 	AttackTypeSplash = "splash"
+	AttackTypeRing   = "ring"
 
 	StandardProjectileSpeed = 8.0
+	StandardSplashSpread    = DefaultSplashSpreadRadians
 )
 
 type BirdDefinition struct {
@@ -77,6 +84,7 @@ var birdDefinitions = map[string]BirdDefinition{
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        1.0,
 			Range:           2.1,
+			Spread:          StandardSplashSpread,
 			Cost:            90,
 		},
 		AttackType: AttackTypeSplash,
@@ -100,6 +108,7 @@ var birdDefinitions = map[string]BirdDefinition{
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        3.0,
 			Range:           2.4,
+			Spread:          StandardSplashSpread,
 			Cost:            50,
 		},
 		AttackType: AttackTypeSplash,
@@ -111,19 +120,21 @@ var birdDefinitions = map[string]BirdDefinition{
 			Damage:          25,
 			ProjectileSpeed: StandardProjectileSpeed,
 			FireRate:        0.8,
-			Range:           3.0,
+			Range:           2.0,
 			Cost:            50,
 		},
-		AttackType: AttackTypeSplash,
+		AttackType: AttackTypeRing,
 		Hybrid:     true,
 	},
 	BirdTypeSunGod: {
 		Type: BirdTypeSunGod,
 		Stats: BirdStats{
-			Damage:          35,
+			Damage:          18,
 			ProjectileSpeed: StandardProjectileSpeed,
-			FireRate:        1.6,
-			Range:           3.6,
+			FireRate:        3.2,
+			Range:           4.5,
+			Spread:          math.Pi / 36,
+			Lifespan:        float64(mapgen.Width),
 			Cost:            150,
 		},
 		AttackType: AttackTypeSplash,
@@ -161,6 +172,8 @@ func AttackBehaviourForAttackType(attackType string) (AttackBehaviour, error) {
 		return SingleAttack{}, nil
 	case AttackTypeSplash:
 		return SplashAttack{}, nil
+	case AttackTypeRing:
+		return RingAttack{}, nil
 	default:
 		return nil, errors.New("unknown attack type")
 	}
