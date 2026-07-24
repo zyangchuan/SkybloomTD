@@ -259,6 +259,53 @@ export default function LevelsPage({ params }: PageProps) {
                 );
               })}
 
+              {/* Free Play stage using orange circle button */}
+              {(() => {
+                const isLeft = levels.length % 2 === 0;
+                return (
+                  <div
+                    onClick={() => {
+                      window.location.href = `/game/?document_id=${documentId}&chapter_id=${chapterId}&freeplay=true`;
+                    }}
+                    className={`relative z-10 flex flex-col items-center group transition-all duration-200 hover:scale-105 active:scale-95 cursor-pointer w-full max-w-[240px] select-none ${
+                      isLeft 
+                        ? '-translate-x-16 sm:-translate-x-28' 
+                        : 'translate-x-16 sm:translate-x-28'
+                    }`}
+                  >
+                    {/* Horizontal Dashed Connector Arm to the central path */}
+                    <div 
+                      className={`absolute top-10 h-0 border-t-4 border-dashed border-yellow-800/30 z-[-1] pointer-events-none ${
+                        isLeft 
+                          ? 'left-1/2 w-[64px] sm:w-[112px]' 
+                          : 'right-1/2 w-[64px] sm:w-[112px]'
+                      }`}
+                    />
+
+                    {/* Circular Orange Icon Button */}
+                    <button
+                      type="button"
+                      className="w-20 h-20 flex items-center justify-center text-white hover:brightness-110 active:scale-95 transition-all cursor-pointer select-none bg-transparent shrink-0 drop-shadow-[0_6px_8px_rgba(0,0,0,0.25)] group-hover:drop-shadow-[0_8px_12px_rgba(0,0,0,0.35)]"
+                      style={{
+                        backgroundImage: "url('/gui/buttons_icons/IconButton_Large_Orange_Circle.svg')",
+                        backgroundSize: '100% 100%',
+                        backgroundPosition: 'center',
+                        backgroundRepeat: 'no-repeat',
+                      }}
+                    >
+                      <span className="text-3xl font-extrabold text-white drop-shadow-[0_2.5px_0_rgba(0,0,0,0.4)] -mt-1.5">
+                        ∞
+                      </span>
+                    </button>
+
+                    {/* Level Title under the Circle */}
+                    <span className="mt-3 text-xs sm:text-sm text-[#4a1900] font-extrabold text-center drop-shadow-[0_1px_0_rgba(255,255,255,0.4)] group-hover:text-yellow-900 transition-colors max-w-[160px] leading-tight break-words px-1">
+                      Free Play
+                    </span>
+                  </div>
+                );
+              })()}
+
             </div>
 
           </div>

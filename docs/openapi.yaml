@@ -966,13 +966,30 @@ paths:
         a new quiz set. New quiz generations request exactly 30 quizzes. Quiz
         answer data is copied into the dedicated game Redis cache for
         authoritative validation during play.
+
+        For chapter-level free play, send `game.freeplay.start` with a
+        `chapter_id`. The server generates a fresh map, creates a chapter-scoped
+        quiz cache containing up to 15 randomly selected quizzes from ready
+        sub-chapter levels in that chapter, and queues normal sub-chapter level
+        generation for missing quiz sources. The server replies with
+        `freeplay.started`. When `status=ready`, send `game.freeplay.load` with
+        the returned `free_play_id` to receive `game.initial_state`, then send
+        `game.freeplay.session.start` with `free_play_id` and `chapter_id` to
+        create the gameplay session. Free play uses `game_mode=free_play`, has
+        no victory state, and continues generating increasingly difficult waves
+        until health reaches 0 or the client exits. When its active quiz cache
+        gets low, the server refills it from random ready sub-chapter quizzes
+        and keeps queueing generation for missing sub-chapter levels.
       operationId: openGameWebSocket
       security:
         - cookieAuth: []
       x-websocket-client-messages:
         - $ref: "#/components/schemas/GameStartWebSocketMessage"
+        - $ref: "#/components/schemas/GameFreePlayStartWebSocketMessage"
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
+        - $ref: "#/components/schemas/GameFreePlayLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
+        - $ref: "#/components/schemas/GameFreePlaySessionStartWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionRunWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
         - $ref: "#/components/schemas/GameMergeTowerActionMessage"
@@ -985,6 +1002,7 @@ paths:
         - $ref: "#/components/schemas/GameConsumableQuizAnswerMessage"
       x-websocket-server-messages:
         - $ref: "#/components/schemas/LevelGenerationStartedMessage"
+        - $ref: "#/components/schemas/FreePlayStartedMessage"
         - $ref: "#/components/schemas/GameInitialStateMessage"
         - $ref: "#/components/schemas/GameSessionStartedMessage"
         - $ref: "#/components/schemas/GameStateMessage"
@@ -1485,6 +1503,22 @@ components:
               format: uuid
               description: Indexed sub-chapter to generate a level for.
 
+    GameFreePlayStartWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.freeplay.start
+        data:
+          type: object
+          required: [chapter_id]
+          properties:
+            chapter_id:
+              type: string
+              format: uuid
+              description: Chapter whose sub-chapter quizzes should feed free play.
+
     GameLoadWebSocketMessage:
       type: object
       required: [type, data]
@@ -1501,6 +1535,22 @@ components:
               format: uuid
               description: Completed level id returned by generation status.
 
+    GameFreePlayLoadWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.freeplay.load
+        data:
+          type: object
+          required: [free_play_id]
+          properties:
+            free_play_id:
+              type: string
+              format: uuid
+              description: Free play id returned by `freeplay.started`.
+
     GameSessionStartWebSocketMessage:
       type: object
       required: [type, data]
@@ -1516,6 +1566,26 @@ components:
               type: string
               format: uuid
               description: Completed level id to start an authoritative gameplay session for.
+
+    GameFreePlaySessionStartWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.freeplay.session.start
+        data:
+          type: object
+          required: [free_play_id, chapter_id]
+          properties:
+            free_play_id:
+              type: string
+              format: uuid
+              description: Free play id returned by `freeplay.started`.
+            chapter_id:
+              type: string
+              format: uuid
+              description: Chapter id used to start free play.
 
     GameSessionRunWebSocketMessage:
       type: object
@@ -1707,6 +1777,16 @@ components:
           const: level_generation.started
         data:
           $ref: "#/components/schemas/LevelGenerationStartResult"
+
+    FreePlayStartedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: freeplay.started
+        data:
+          $ref: "#/components/schemas/FreePlayStartResult"
 
     GameInitialStateMessage:
       type: object
@@ -1933,6 +2013,49 @@ components:
           type: string
           example: /api/game-service/level-generation/0d2a8c64c36f4a7d88442a7517c9f014/status
 
+    FreePlayStartResult:
+      type: object
+      required:
+        - free_play_id
+        - chapter_id
+        - status
+        - ready_quiz_count
+        - queued_sub_chapters
+        - total_sub_chapters
+        - map_seed
+        - map_algorithm_version
+      properties:
+        free_play_id:
+          type: string
+          format: uuid
+          description: Chapter-scoped free play id used as the map, quiz cache, and session level key.
+        chapter_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ready, preparing]
+          description: "`ready` means at least one quiz was cached and the client can load free play. `preparing` means no ready sub-chapter quizzes were available yet."
+        ready_quiz_count:
+          type: integer
+          minimum: 0
+          maximum: 15
+          description: Number of quizzes placed into the initial free play cache.
+        queued_sub_chapters:
+          type: integer
+          minimum: 0
+          description: Number of missing sub-chapter levels queued for normal generation.
+        total_sub_chapters:
+          type: integer
+          minimum: 1
+          description: Number of sub-chapters found in the requested chapter.
+        map_seed:
+          type: integer
+          format: int64
+        map_algorithm_version:
+          type: integer
+          example: 1
+
     LevelGenerationStatus:
       type: object
       required:
@@ -1992,6 +2115,10 @@ components:
       properties:
         map:
           $ref: "#/components/schemas/GeneratedMap"
+        game_mode:
+          type: string
+          enum: [normal, free_play]
+          description: Present as `free_play` for free play map loads.
 
     GameState:
       type: object
@@ -2064,6 +2191,10 @@ components:
           description: Transient events emitted for this tick, such as attacks, damage, spawns, escapes, and wave starts.
           items:
             $ref: "#/components/schemas/GameEvent"
+        game_mode:
+          type: string
+          enum: [normal, free_play]
+          description: Session mode. Free play sessions continue waves indefinitely and never emit `game.victory`.
 
     GameOverState:
       type: object

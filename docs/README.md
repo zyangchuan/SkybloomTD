@@ -267,6 +267,48 @@ session for that user and level, including placed birds, active enemies, active
 projectiles, health, wave, tick, current essence, whether the loop has started,
 and whether the loop is paused, until the session expires.
 
+To start chapter-level free play instead of a normal sub-chapter level, send:
+
+```json
+{
+  "type": "game.freeplay.start",
+  "data": {
+    "chapter_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+The server replies with `freeplay.started`. When `status` is `ready`, use the
+returned `free_play_id` to load the generated free-play map:
+
+```json
+{
+  "type": "game.freeplay.load",
+  "data": {
+    "free_play_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+Then create the free-play gameplay session:
+
+```json
+{
+  "type": "game.freeplay.session.start",
+  "data": {
+    "free_play_id": "00000000-0000-0000-0000-000000000000",
+    "chapter_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+Free play generates a fresh map, caches up to 15 random quizzes from ready
+sub-chapter levels in the chapter, and queues normal generation for missing
+sub-chapter levels. When the active quiz cache gets low, it refills from random
+ready sub-chapter quizzes. Free play sessions report `game_mode=free_play`,
+continue spawning increasingly difficult waves indefinitely, and only end by
+health reaching 0 or by client exit.
+
 The gameplay loop currently runs three smog waves. Each wave is split into
 three subwaves of grouped smog spawns, with larger gaps between individual
 smogs and a pause between subwaves. The first wave starts on the first gameplay

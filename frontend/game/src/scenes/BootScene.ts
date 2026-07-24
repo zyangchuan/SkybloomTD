@@ -6,6 +6,8 @@ export default class BootScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private pollIntervalId: any = null;
   private subChapterId: string | null = null;
+  private chapterId: string | null = null;
+  private isFreePlay = false;
   private loadingTween!: Phaser.Tweens.Tween;
   private levelId: string | null = null; // Stored level ID to pass to GameScene
 
@@ -16,6 +18,8 @@ export default class BootScene extends Phaser.Scene {
   init() {
     const params = new URLSearchParams(window.location.search);
     this.subChapterId = params.get('sub_chapter_id');
+    this.chapterId = params.get('chapter_id');
+    this.isFreePlay = params.get('freeplay') === 'true';
     this.cameras.main.setBackgroundColor('#0f172a');
   }
 
@@ -161,8 +165,12 @@ export default class BootScene extends Phaser.Scene {
       color: '#78350f',
     }).setOrigin(0.5);
 
-    if (!this.subChapterId) {
+    if (!this.isFreePlay && !this.subChapterId) {
       this.showError('No level specified in URL parameters.');
+      return;
+    }
+    if (this.isFreePlay && !this.chapterId) {
+      this.showError('No chapter specified for free play.');
       return;
     }
 
@@ -210,14 +218,23 @@ export default class BootScene extends Phaser.Scene {
       return;
     }
 
-    const startMsg = {
-      type: 'game.start',
-      data: {
-        sub_chapter_id: this.subChapterId
-      }
-    };
-
-    this.ws.send(JSON.stringify(startMsg));
+    if (this.isFreePlay) {
+      const startMsg = {
+        type: 'game.freeplay.start',
+        data: {
+          chapter_id: this.chapterId
+        }
+      };
+      this.ws.send(JSON.stringify(startMsg));
+    } else {
+      const startMsg = {
+        type: 'game.start',
+        data: {
+          sub_chapter_id: this.subChapterId
+        }
+      };
+      this.ws.send(JSON.stringify(startMsg));
+    }
   }
 
   private handleWebSocketMessage(message: any) {
@@ -241,6 +258,27 @@ export default class BootScene extends Phaser.Scene {
         }
         break;
 
+      case 'freeplay.started': {
+        const { free_play_id, status } = message.data;
+
+        if (free_play_id) {
+          this.levelId = free_play_id; // Save retrieved free play ID as levelId
+          if (status === 'ready') {
+            this.detailText.setText('Free play ready! Loading session...');
+            this.loadFreePlaySession(free_play_id);
+          } else if (status === 'preparing') {
+            this.detailText.setText('Preparing quizzes from chapter...');
+            // Wait 2 seconds and request start again to check status
+            this.time.delayedCall(2000, () => {
+              this.startGameGeneration();
+            });
+          }
+        } else {
+          this.showError('Invalid free play start message received.');
+        }
+        break;
+      }
+
       case 'game.initial_state':
         this.detailText.setText('Session loaded! Booting scene...');
         this.cleanup();
@@ -258,7 +296,9 @@ export default class BootScene extends Phaser.Scene {
         this.scene.start('GameScene', {
           initialState: message.data,
           ws: transferredWs,
-          levelId: this.levelId
+          levelId: this.levelId,
+          chapterId: this.chapterId,
+          isFreePlay: this.isFreePlay
         });
         break;
 
@@ -269,6 +309,22 @@ export default class BootScene extends Phaser.Scene {
       default:
         console.warn('Unhandled message type:', message.type);
     }
+  }
+
+  private loadFreePlaySession(freePlayId: string) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.showError('Connection lost. Cannot load game session.');
+      return;
+    }
+
+    const loadMsg = {
+      type: 'game.freeplay.load',
+      data: {
+        free_play_id: freePlayId
+      }
+    };
+
+    this.ws.send(JSON.stringify(loadMsg));
   }
 
   private startPollingStatus(statusUrl: string) {

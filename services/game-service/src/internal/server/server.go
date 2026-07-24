@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"math"
+	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
@@ -66,10 +67,14 @@ const (
 	airstrikeTargetCount         = 3
 	airstrikeDamage              = 80.0
 	airstrikeRadius              = 2.0
+	freePlayQuizBatchSize        = 15
+	freePlayQuizRefillThreshold  = 5
 )
 
 type LevelRepository interface {
+	FindReusableLevelWithQuizzes(ctx context.Context, userID string, subChapterID string) (models.ReusableLevel, error)
 	GetBootstrap(ctx context.Context, levelID string, userID string) (repository.LevelBootstrap, error)
+	ListChapterSubChapters(ctx context.Context, chapterID string, userID string) ([]repository.SubChapterSummary, error)
 	Ping(ctx context.Context) error
 }
 
@@ -92,6 +97,7 @@ type MapCache interface {
 
 type QuizCache interface {
 	AcquireRefillLease(ctx context.Context, generationID string, leaseValue string, ttl time.Duration) (bool, error)
+	Append(ctx context.Context, generationID string, quizzes []quizcache.CachedQuiz) (int, error)
 	Get(ctx context.Context, generationID string) (quizcache.LevelQuizzes, error)
 	PeekRandom(ctx context.Context, generationID string) (quizcache.CachedQuiz, int, error)
 	ReleaseRefillLease(ctx context.Context, generationID string, leaseValue string) error
@@ -133,7 +139,8 @@ type Message struct {
 }
 
 type InitialState struct {
-	Map mapgen.GeneratedMap `json:"map"`
+	Map      mapgen.GeneratedMap `json:"map"`
+	GameMode string              `json:"game_mode,omitempty"`
 }
 
 type GameState struct {
@@ -154,6 +161,18 @@ type GameState struct {
 	Projectiles                  []ProjectileState `json:"projectiles"`
 	Consumables                  ConsumableState   `json:"consumables"`
 	Events                       []GameEvent       `json:"events,omitempty"`
+	GameMode                     string            `json:"game_mode,omitempty"`
+}
+
+type FreePlayStartResult struct {
+	FreePlayID          string `json:"free_play_id"`
+	ChapterID           string `json:"chapter_id"`
+	Status              string `json:"status"`
+	ReadyQuizCount      int    `json:"ready_quiz_count"`
+	QueuedSubChapters   int    `json:"queued_sub_chapters"`
+	TotalSubChapters    int    `json:"total_sub_chapters"`
+	MapSeed             int64  `json:"map_seed"`
+	MapAlgorithmVersion int    `json:"map_algorithm_version"`
 }
 
 type BirdTypeInfo struct {
@@ -371,6 +390,8 @@ type runningGameLoop struct {
 	levelID                 string
 	generationID            string
 	subChapterID            string
+	chapterID               string
+	gameMode                string
 	userID                  string
 	currentQuizID           string
 	currentConsumableQuizID string
@@ -407,6 +428,8 @@ func stopGameLoop(loop *runningGameLoop) {
 
 type runtimeSession struct {
 	session                 gamesession.State
+	gameMode                string
+	chapterID               string
 	economy                 gamesession.Economy
 	birds                   []placedBird
 	enemies                 []gameobject.Enemy
@@ -601,9 +624,25 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 					return
 				}
 			}
+		case "game.freeplay.start":
+			if err := s.handleFreePlayStart(ctx, conn, writeMu, userID, message.Data); err != nil {
+				log.Printf("game.freeplay.start failed user_id=%s: %v", userID, err)
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+			}
 		case "game.load":
 			if err := s.handleLoad(ctx, conn, writeMu, userID, message.Data); err != nil {
 				log.Printf("game.load failed user_id=%s: %v", userID, err)
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+			}
+		case "game.freeplay.load":
+			if err := s.handleFreePlayLoad(ctx, conn, writeMu, userID, message.Data); err != nil {
+				log.Printf("game.freeplay.load failed user_id=%s: %v", userID, err)
 				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
 					log.Printf("websocket error write failed: %v", writeErr)
 					return
@@ -617,6 +656,21 @@ func (s *Server) readLoop(ctx context.Context, conn *websocket.Conn, writeMu *sy
 			loop, err := s.handleSessionStart(ctx, conn, writeMu, userID, message.Data)
 			if err != nil {
 				log.Printf("game.session.start failed user_id=%s: %v", userID, err)
+				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
+					log.Printf("websocket error write failed: %v", writeErr)
+					return
+				}
+				continue
+			}
+			gameLoop = loop
+		case "game.freeplay.session.start":
+			if gameLoop != nil {
+				stopGameLoop(gameLoop)
+				gameLoop = nil
+			}
+			loop, err := s.handleFreePlaySessionStart(ctx, conn, writeMu, userID, message.Data)
+			if err != nil {
+				log.Printf("game.freeplay.session.start failed user_id=%s: %v", userID, err)
 				if writeErr := writeWebsocketJSON(conn, writeMu, Message{Type: "error", Data: map[string]string{"error": err.Error()}}); writeErr != nil {
 					log.Printf("websocket error write failed: %v", writeErr)
 					return
@@ -863,6 +917,67 @@ func (s *Server) handleStart(ctx context.Context, conn *websocket.Conn, writeMu 
 	return writeWebsocketJSON(conn, writeMu, Message{Type: "level_generation.started", Data: result})
 }
 
+func (s *Server) handleFreePlayStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
+	if s.quizzes == nil || s.maps == nil || s.levels == nil {
+		return errors.New("free play is not configured")
+	}
+	var request struct {
+		ChapterID string `json:"chapter_id"`
+	}
+	if err := decodeMessageData(data, &request); err != nil {
+		return errors.New("game.freeplay.start data must include chapter_id")
+	}
+	chapterID := strings.TrimSpace(request.ChapterID)
+	if !uuidPattern.MatchString(chapterID) {
+		return errors.New("chapter_id must be a valid UUID")
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	subChapters, err := s.levels.ListChapterSubChapters(callCtx, chapterID, userID)
+	if err != nil {
+		log.Printf("free play subchapter lookup failed chapter_id=%s user_id=%s: %v", chapterID, userID, err)
+		return errors.New("failed to load chapter levels")
+	}
+	if len(subChapters) == 0 {
+		return errors.New("chapter has no levels")
+	}
+
+	freePlayID := uuid.NewString()
+	mapSeed := time.Now().UTC().UnixNano()
+	levelMap, err := mapgen.Generate(mapSeed, mapgen.Version)
+	if err != nil {
+		return errors.New("failed to generate free play map")
+	}
+	if err := s.maps.Set(callCtx, freePlayID, levelMap); err != nil {
+		log.Printf("free play map cache write failed free_play_id=%s: %v", freePlayID, err)
+		return errors.New("failed to cache free play map")
+	}
+
+	readyCount, queuedCount, err := s.fillFreePlayQuizCache(callCtx, userID, freePlayID, chapterID, subChapters, freePlayQuizBatchSize)
+	if err != nil {
+		return err
+	}
+	status := "ready"
+	if readyCount == 0 {
+		status = "preparing"
+	}
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "freeplay.started",
+		Data: FreePlayStartResult{
+			FreePlayID:          freePlayID,
+			ChapterID:           chapterID,
+			Status:              status,
+			ReadyQuizCount:      readyCount,
+			QueuedSubChapters:   queuedCount,
+			TotalSubChapters:    len(subChapters),
+			MapSeed:             mapSeed,
+			MapAlgorithmVersion: mapgen.Version,
+		},
+	})
+}
+
 func (s *Server) handleLoad(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
 	var request struct {
 		LevelID string `json:"level_id"`
@@ -875,6 +990,35 @@ func (s *Server) handleLoad(ctx context.Context, conn *websocket.Conn, writeMu *
 		return errors.New("level_id must be a valid UUID")
 	}
 	return s.writeInitialState(ctx, conn, writeMu, userID, levelID)
+}
+
+func (s *Server) handleFreePlayLoad(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) error {
+	var request struct {
+		FreePlayID string `json:"free_play_id"`
+	}
+	if err := decodeMessageData(data, &request); err != nil {
+		return errors.New("game.freeplay.load data must include free_play_id")
+	}
+	freePlayID := strings.TrimSpace(request.FreePlayID)
+	if !uuidPattern.MatchString(freePlayID) {
+		return errors.New("free_play_id must be a valid UUID")
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := s.quizzes.Get(callCtx, freePlayID); errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		return errors.New("free play quizzes are still preparing")
+	} else if err != nil {
+		return errors.New("failed to load free play quizzes")
+	}
+	levelMap, err := s.maps.Get(callCtx, mapgen.Version, freePlayID)
+	if err != nil {
+		log.Printf("free play map load failed free_play_id=%s user_id=%s: %v", freePlayID, userID, err)
+		return errors.New("failed to load free play map")
+	}
+	return writeWebsocketJSON(conn, writeMu, Message{
+		Type: "game.initial_state",
+		Data: InitialState{Map: levelMap, GameMode: gamesession.GameModeFreePlay},
+	})
 }
 
 func (s *Server) writeInitialState(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, levelID string) error {
@@ -973,6 +1117,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 
 	runtime := runtimeSession{
 		session:     session,
+		gameMode:    gamesession.GameModeNormal,
 		economy:     gamesession.NewEconomy(session.Essence),
 		birds:       restoredBirds,
 		enemies:     enemiesFromStored(storedRuntime.Enemies),
@@ -1031,6 +1176,7 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 		levelID:                 runtime.session.LevelID,
 		generationID:            runtime.session.GenerationID,
 		subChapterID:            runtime.session.SubChapterID,
+		gameMode:                gamesession.GameModeNormal,
 		userID:                  runtime.session.UserID,
 		currentQuizID:           currentQuizID,
 		currentConsumableQuizID: runtime.consumables.Airstrike.PendingQuizID,
@@ -1043,6 +1189,214 @@ func (s *Server) handleSessionStart(ctx context.Context, conn *websocket.Conn, w
 	}
 	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop)
 	return loop, nil
+}
+
+func (s *Server) handleFreePlaySessionStart(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, userID string, data any) (*runningGameLoop, error) {
+	if s.sessions == nil || s.quizzes == nil || s.maps == nil {
+		return nil, errors.New("free play session store is not configured")
+	}
+	var request struct {
+		FreePlayID string `json:"free_play_id"`
+		ChapterID  string `json:"chapter_id"`
+	}
+	if err := decodeMessageData(data, &request); err != nil {
+		return nil, errors.New("game.freeplay.session.start data must include free_play_id and chapter_id")
+	}
+	freePlayID := strings.TrimSpace(request.FreePlayID)
+	chapterID := strings.TrimSpace(request.ChapterID)
+	if !uuidPattern.MatchString(freePlayID) {
+		return nil, errors.New("free_play_id must be a valid UUID")
+	}
+	if !uuidPattern.MatchString(chapterID) {
+		return nil, errors.New("chapter_id must be a valid UUID")
+	}
+
+	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	levelMap, err := s.maps.Get(callCtx, mapgen.Version, freePlayID)
+	if err != nil {
+		log.Printf("free play map load failed free_play_id=%s: %v", freePlayID, err)
+		return nil, errors.New("failed to load free play map")
+	}
+	if _, err := s.quizzes.Get(callCtx, freePlayID); errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		return nil, errors.New("free play quizzes are still preparing")
+	} else if err != nil {
+		return nil, errors.New("failed to load free play quizzes")
+	}
+
+	session, err := s.sessions.Start(callCtx, gamesession.StartOptions{
+		UserID:       userID,
+		LevelID:      freePlayID,
+		GenerationID: freePlayID,
+		ChapterID:    chapterID,
+		GameMode:     gamesession.GameModeFreePlay,
+	})
+	if err != nil {
+		log.Printf("free play session create failed free_play_id=%s user_id=%s: %v", freePlayID, userID, err)
+		return nil, errors.New("failed to start free play session")
+	}
+	if err := s.sessions.ClearQuizMistakes(callCtx, session.SessionID, userID); err != nil && !errors.Is(err, gamesession.ErrSessionNotFound) {
+		log.Printf("failed to clear free play quiz mistakes session_id=%s user_id=%s: %v", session.SessionID, userID, err)
+	}
+	storedRuntime, err := s.sessions.LoadRuntimeState(callCtx, session.SessionID)
+	if err != nil {
+		log.Printf("free play runtime load failed session_id=%s: %v", session.SessionID, err)
+		return nil, errors.New("failed to load free play session")
+	}
+	storedRuntime = normalizeRuntimeState(storedRuntime)
+	restoredBirds, err := placedBirdsFromStored(storedRuntime.Birds)
+	if err != nil {
+		return nil, errors.New("failed to restore free play session")
+	}
+	session.Health = storedRuntime.Health
+	session.Essence = storedRuntime.Essence
+	session.Wave = storedRuntime.Wave
+	session.Tick = storedRuntime.Tick
+
+	runtime := runtimeSession{
+		session:     session,
+		gameMode:    gamesession.GameModeFreePlay,
+		chapterID:   chapterID,
+		economy:     gamesession.NewEconomy(session.Essence),
+		birds:       restoredBirds,
+		enemies:     enemiesFromStored(storedRuntime.Enemies),
+		projectiles: projectilesFromStored(storedRuntime.Projectiles),
+		consumables: consumablesFromStored(storedRuntime.Consumables),
+		levelMap:    levelMap,
+		path:        gamePath(levelMap),
+		loopStarted: storedRuntime.LoopStarted,
+		loopPaused:  storedRuntime.LoopPaused,
+
+		lastQuizStartedAt:       storedRuntime.LastQuizStartedAt,
+		consumableCooldownUntil: storedRuntime.ConsumableCooldownUntil,
+		waveStartedAtTick:       storedRuntime.WaveStartedAtTick,
+		waveSpawned:             storedRuntime.WaveSpawned,
+		nextWaveTick:            storedRuntime.NextWaveTick,
+	}
+	if runtime.session.Health > 0 {
+		runtime.loopStarted = false
+		runtime.loopPaused = false
+		if err := s.saveRuntimeState(callCtx, runtime); err != nil {
+			return nil, errors.New("failed to start free play session")
+		}
+	}
+	state := gameStateFromRuntime(runtime, nil, session.UpdatedAt, birdTypeCatalog(), enemyTypeCatalog(), nil)
+	if err := writeWebsocketJSON(conn, writeMu, Message{Type: "game.session.started", Data: state}); err != nil {
+		return nil, err
+	}
+	if runtime.session.Health <= 0 {
+		s.cleanupQuizCacheAfterGameEnd(ctx, runtime, "health_depleted")
+		if err := writeGameOver(conn, writeMu, runtime, "health_depleted"); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	currentQuizID := ""
+	if runtime.consumables.Airstrike.PendingQuizID == "" {
+		if quizzes, err := s.quizzes.Get(callCtx, runtime.session.GenerationID); err == nil {
+			currentQuizID = strings.TrimSpace(quizzes.CurrentQuizID)
+		}
+	}
+	loopCtx, stop := context.WithCancel(ctx)
+	loop := &runningGameLoop{
+		sessionID:               runtime.session.SessionID,
+		levelID:                 runtime.session.LevelID,
+		generationID:            runtime.session.GenerationID,
+		chapterID:               chapterID,
+		gameMode:                gamesession.GameModeFreePlay,
+		userID:                  runtime.session.UserID,
+		currentQuizID:           currentQuizID,
+		currentConsumableQuizID: runtime.consumables.Airstrike.PendingQuizID,
+		lastQuizStartedAt:       runtime.lastQuizStartedAt,
+		consumableCooldownUntil: runtime.consumableCooldownUntil,
+		loopStarted:             runtime.loopStarted,
+		stop:                    stop,
+		actions:                 make(chan clientAction, 64),
+		done:                    make(chan struct{}),
+	}
+	go s.runGameLoop(loopCtx, conn, writeMu, runtime, loop)
+	return loop, nil
+}
+
+func (s *Server) fillFreePlayQuizCache(
+	ctx context.Context,
+	userID string,
+	freePlayID string,
+	chapterID string,
+	subChapters []repository.SubChapterSummary,
+	targetCount int,
+) (int, int, error) {
+	if targetCount <= 0 {
+		targetCount = freePlayQuizBatchSize
+	}
+	selected, queued, err := s.freePlayQuizBatch(ctx, userID, subChapters, targetCount)
+	if err != nil {
+		return 0, queued, err
+	}
+	if len(selected) == 0 {
+		return 0, queued, nil
+	}
+	if err := s.quizzes.Set(ctx, freePlayID, quizcache.LevelQuizzes{
+		GenerationID: freePlayID,
+		LevelID:      freePlayID,
+		UserID:       userID,
+		SubChapterID: chapterID,
+		Quizzes:      selected,
+	}); err != nil {
+		return 0, queued, errors.New("failed to cache free play quizzes")
+	}
+	return len(selected), queued, nil
+}
+
+func (s *Server) freePlayQuizBatch(
+	ctx context.Context,
+	userID string,
+	subChapters []repository.SubChapterSummary,
+	targetCount int,
+) ([]quizcache.CachedQuiz, int, error) {
+	shuffled := append([]repository.SubChapterSummary(nil), subChapters...)
+	rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+
+	selected := make([]quizcache.CachedQuiz, 0, targetCount)
+	queued := 0
+	for _, subChapter := range shuffled {
+		if len(selected) >= targetCount {
+			break
+		}
+		reusable, err := s.levels.FindReusableLevelWithQuizzes(ctx, userID, subChapter.SubChapterID)
+		if errors.Is(err, models.ErrLevelNotFound) {
+			if s.starter != nil {
+				if _, startErr := s.starter.Start(ctx, userID, subChapter.SubChapterID); startErr != nil {
+					log.Printf("free play background generation start failed sub_chapter_id=%s user_id=%s: %v", subChapter.SubChapterID, userID, startErr)
+				} else {
+					queued++
+				}
+			}
+			continue
+		}
+		if err != nil {
+			return nil, queued, errors.New("failed to load free play quizzes")
+		}
+		level, err := s.levels.GetBootstrap(ctx, reusable.LevelID, userID)
+		if err != nil {
+			return nil, queued, errors.New("failed to load free play quizzes")
+		}
+		candidates := quizcache.FromRepositoryQuizzes(level.Quizzes)
+		rand.New(rand.NewSource(time.Now().UnixNano())).Shuffle(len(candidates), func(i, j int) {
+			candidates[i], candidates[j] = candidates[j], candidates[i]
+		})
+		for _, quiz := range candidates {
+			if len(selected) >= targetCount {
+				break
+			}
+			selected = append(selected, quiz)
+		}
+	}
+	return selected, queued, nil
 }
 
 func (s *Server) runGameLoop(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, runtime runtimeSession, loop *runningGameLoop) {
@@ -1225,6 +1579,10 @@ func (s *Server) maybeTriggerQuizRefill(loop *runningGameLoop, remaining int) {
 	if loop == nil || s.quizzes == nil {
 		return
 	}
+	if loop.gameMode == gamesession.GameModeFreePlay {
+		s.maybeTriggerFreePlayQuizRefill(loop, remaining)
+		return
+	}
 	if s.refills == nil {
 		log.Printf("quiz refill skipped because publisher is not configured generation_id=%s level_id=%s remaining=%d", loop.generationID, loop.levelID, remaining)
 		return
@@ -1268,6 +1626,79 @@ func (s *Server) maybeTriggerQuizRefill(loop *runningGameLoop, remaining int) {
 		}
 		log.Printf("quiz refill queued generation_id=%s level_id=%s remaining=%d threshold=%d refill_id=%s", loop.generationID, loop.levelID, remaining, threshold, refillID)
 	}()
+}
+
+func (s *Server) maybeTriggerFreePlayQuizRefill(loop *runningGameLoop, remaining int) {
+	if loop == nil || s.quizzes == nil || s.levels == nil || strings.TrimSpace(loop.chapterID) == "" {
+		return
+	}
+	if remaining < 0 || remaining > freePlayQuizRefillThreshold {
+		return
+	}
+	refillID := uuid.NewString()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		acquired, err := s.quizzes.AcquireRefillLease(ctx, loop.generationID, refillID, s.config.QuizRefillLeaseTTL)
+		if err != nil {
+			log.Printf("free play quiz refill lease acquire failed free_play_id=%s: %v", loop.generationID, err)
+			return
+		}
+		if !acquired {
+			return
+		}
+		defer func() {
+			if err := s.quizzes.ReleaseRefillLease(context.Background(), loop.generationID, refillID); err != nil {
+				log.Printf("free play quiz refill lease release failed free_play_id=%s refill_id=%s: %v", loop.generationID, refillID, err)
+			}
+		}()
+
+		subChapters, err := s.levels.ListChapterSubChapters(ctx, loop.chapterID, loop.userID)
+		if err != nil {
+			log.Printf("free play quiz refill subchapter lookup failed chapter_id=%s user_id=%s: %v", loop.chapterID, loop.userID, err)
+			return
+		}
+		quizzes, queued, err := s.freePlayQuizBatch(ctx, loop.userID, subChapters, freePlayQuizBatchSize)
+		if err != nil {
+			log.Printf("free play quiz refill batch failed free_play_id=%s: %v", loop.generationID, err)
+			return
+		}
+		if len(quizzes) == 0 {
+			log.Printf("free play quiz refill waiting for generated subchapters free_play_id=%s queued=%d", loop.generationID, queued)
+			return
+		}
+		quizzes = s.excludeCachedFreePlayQuizzes(ctx, loop.generationID, quizzes)
+		if len(quizzes) == 0 {
+			return
+		}
+		cacheRemaining, err := s.quizzes.Append(ctx, loop.generationID, quizzes)
+		if err != nil {
+			log.Printf("free play quiz refill append failed free_play_id=%s: %v", loop.generationID, err)
+			return
+		}
+		log.Printf("free play quiz refill complete free_play_id=%s appended=%d remaining=%d queued=%d", loop.generationID, len(quizzes), cacheRemaining, queued)
+	}()
+}
+
+func (s *Server) excludeCachedFreePlayQuizzes(ctx context.Context, generationID string, candidates []quizcache.CachedQuiz) []quizcache.CachedQuiz {
+	existing, err := s.quizzes.Get(ctx, generationID)
+	if err != nil {
+		return candidates
+	}
+	seen := make(map[string]struct{}, len(existing.Quizzes))
+	for _, quiz := range existing.Quizzes {
+		seen[quiz.ID] = struct{}{}
+	}
+	filtered := candidates[:0]
+	for _, quiz := range candidates {
+		if _, ok := seen[quiz.ID]; ok {
+			continue
+		}
+		seen[quiz.ID] = struct{}{}
+		filtered = append(filtered, quiz)
+	}
+	return filtered
 }
 
 func (s *Server) quizService() *quizflow.Service {
@@ -2119,6 +2550,9 @@ func (s *Server) awardEssence(ctx context.Context, runtime *runtimeSession, amou
 
 func (s *Server) saveRuntimeState(ctx context.Context, runtime runtimeSession) error {
 	return s.sessions.SaveRuntimeState(ctx, runtime.session.SessionID, gamesession.RuntimeState{
+		GenerationID:            runtime.session.GenerationID,
+		ChapterID:               runtime.chapterID,
+		GameMode:                runtime.gameMode,
 		Health:                  runtime.session.Health,
 		Essence:                 runtime.economy.Essence,
 		Wave:                    runtime.session.Wave,
@@ -2166,6 +2600,7 @@ func gameStateFromRuntime(runtime runtimeSession, loop *runningGameLoop, serverT
 		Projectiles:                  projectileStates(runtime.projectiles),
 		Consumables:                  consumables,
 		Events:                       events,
+		GameMode:                     runtime.gameMode,
 	}
 }
 
@@ -2388,6 +2823,9 @@ func activeWaveDefinition(runtime *runtimeSession) (waveDefinition, bool) {
 	if runtime.session.Wave <= 0 || runtime.waveSpawned == 0 {
 		nextIndex := runtime.session.Wave
 		if nextIndex < 0 || nextIndex >= len(waves) {
+			if isFreePlayRuntime(runtime) {
+				return generatedFreePlayWave(nextIndex + 1), true
+			}
 			return waveDefinition{}, false
 		}
 		return waves[nextIndex], true
@@ -2396,6 +2834,9 @@ func activeWaveDefinition(runtime *runtimeSession) (waveDefinition, bool) {
 		if wave.Wave == runtime.session.Wave {
 			return wave, true
 		}
+	}
+	if isFreePlayRuntime(runtime) && runtime.session.Wave > 0 {
+		return generatedFreePlayWave(runtime.session.Wave), true
 	}
 	return waveDefinition{}, false
 }
@@ -2409,20 +2850,45 @@ func currentWaveDefinition(waveNumber int) (waveDefinition, bool) {
 	return waveDefinition{}, false
 }
 
+func freePlayCurrentWaveDefinition(waveNumber int) waveDefinition {
+	if wave, ok := currentWaveDefinition(waveNumber); ok {
+		return wave
+	}
+	return generatedFreePlayWave(waveNumber)
+}
+
+func generatedFreePlayWave(waveNumber int) waveDefinition {
+	if waveNumber < 1 {
+		waveNumber = 1
+	}
+	return waveDefinition{Wave: waveNumber, Groups: []spawnGroup{
+		scaledGroup(waveNumber, gameobject.EnemyTypeJunk, 3+(waveNumber/4)),
+		scaledGroup(waveNumber, gameobject.EnemyTypeSmog, 20+(waveNumber*2)),
+		scaledGroup(waveNumber, gameobject.EnemyTypeNoise, 18+(waveNumber*2)),
+		scaledGroup(waveNumber, gameobject.EnemyTypeJunk, 2+(waveNumber/5)),
+		scaledGroup(waveNumber, gameobject.EnemyTypeSmog, 20+(waveNumber*2)),
+		scaledGroup(waveNumber, gameobject.EnemyTypeNoise, 18+(waveNumber*2)),
+	}}
+}
+
 func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
 	if runtime.session.Wave <= 0 || len(runtime.enemies) > 0 {
 		return nil
 	}
 	currentWave, ok := currentWaveDefinition(runtime.session.Wave)
+	if !ok && isFreePlayRuntime(runtime) {
+		currentWave = generatedFreePlayWave(runtime.session.Wave)
+		ok = true
+	}
 	if !ok || runtime.waveSpawned < currentWave.Count() {
 		return nil
 	}
-	if runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
+	if !isFreePlayRuntime(runtime) && runtime.session.Wave >= len(waveDefinitions()) && runtime.nextWaveTick == 0 {
 		return nil
 	}
 
 	events := []GameEvent{{Type: "wave.cleared", Wave: runtime.session.Wave}}
-	if runtime.session.Wave >= len(waveDefinitions()) {
+	if !isFreePlayRuntime(runtime) && runtime.session.Wave >= len(waveDefinitions()) {
 		runtime.nextWaveTick = 0
 		return events
 	}
@@ -2434,11 +2900,18 @@ func scheduleNextWaveIfCleared(runtime *runtimeSession) []GameEvent {
 }
 
 func gameWon(runtime runtimeSession) bool {
+	if runtime.gameMode == gamesession.GameModeFreePlay {
+		return false
+	}
 	if runtime.session.Health <= 0 || runtime.session.Wave < len(waveDefinitions()) || len(runtime.enemies) > 0 {
 		return false
 	}
 	finalWave, ok := currentWaveDefinition(runtime.session.Wave)
 	return ok && runtime.waveSpawned >= finalWave.Count() && runtime.nextWaveTick == 0
+}
+
+func isFreePlayRuntime(runtime *runtimeSession) bool {
+	return runtime != nil && runtime.gameMode == gamesession.GameModeFreePlay
 }
 
 func moveEnemies(runtime *runtimeSession, deltaSeconds float64) []GameEvent {
