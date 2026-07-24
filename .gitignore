@@ -8,3 +8,6 @@ __pycache__/
 .DS_Store
 .cache/
 dist/
+node_modules/
+system-tests/playwright-report/
+system-tests/test-results/

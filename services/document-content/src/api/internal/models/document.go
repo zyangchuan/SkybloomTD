@@ -18,6 +18,7 @@ const (
 var ErrTaskStatusNotFound = errors.New("task status not found")
 var ErrDocumentNotFound = errors.New("document not found")
 var ErrChapterNotFound = errors.New("chapter not found")
+var ErrInvalidCursor = errors.New("invalid cursor")
 
 type SourceRef struct {
 	S3Bucket       string `json:"s3_bucket"`
@@ -26,22 +27,27 @@ type SourceRef struct {
 
 type DocumentJob struct {
 	JobType    string `json:"job_type"`
-	TaskID         string `json:"task_id"`
+	TaskID     string `json:"task_id"`
 	UserID     string `json:"user_id"`
 	DocumentID string `json:"document_id"`
 	Source     any    `json:"source"`
 }
 
 type Document struct {
-	ID                uuid.UUID `gorm:"type:uuid;primaryKey" json:"document_id"`
-	UserID            uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
-	S3Bucket          *string   `gorm:"type:text" json:"s3_bucket,omitempty"`
-	SourceFilename    string    `gorm:"type:text" json:"source_filename"`
-	GameName          string    `gorm:"type:text;not null;default:'Untitled Game'" json:"game_name"`
-	TaskID            string    `gorm:"type:text;index" json:"task_id"`
-	IsReady           bool      `gorm:"not null;default:false" json:"is_ready"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID             uuid.UUID `gorm:"type:uuid;primaryKey" json:"document_id"`
+	UserID         uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
+	S3Bucket       *string   `gorm:"type:text" json:"s3_bucket,omitempty"`
+	SourceFilename string    `gorm:"type:text" json:"source_filename"`
+	GameName       string    `gorm:"type:text;not null;default:'Untitled Game'" json:"game_name"`
+	TaskID         string    `gorm:"type:text;index" json:"task_id"`
+	IsReady        bool      `gorm:"not null;default:false" json:"is_ready"`
+	IsPublic       bool      `gorm:"not null;default:true" json:"is_public"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+func (Document) TableName() string {
+	return "private.documents"
 }
 
 type DocumentSummary struct {
@@ -49,6 +55,7 @@ type DocumentSummary struct {
 	SourceFilename string    `json:"source_filename"`
 	GameName       string    `json:"game_name"`
 	IsReady        bool      `json:"is_ready"`
+	IsPublic       bool      `json:"is_public"`
 	TaskID         string    `json:"task_id"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -56,6 +63,27 @@ type DocumentSummary struct {
 
 type ListDocumentsResponse struct {
 	Documents []DocumentSummary `json:"documents"`
+}
+
+type GameLibrarySummary struct {
+	DocumentID     uuid.UUID `json:"document_id"`
+	UserID         uuid.UUID `json:"user_id"`
+	SourceFilename string    `json:"source_filename"`
+	GameName       string    `json:"game_name"`
+	IsReady        bool      `json:"is_ready"`
+	IsPublic       bool      `json:"is_public"`
+	StarredByMe    bool      `json:"starred_by_me"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type ListGameLibraryResponse struct {
+	Games      []GameLibrarySummary `json:"games"`
+	NextCursor string               `json:"next_cursor,omitempty"`
+}
+
+type UpdateVisibilityRequest struct {
+	IsPublic bool `json:"is_public"`
 }
 
 type ChapterSummary struct {
@@ -88,11 +116,11 @@ type ListSubChaptersResponse struct {
 }
 
 type TaskStatus struct {
-	TaskID         string    `json:"task_id"`
+	TaskID     string    `json:"task_id"`
 	DocumentID string    `json:"document_id"`
 	Status     string    `json:"status"`
 	Error      *string   `json:"error"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 func NewQueuedDocument(documentID string, userID string, taskID string, gameName string, source SourceRef) (Document, error) {
@@ -109,6 +137,7 @@ func NewQueuedDocument(documentID string, userID string, taskID string, gameName
 		GameName:       gameName,
 		TaskID:         taskID,
 		IsReady:        false,
+		IsPublic:       true,
 	}
 
 	return document, nil
@@ -130,6 +159,7 @@ func NewDocumentSummary(document Document) DocumentSummary {
 		SourceFilename: document.SourceFilename,
 		GameName:       document.GameName,
 		IsReady:        document.IsReady,
+		IsPublic:       document.IsPublic,
 		TaskID:         document.TaskID,
 		CreatedAt:      document.CreatedAt,
 		UpdatedAt:      document.UpdatedAt,

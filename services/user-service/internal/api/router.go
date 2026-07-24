@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 
 	"skybloom/user-service/internal/auth"
 	"skybloom/user-service/internal/config"
@@ -25,6 +27,7 @@ type Server struct {
 
 type UserStore interface {
 	Ping(ctx context.Context) error
+	GetByID(ctx context.Context, userID uuid.UUID) (models.User, error)
 	Upsert(ctx context.Context, user models.User) (models.User, error)
 }
 
@@ -71,6 +74,7 @@ func NewRouter(cfg config.Config, users UserStore) *gin.Engine {
 	protected.Use(auth.Middleware(cfg))
 	protected.POST("/users", server.upsertUser)
 	protected.POST("/users/me", server.upsertUser)
+	protected.GET("/users/:id", server.getUserByID)
 
 	return router
 }
@@ -161,6 +165,26 @@ func (s *Server) upsertUser(c *gin.Context) {
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func (s *Server) getUserByID(c *gin.Context) {
+	userID, err := uuid.Parse(strings.TrimSpace(c.Param("id")))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user id must be a UUID"})
+		return
+	}
+
+	user, err := s.users.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user profile not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user profile"})
 		return
 	}
 

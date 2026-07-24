@@ -31,6 +31,8 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
+            docker system prune -f
+
             docker compose \
               -f docker-compose.yml \
               -f docker-compose.production.yml \

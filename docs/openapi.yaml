@@ -30,6 +30,8 @@ tags:
     description: User profile persistence backed by `private.users`.
   - name: Document Content
     description: PDF/document upload and OCR workflow entrypoints.
+  - name: Game Library
+    description: Shared public game library, visibility, and starred-game endpoints.
   - name: Game Service
     description: Authoritative game websocket and level generation workflow.
 
@@ -185,6 +187,48 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
           description: Request body id does not match authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/users/{id}:
+    get:
+      tags: [Users]
+      summary: Get a user profile by id
+      description: Returns a stored user profile from `private.users` by Supabase user id.
+      operationId: getUserById
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Supabase user id stored in `private.users.id`.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User profile was found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: User id is not a valid UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User profile was not found.
           content:
             application/json:
               schema:
@@ -427,13 +471,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/document-content/documents/{document_id}/visibility:
+    patch:
+      tags: [Game Library]
+      summary: Toggle a game's public visibility
+      description: |
+        Updates the authenticated user's game visibility. Games are public by
+        default when uploaded. Only the document owner can change visibility.
+        Private games are hidden from other users' library and starred-game
+        lists, while public ready games can be listed and played by others.
+      operationId: updateDocumentVisibility
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateVisibilityRequest"
+            example:
+              is_public: false
+      responses:
+        "200":
+          description: Visibility was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentSummary"
+        "400":
+          description: Invalid document id or request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Document was not found for the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database update failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/document-content/documents/{document_id}/chapters:
     get:
       tags: [Document Content]
       summary: List chapters for a document
       description: |
-        Returns indexed chapters for a document owned by the authenticated user.
-        A document that is not ready yet may return an empty chapter list.
+        Returns indexed chapters for a document owned by the authenticated user
+        or for a public ready game owned by another user. A document that is
+        not ready yet may return an empty chapter list for its owner.
       operationId: listDocumentChapters
       security:
         - cookieAuth: []
@@ -459,7 +558,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Document was not found for the authenticated user.
+          description: Document was not found or is private to another user.
           content:
             application/json:
               schema:
@@ -475,7 +574,7 @@ paths:
     get:
       tags: [Document Content]
       summary: List sub-chapters for a chapter
-      description: Returns indexed sub-chapters for a chapter owned by the authenticated user.
+      description: Returns indexed sub-chapters for a chapter owned by the authenticated user or from a public ready game.
       operationId: listChapterSubChapters
       security:
         - cookieAuth: []
@@ -501,13 +600,161 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Chapter was not found for the authenticated user.
+          description: Chapter was not found or belongs to a private game owned by another user.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/library/games:
+    get:
+      tags: [Game Library]
+      summary: List public games
+      description: |
+        Returns ready games whose owners have left them public. Results are
+        cursor-paginated with a fixed page size of 10.
+      operationId: listPublicGames
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Public game library page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListGameLibraryResponse"
+        "400":
+          description: Invalid cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/library/starred:
+    get:
+      tags: [Game Library]
+      summary: List games starred by the current user
+      description: |
+        Returns games the authenticated user has starred. A game is included
+        when it is owned by the authenticated user, or when it is public and
+        ready. Results are cursor-paginated with a fixed page size of 10.
+      operationId: listStarredGames
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Starred game page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListGameLibraryResponse"
+        "400":
+          description: Invalid cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database lookup failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/document-content/library/games/{document_id}/star:
+    post:
+      tags: [Game Library]
+      summary: Star a game
+      description: |
+        Saves a game to the authenticated user's starred list. The operation is
+        idempotent. Users can star their own games, or games that are public
+        and ready.
+      operationId: starGame
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "204":
+          description: Game is starred.
+        "400":
+          description: Invalid document id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Game was not found or is not available to star.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database write failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      tags: [Game Library]
+      summary: Unstar a game
+      description: Removes a game from the authenticated user's starred list. The operation is idempotent.
+      operationId: unstarGame
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DocumentId"
+      responses:
+        "204":
+          description: Game is no longer starred.
+        "400":
+          description: Invalid document id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid authentication cookie.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Database write failed.
           content:
             application/json:
               schema:
@@ -671,14 +918,21 @@ paths:
         ticker starts after that message.
         During the session, clients can send `game.action.place_tower` with a
         base `bird_type` and grid `x`/`y`, send `game.action.merge_tower` with
-        compatible source and target bird ids to create hybrid birds, or send
-        `game.pause` to persist `loop_paused=true` and stop advancing ticks
-        until a later resume flow is added. Hybrid bird types are returned in
-        the catalog and state snapshots, but cannot be placed directly.
+        compatible source and target bird ids to create hybrid birds, send
+        `game.action.use_consumable` to deploy a ready Airstrike against three
+        map targets, or send `game.pause` to persist `loop_paused=true` and stop
+        advancing ticks until a later resume flow is added. The client controls
+        the Airstrike animation and sends `game.action.use_consumable` at impact;
+        the server then validates availability and targets, consumes the charge,
+        applies damage immediately. The result is included in subsequent
+        `game.state` snapshots; no success-specific reply is sent.
+        Hybrid bird types are returned in the catalog and state snapshots, but
+        cannot be placed directly.
         Reconnecting with the same `level_id` reuses the existing Redis session
         for that user and level, including placed birds, active smogs, health,
         wave, tick, current essence, loop start state, and pause state, until
-        the session expires. The gameplay loop runs five
+        the session expires. Consumable inventory and pending consumable
+        deployments are also restored. The gameplay loop runs five
         enemy waves, each split into grouped spawns. The first
         wave starts
         on the first gameplay tick after the session starts, and each later
@@ -696,6 +950,12 @@ paths:
         data, then send `game.quiz.answer` with the selected option index.
         Starting a fresh quiz has a 20 second cooldown. Re-requesting the
         currently pending unanswered quiz is allowed immediately.
+        To acquire an Airstrike, send `game.consumable.acquire` with
+        `item_type=airstrike`. The server presents a consumable quiz with
+        `game.consumable.quiz.presented`; answering correctly with
+        `game.consumable.quiz.answer` grants one ready Airstrike instead of
+        essence. Progression quizzes and consumable acquisition quizzes cannot
+        be pending at the same time.
         Quiz requests before `game.session.run` return `game.quiz.unavailable`
         with `reason=game_not_started`. Correct answers award 50 essence;
         incorrect answers are saved for a later mistakes summary. Answered
@@ -706,22 +966,43 @@ paths:
         a new quiz set. New quiz generations request exactly 30 quizzes. Quiz
         answer data is copied into the dedicated game Redis cache for
         authoritative validation during play.
+
+        For chapter-level free play, send `game.freeplay.start` with a
+        `chapter_id`. The server generates a fresh map, creates a chapter-scoped
+        quiz cache containing up to 15 randomly selected quizzes from ready
+        sub-chapter levels in that chapter, and queues normal sub-chapter level
+        generation for missing quiz sources. The server replies with
+        `freeplay.started`. When `status=ready`, send `game.freeplay.load` with
+        the returned `free_play_id` to receive `game.initial_state`, then send
+        `game.freeplay.session.start` with `free_play_id` and `chapter_id` to
+        create the gameplay session. Free play uses `game_mode=free_play`, has
+        no victory state, and continues generating increasingly difficult waves
+        until health reaches 0 or the client exits. When its active quiz cache
+        gets low, the server refills it from random ready sub-chapter quizzes
+        and keeps queueing generation for missing sub-chapter levels.
       operationId: openGameWebSocket
       security:
         - cookieAuth: []
       x-websocket-client-messages:
         - $ref: "#/components/schemas/GameStartWebSocketMessage"
+        - $ref: "#/components/schemas/GameFreePlayStartWebSocketMessage"
         - $ref: "#/components/schemas/GameLoadWebSocketMessage"
+        - $ref: "#/components/schemas/GameFreePlayLoadWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionStartWebSocketMessage"
+        - $ref: "#/components/schemas/GameFreePlaySessionStartWebSocketMessage"
         - $ref: "#/components/schemas/GameSessionRunWebSocketMessage"
         - $ref: "#/components/schemas/GamePlaceTowerActionMessage"
         - $ref: "#/components/schemas/GameMergeTowerActionMessage"
+        - $ref: "#/components/schemas/GameUseConsumableActionMessage"
         - $ref: "#/components/schemas/GamePauseWebSocketMessage"
         - $ref: "#/components/schemas/GameExitWebSocketMessage"
         - $ref: "#/components/schemas/GameQuizRequestMessage"
         - $ref: "#/components/schemas/GameQuizAnswerMessage"
+        - $ref: "#/components/schemas/GameConsumableAcquireMessage"
+        - $ref: "#/components/schemas/GameConsumableQuizAnswerMessage"
       x-websocket-server-messages:
         - $ref: "#/components/schemas/LevelGenerationStartedMessage"
+        - $ref: "#/components/schemas/FreePlayStartedMessage"
         - $ref: "#/components/schemas/GameInitialStateMessage"
         - $ref: "#/components/schemas/GameSessionStartedMessage"
         - $ref: "#/components/schemas/GameStateMessage"
@@ -732,6 +1013,8 @@ paths:
         - $ref: "#/components/schemas/GameQuizPresentedMessage"
         - $ref: "#/components/schemas/GameQuizResultMessage"
         - $ref: "#/components/schemas/GameQuizUnavailableMessage"
+        - $ref: "#/components/schemas/GameConsumableQuizPresentedMessage"
+        - $ref: "#/components/schemas/GameConsumableQuizResultMessage"
         - $ref: "#/components/schemas/GameActionAcceptedMessage"
         - $ref: "#/components/schemas/GameActionRejectedMessage"
         - $ref: "#/components/schemas/GameErrorMessage"
@@ -825,6 +1108,13 @@ components:
       schema:
         type: string
         pattern: "^[a-f0-9]{32}$"
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor returned as `next_cursor` from the previous page.
+      schema:
+        type: string
 
   schemas:
     HealthResponse:
@@ -925,6 +1215,7 @@ components:
         - document_id
         - game_name
         - is_ready
+        - is_public
       properties:
         message:
           type: string
@@ -949,6 +1240,10 @@ components:
           type: boolean
           description: Durable document readiness flag. It is `false` until indexing succeeds.
           example: false
+        is_public:
+          type: boolean
+          description: Public visibility flag. New games are public by default.
+          example: true
 
     ListDocumentsResponse:
       type: object
@@ -964,9 +1259,10 @@ components:
       type: object
       required:
         - document_id
-        - filename
+        - source_filename
         - game_name
         - is_ready
+        - is_public
         - task_id
         - created_at
         - updated_at
@@ -974,7 +1270,7 @@ components:
         document_id:
           type: string
           format: uuid
-        filename:
+        source_filename:
           type: string
           example: lesson.pdf
         game_name:
@@ -983,10 +1279,79 @@ components:
         is_ready:
           type: boolean
           description: Durable document readiness flag. `true` only after indexing succeeds.
+        is_public:
+          type: boolean
+          description: Whether this game appears in the shared public library once ready.
         task_id:
           type: string
           pattern: "^[a-f0-9]{32}$"
           description: Main document processing task id.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UpdateVisibilityRequest:
+      type: object
+      required: [is_public]
+      properties:
+        is_public:
+          type: boolean
+          description: Set to `true` to make the game public, or `false` to make it private.
+
+    ListGameLibraryResponse:
+      type: object
+      required:
+        - games
+      properties:
+        games:
+          type: array
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/GameLibrarySummary"
+        next_cursor:
+          type: string
+          description: Opaque cursor for the next page. Omitted when there are no more results.
+
+    GameLibrarySummary:
+      type: object
+      required:
+        - document_id
+        - user_id
+        - source_filename
+        - game_name
+        - is_ready
+        - is_public
+        - starred_by_me
+        - created_at
+        - updated_at
+      properties:
+        document_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          description: Owner id for the game.
+        source_filename:
+          type: string
+          example: lesson.pdf
+        game_name:
+          type: string
+          example: Linear Algebra TD
+        is_ready:
+          type: boolean
+          description: Durable game readiness flag.
+          example: true
+        is_public:
+          type: boolean
+          description: Public visibility flag.
+          example: true
+        starred_by_me:
+          type: boolean
+          description: Whether the authenticated user has starred this game.
         created_at:
           type: string
           format: date-time
@@ -1138,6 +1503,22 @@ components:
               format: uuid
               description: Indexed sub-chapter to generate a level for.
 
+    GameFreePlayStartWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.freeplay.start
+        data:
+          type: object
+          required: [chapter_id]
+          properties:
+            chapter_id:
+              type: string
+              format: uuid
+              description: Chapter whose sub-chapter quizzes should feed free play.
+
     GameLoadWebSocketMessage:
       type: object
       required: [type, data]
@@ -1154,6 +1535,22 @@ components:
               format: uuid
               description: Completed level id returned by generation status.
 
+    GameFreePlayLoadWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.freeplay.load
+        data:
+          type: object
+          required: [free_play_id]
+          properties:
+            free_play_id:
+              type: string
+              format: uuid
+              description: Free play id returned by `freeplay.started`.
+
     GameSessionStartWebSocketMessage:
       type: object
       required: [type, data]
@@ -1169,6 +1566,26 @@ components:
               type: string
               format: uuid
               description: Completed level id to start an authoritative gameplay session for.
+
+    GameFreePlaySessionStartWebSocketMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.freeplay.session.start
+        data:
+          type: object
+          required: [free_play_id, chapter_id]
+          properties:
+            free_play_id:
+              type: string
+              format: uuid
+              description: Free play id returned by `freeplay.started`.
+            chapter_id:
+              type: string
+              format: uuid
+              description: Chapter id used to start free play.
 
     GameSessionRunWebSocketMessage:
       type: object
@@ -1234,6 +1651,35 @@ components:
 
             Hybrid upgrade costs: `falcon`, `kingfisher`, and `phoenix` cost 50 essence; `sun_god` costs 200 essence.
 
+    GameUseConsumableActionMessage:
+      type: object
+      description: |
+        Resolve a consumable impact immediately. For Airstrike, the server
+        validates availability and exactly three map targets, consumes one
+        charge, and applies damage with no success-specific reply. The next
+        `game.state` contains authoritative enemy health and inventory. Each
+        target deals 80 damage in a two-tile radius; overlapping target areas
+        apply their damage independently.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.action.use_consumable
+        data:
+          type: object
+          required: [item_type, targets]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+            targets:
+              type: array
+              minItems: 3
+              maxItems: 3
+              description: Three distinct in-map target positions.
+              items:
+                $ref: "#/components/schemas/GridPosition"
+
     GamePauseWebSocketMessage:
       type: object
       required: [type]
@@ -1284,6 +1730,44 @@ components:
               minimum: 0
               description: Zero-based option index chosen by the player.
 
+    GameConsumableAcquireMessage:
+      type: object
+      description: Request a quiz that awards one consumable charge when answered correctly.
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.acquire
+        data:
+          type: object
+          required: [item_type]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+
+    GameConsumableQuizAnswerMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.quiz.answer
+        data:
+          type: object
+          required: [item_type, quiz_id, selected_index]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+            quiz_id:
+              type: string
+              format: uuid
+            selected_index:
+              type: integer
+              minimum: 0
+              description: Zero-based option index chosen by the player.
+
     LevelGenerationStartedMessage:
       type: object
       required: [type, data]
@@ -1293,6 +1777,16 @@ components:
           const: level_generation.started
         data:
           $ref: "#/components/schemas/LevelGenerationStartResult"
+
+    FreePlayStartedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: freeplay.started
+        data:
+          $ref: "#/components/schemas/FreePlayStartResult"
 
     GameInitialStateMessage:
       type: object
@@ -1394,6 +1888,26 @@ components:
         data:
           $ref: "#/components/schemas/QuizUnavailable"
 
+    GameConsumableQuizPresentedMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.quiz.presented
+        data:
+          $ref: "#/components/schemas/ConsumableQuizPrompt"
+
+    GameConsumableQuizResultMessage:
+      type: object
+      required: [type, data]
+      properties:
+        type:
+          type: string
+          const: game.consumable.quiz.result
+        data:
+          $ref: "#/components/schemas/ConsumableQuizResult"
+
     GameActionAcceptedMessage:
       type: object
       required: [type, data]
@@ -1432,7 +1946,7 @@ components:
           properties:
             action:
               type: string
-              enum: [place_tower, merge_tower]
+              enum: [place_tower, merge_tower, use_consumable, validate_consumable_acquire]
             error:
               type: string
               example: insufficient essence
@@ -1499,6 +2013,49 @@ components:
           type: string
           example: /api/game-service/level-generation/0d2a8c64c36f4a7d88442a7517c9f014/status
 
+    FreePlayStartResult:
+      type: object
+      required:
+        - free_play_id
+        - chapter_id
+        - status
+        - ready_quiz_count
+        - queued_sub_chapters
+        - total_sub_chapters
+        - map_seed
+        - map_algorithm_version
+      properties:
+        free_play_id:
+          type: string
+          format: uuid
+          description: Chapter-scoped free play id used as the map, quiz cache, and session level key.
+        chapter_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [ready, preparing]
+          description: "`ready` means at least one quiz was cached and the client can load free play. `preparing` means no ready sub-chapter quizzes were available yet."
+        ready_quiz_count:
+          type: integer
+          minimum: 0
+          maximum: 15
+          description: Number of quizzes placed into the initial free play cache.
+        queued_sub_chapters:
+          type: integer
+          minimum: 0
+          description: Number of missing sub-chapter levels queued for normal generation.
+        total_sub_chapters:
+          type: integer
+          minimum: 1
+          description: Number of sub-chapters found in the requested chapter.
+        map_seed:
+          type: integer
+          format: int64
+        map_algorithm_version:
+          type: integer
+          example: 1
+
     LevelGenerationStatus:
       type: object
       required:
@@ -1558,11 +2115,15 @@ components:
       properties:
         map:
           $ref: "#/components/schemas/GeneratedMap"
+        game_mode:
+          type: string
+          enum: [normal, free_play]
+          description: Present as `free_play` for free play map loads.
 
     GameState:
       type: object
       description: Authoritative gameplay snapshot. After `game.session.run`, `game.state` messages are sent 20 times per second.
-      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, quiz_cooldown_remaining_seconds, birds, smogs, projectiles]
+      required: [session_id, level_id, health, essence, wave, tick, loop_started, loop_paused, server_time, quiz_cooldown_remaining_seconds, birds, enemies, projectiles, consumables]
       properties:
         session_id:
           type: string
@@ -1595,7 +2156,7 @@ components:
         quiz_cooldown_remaining_seconds:
           type: integer
           minimum: 0
-          description: Seconds remaining before the next fresh quiz can be started. Re-requesting the current unanswered quiz is not blocked by this cooldown.
+          description: Seconds remaining in the 30-second Bird of Wisdom cooldown before the next fresh quiz can be started. Re-requesting the current unanswered quiz is not blocked by this cooldown.
           example: 12
         bird_types:
           type: array
@@ -1609,19 +2170,31 @@ components:
             $ref: "#/components/schemas/PlacedBird"
         smogs:
           type: array
+          deprecated: true
           description: Active enemies with authoritative positions and health.
           items:
             $ref: "#/components/schemas/Smog"
+        enemies:
+          type: array
+          description: Active enemies with authoritative positions and health.
+          items:
+            $ref: "#/components/schemas/Enemy"
         projectiles:
           type: array
           description: Deprecated combat-visual compatibility field. Authoritative damage is resolved immediately in attack events, so this is normally empty.
           items:
             $ref: "#/components/schemas/Projectile"
+        consumables:
+          $ref: "#/components/schemas/ConsumableInventory"
         events:
           type: array
           description: Transient events emitted for this tick, such as attacks, damage, spawns, escapes, and wave starts.
           items:
             $ref: "#/components/schemas/GameEvent"
+        game_mode:
+          type: string
+          enum: [normal, free_play]
+          description: Session mode. Free play sessions continue waves indefinitely and never emit `game.victory`.
 
     GameOverState:
       type: object
@@ -1744,13 +2317,54 @@ components:
         remaining:
           type: integer
           description: Number of quizzes left after deleting the answered quiz.
+
+    ConsumableQuizPrompt:
+      allOf:
+        - $ref: "#/components/schemas/QuizPrompt"
+        - type: object
+          required: [item_type]
+          properties:
+            item_type:
+              type: string
+              enum: [airstrike]
+
+    ConsumableQuizResult:
+      type: object
+      required: [item_type, quiz_id, correct, selected_index, correct_index, selected_option_markdown, correct_option_markdown, consumable_awarded, consumables, remaining]
+      properties:
+        item_type:
+          type: string
+          enum: [airstrike]
+        quiz_id:
+          type: string
+          format: uuid
+        correct:
+          type: boolean
+        selected_index:
+          type: integer
+        correct_index:
+          type: integer
+        selected_option_markdown:
+          type: string
+        correct_option_markdown:
+          type: string
+        consumable_awarded:
+          type: integer
+          description: Number of consumable charges awarded by this answer.
+          example: 1
+        consumables:
+          $ref: "#/components/schemas/ConsumableInventory"
+        remaining:
+          type: integer
+          description: Number of quizzes left after deleting the answered quiz.
+
     QuizUnavailable:
       type: object
       required: [reason]
       properties:
         reason:
           type: string
-          enum: [game_not_started, no_quizzes_remaining, quiz_cooldown]
+          enum: [game_not_started, no_quizzes_remaining, quiz_cooldown, progression_quiz_pending, consumable_quiz_pending]
           example: no_quizzes_remaining
         retry_after_seconds:
           type: integer
@@ -1837,8 +2451,8 @@ components:
           $ref: "#/components/schemas/BirdStats"
         attack:
           type: string
-          enum: [single, splash]
-          description: Splash attacks resolve as three immediate feather fan lanes from the bird tower toward the selected target.
+          enum: [single, splash, ring]
+          description: Splash attacks resolve as three immediate attack lines evenly distributed across the configured spread, with two boundary lines and one center line toward the selected target. Each line damages one enemy by default, or up to the configured pierce count. Ring attacks resolve immediate damage to every enemy within the bird tower radius without selecting a target.
 
     PlacedBird:
       type: object
@@ -1860,6 +2474,7 @@ components:
 
     Smog:
       type: object
+      deprecated: true
       required: [id, health, position, speed, path_index]
       properties:
         id:
@@ -1874,6 +2489,53 @@ components:
           format: double
         path_index:
           type: integer
+
+    Enemy:
+      type: object
+      required: [id, type, health, position, speed, path_index]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [smog, noise, junk]
+        health:
+          type: integer
+        position:
+          $ref: "#/components/schemas/GridPosition"
+        speed:
+          type: number
+          format: double
+        path_index:
+          type: integer
+
+    ConsumableInventory:
+      type: object
+      required: [airstrike]
+      properties:
+        airstrike:
+          $ref: "#/components/schemas/ConsumableItemState"
+
+    ConsumableItemState:
+      type: object
+      required: [status, charges, cooldown_remaining_seconds]
+      properties:
+        status:
+          type: string
+          enum: [empty, ready, quiz_pending]
+          description: "`quiz_pending` means an acquisition quiz is awaiting an answer."
+        charges:
+          type: integer
+          minimum: 0
+        cooldown_remaining_seconds:
+          type: integer
+          minimum: 0
+          description: Seconds remaining in the Airstrike cooldown. It lasts 30 seconds after Airstrike is used and 15 seconds after an acquisition quiz is answered incorrectly.
+        pending_quiz_id:
+          type: string
+          format: uuid
+          description: Present when `status=quiz_pending`; identifies the quiz that awards this consumable.
 
     Projectile:
       type: object
@@ -1914,13 +2576,17 @@ components:
       properties:
         type:
           type: string
-          enum: [wave.started, wave.cleared, smog.spawned, smog.escaped, bird.attack, smog.damage]
+          enum: [wave.started, wave.cleared, enemy.spawned, enemy.escaped, bird.attack, enemy.damage, airstrike.impact]
         bird_id:
+          type: string
+          format: uuid
+        enemy_id:
           type: string
           format: uuid
         smog_id:
           type: string
           format: uuid
+          deprecated: true
         projectile_id:
           type: string
           format: uuid
@@ -1931,12 +2597,24 @@ components:
           items:
             type: string
             format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+          description: Present for consumable deployment events.
+        item_type:
+          type: string
+          enum: [airstrike]
+        targets:
+          type: array
+          description: Present for `airstrike.impact`.
+          items:
+            $ref: "#/components/schemas/GridPosition"
         damage:
           type: number
           format: double
         health:
           type: integer
-          description: Remaining smog health for damage events, or remaining base health for escape events.
+          description: Remaining enemy health for damage events, or remaining base health for escape events.
         wave:
           type: integer
 
@@ -1957,6 +2635,13 @@ components:
         range:
           type: number
           format: double
+        spread:
+          type: number
+          format: double
+          description: Splash attack projectile spread angle in radians. Omitted or zero uses the default splash spread.
+        pierce:
+          type: integer
+          description: Single and splash attack hit cap per attack line. Target acquisition still uses range. When set, the attack line damages up to this many enemies. When omitted or zero, the attack line stops after its first hit.
         cost:
           type: integer
 

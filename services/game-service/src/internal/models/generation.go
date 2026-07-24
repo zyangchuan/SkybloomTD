@@ -8,6 +8,7 @@ import (
 const (
 	JobTypeMapGenerate  = "map.generate"
 	JobTypeQuizGenerate = "quiz.generate"
+	JobTypeQuizRefill   = "quiz.refill"
 
 	GenerationStatusPending  = "pending"
 	GenerationStatusComplete = "complete"
@@ -28,10 +29,13 @@ type LevelJob struct {
 	JobType             string `json:"job_type"`
 	TaskID              string `json:"task_id"`
 	GenerationID        string `json:"generation_id"`
+	LevelID             string `json:"level_id,omitempty"`
 	UserID              string `json:"user_id"`
 	SubChapterID        string `json:"sub_chapter_id"`
 	MapSeed             int64  `json:"map_seed"`
 	MapAlgorithmVersion int    `json:"map_algorithm_version"`
+	RefillID            string `json:"refill_id,omitempty"`
+	MaxQuizCount        int    `json:"max_quiz_count,omitempty"`
 }
 
 type LevelGenerationRecord struct {
@@ -47,7 +51,7 @@ type LevelGenerationRecord struct {
 }
 
 func (LevelGenerationRecord) TableName() string {
-	return "level_generation_jobs"
+	return "private.level_generation_jobs"
 }
 
 type GenerationStatus struct {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 
 	"skybloom/game-service/internal/config"
@@ -29,6 +30,7 @@ type Worker struct {
 }
 
 type LevelRepository interface {
+	AppendQuizzes(ctx context.Context, levelID string, userID string, generation generator.LevelGeneration, maxQuizCount int) (repository.QuizAppendResult, error)
 	AttachGenerationToLevel(ctx context.Context, generationID string, levelID string, options repository.LevelInsertOptions) (repository.SavedLevel, error)
 	FindReusableLevelWithQuizzes(ctx context.Context, userID string, subChapterID string) (models.ReusableLevel, error)
 	GetBootstrap(ctx context.Context, levelID string, userID string) (repository.LevelBootstrap, error)
@@ -41,6 +43,7 @@ type SourceFetcher interface {
 
 type LevelGenerator interface {
 	GenerateLevel(ctx context.Context, sourceContext source.SourceContext) (generator.LevelGeneration, error)
+	GenerateQuizRefill(ctx context.Context, sourceContext source.SourceContext, existingQuizzes []generator.ExistingQuiz) (generator.LevelGeneration, error)
 }
 
 type GenerationStatusStore interface {
@@ -52,6 +55,9 @@ type MapCache interface {
 }
 
 type QuizCache interface {
+	Append(ctx context.Context, generationID string, quizzes []quizcache.CachedQuiz) (int, error)
+	Get(ctx context.Context, generationID string) (quizcache.LevelQuizzes, error)
+	ReleaseRefillLease(ctx context.Context, generationID string, leaseValue string) error
 	Set(ctx context.Context, generationID string, quizzes quizcache.LevelQuizzes) error
 }
 
@@ -152,9 +158,84 @@ func (w *Worker) ProcessJob(ctx context.Context, job models.LevelJob) error {
 		return w.ProcessMapJob(ctx, job)
 	case models.JobTypeQuizGenerate:
 		return w.ProcessQuizJob(ctx, job)
+	case models.JobTypeQuizRefill:
+		return w.ProcessQuizRefillJob(ctx, job)
 	default:
 		return fmt.Errorf("unsupported level job type %q", job.JobType)
 	}
+}
+
+func (w *Worker) ProcessQuizRefillJob(ctx context.Context, job models.LevelJob) error {
+	if job.LevelID == "" {
+		return errors.New("quiz refill job missing level_id")
+	}
+	if job.RefillID != "" {
+		defer func() {
+			if err := w.quizzes.ReleaseRefillLease(context.Background(), job.GenerationID, job.RefillID); err != nil {
+				log.Printf("quiz refill lease release failed generation_id=%s refill_id=%s: %v", job.GenerationID, job.RefillID, err)
+			}
+		}()
+	}
+
+	bootstrap, err := w.levels.GetBootstrap(ctx, job.LevelID, job.UserID)
+	if err != nil {
+		return err
+	}
+	sourceContext, err := w.sources.FetchSubChapterContent(ctx, job.UserID, job.SubChapterID)
+	if err != nil {
+		return err
+	}
+	generation, err := w.generator.GenerateQuizRefill(ctx, sourceContext, existingGeneratorQuizzes(bootstrap.Quizzes))
+	if err != nil {
+		return err
+	}
+	cachedRefill := cachedGeneratedQuizzes(generation, len(bootstrap.Quizzes))
+	remaining, err := w.quizzes.Append(ctx, job.GenerationID, cachedRefill)
+	if err != nil {
+		return fmt.Errorf("append generated refill quizzes to cache: %w", err)
+	}
+
+	maxQuizCount := job.MaxQuizCount
+	if maxQuizCount <= 0 {
+		maxQuizCount = w.config.MaxQuizzesPerLevel
+	}
+	appended, err := w.levels.AppendQuizzes(ctx, job.LevelID, job.UserID, generation, maxQuizCount)
+	if err != nil {
+		log.Printf(
+			"quiz refill persisted to cache but database append failed task_id=%s generation_id=%s level_id=%s cached=%d cache_remaining=%d: %v",
+			job.TaskID,
+			job.GenerationID,
+			job.LevelID,
+			len(cachedRefill),
+			remaining,
+			err,
+		)
+		return nil
+	}
+	if appended.Appended == 0 {
+		log.Printf(
+			"quiz refill cached but database append skipped task_id=%s generation_id=%s level_id=%s cached=%d cache_remaining=%d total_quizzes=%d max_quizzes=%d",
+			job.TaskID,
+			job.GenerationID,
+			job.LevelID,
+			len(cachedRefill),
+			remaining,
+			appended.TotalQuizzes,
+			maxQuizCount,
+		)
+		return nil
+	}
+	log.Printf(
+		"quiz refill complete task_id=%s generation_id=%s level_id=%s cached=%d db_appended=%d cache_remaining=%d total_quizzes=%d",
+		job.TaskID,
+		job.GenerationID,
+		job.LevelID,
+		len(cachedRefill),
+		appended.Appended,
+		remaining,
+		appended.TotalQuizzes,
+	)
+	return nil
 }
 
 func (w *Worker) ProcessMapJob(ctx context.Context, job models.LevelJob) error {
@@ -242,6 +323,15 @@ func (w *Worker) ProcessQuizJob(ctx context.Context, job models.LevelJob) error 
 		w.markStepFailed(ctx, job, "quiz", err)
 		return err
 	}
+	if err := w.quizzes.Set(ctx, job.GenerationID, quizcache.LevelQuizzes{
+		GenerationID: job.GenerationID,
+		UserID:       job.UserID,
+		SubChapterID: job.SubChapterID,
+		Quizzes:      cachedGeneratedQuizzes(generation, 0),
+	}); err != nil {
+		w.markStepFailed(ctx, job, "quiz", err)
+		return fmt.Errorf("cache generated quizzes before database insert: %w", err)
+	}
 	saved, err := w.levels.Insert(ctx, sourceContext, generation, w.config.Model, options)
 	if err != nil {
 		w.markStepFailed(ctx, job, "quiz", err)
@@ -267,6 +357,12 @@ func (w *Worker) ProcessQuizJob(ctx context.Context, job models.LevelJob) error 
 }
 
 func (w *Worker) cacheLevelQuizzes(ctx context.Context, job models.LevelJob, levelID string) (int, error) {
+	if cached, err := w.quizzes.Get(ctx, job.GenerationID); err == nil {
+		return len(cached.Quizzes), nil
+	} else if !errors.Is(err, quizcache.ErrQuizzesNotFound) {
+		return 0, fmt.Errorf("load cached level quizzes: %w", err)
+	}
+
 	level, err := w.levels.GetBootstrap(ctx, levelID, job.UserID)
 	if err != nil {
 		return 0, fmt.Errorf("load level quizzes for cache: %w", err)
@@ -278,11 +374,42 @@ func (w *Worker) cacheLevelQuizzes(ctx context.Context, job models.LevelJob, lev
 		return 0, fmt.Errorf("cache level quizzes: %w", err)
 	}
 	if level.GenerationID != "" && level.GenerationID != job.GenerationID {
-		if err := w.quizzes.Set(ctx, level.GenerationID, quizcache.FromLevelBootstrap(level, level.GenerationID)); err != nil {
-			return 0, fmt.Errorf("cache level quizzes for bound generation: %w", err)
+		if _, err := w.quizzes.Get(ctx, level.GenerationID); errors.Is(err, quizcache.ErrQuizzesNotFound) {
+			if err := w.quizzes.Set(ctx, level.GenerationID, quizcache.FromLevelBootstrap(level, level.GenerationID)); err != nil {
+				return 0, fmt.Errorf("cache level quizzes for bound generation: %w", err)
+			}
+		} else if err != nil {
+			return 0, fmt.Errorf("load cached bound generation quizzes: %w", err)
 		}
 	}
 	return len(level.Quizzes), nil
+}
+
+func existingGeneratorQuizzes(quizzes []repository.QuizItem) []generator.ExistingQuiz {
+	existing := make([]generator.ExistingQuiz, 0, len(quizzes))
+	for _, quiz := range quizzes {
+		existing = append(existing, generator.ExistingQuiz{
+			QuizIndex:        quiz.QuizIndex,
+			QuestionMarkdown: quiz.QuestionMarkdown,
+			OptionsMarkdown:  quiz.OptionsMarkdown,
+		})
+	}
+	return existing
+}
+
+func cachedGeneratedQuizzes(generation generator.LevelGeneration, startQuizIndex int) []quizcache.CachedQuiz {
+	quizzes := make([]quizcache.CachedQuiz, 0, len(generation.Quizzes))
+	for index, quiz := range generation.Quizzes {
+		quizzes = append(quizzes, quizcache.CachedQuiz{
+			ID:               uuid.NewString(),
+			QuizIndex:        startQuizIndex + index,
+			QuizType:         quiz.QuizType,
+			QuestionMarkdown: quiz.QuestionMarkdown,
+			OptionsMarkdown:  quiz.OptionsMarkdown,
+			AnswerIndex:      quiz.AnswerIndex,
+		})
+	}
+	return quizzes
 }
 
 func (w *Worker) markStepFailed(ctx context.Context, job models.LevelJob, step string, err error) {
@@ -305,6 +432,18 @@ func (NoopMapCache) Set(context.Context, string, mapgen.GeneratedMap) error {
 }
 
 type NoopQuizCache struct{}
+
+func (NoopQuizCache) Append(context.Context, string, []quizcache.CachedQuiz) (int, error) {
+	return 0, nil
+}
+
+func (NoopQuizCache) Get(context.Context, string) (quizcache.LevelQuizzes, error) {
+	return quizcache.LevelQuizzes{}, quizcache.ErrQuizzesNotFound
+}
+
+func (NoopQuizCache) ReleaseRefillLease(context.Context, string, string) error {
+	return nil
+}
 
 func (NoopQuizCache) Set(context.Context, string, quizcache.LevelQuizzes) error {
 	return nil

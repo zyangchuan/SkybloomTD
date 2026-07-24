@@ -26,3 +26,5 @@ Body:
 ```
 
 The service stores the Supabase JWT `sub` claim as `private.users.id`.
+
+`GET /users/{id}` returns a stored user profile by Supabase user id.

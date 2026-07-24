@@ -17,6 +17,8 @@ type BirdStats struct {
 	ProjectileSpeed float64 `json:"projectile_speed"`
 	FireRate        float64 `json:"fire_rate"`
 	Range           float64 `json:"range"`
+	Spread          float64 `json:"spread,omitempty"`
+	Pierce          int     `json:"pierce,omitempty"`
 	Cost            int     `json:"cost"`
 }
 
@@ -27,6 +29,7 @@ type AttackHit struct {
 
 type AttackBehaviour interface {
 	Attack(bird Bird, target Enemy, enemies []Enemy) []AttackHit
+	RequiresTarget() bool
 }
 
 func NewBird(id string, birdType string, position Position) (Bird, error) {
@@ -66,8 +69,23 @@ func (b Bird) TargetInRange(target Enemy) bool {
 	return target.IsAlive() && b.Position.DistanceTo(target.Position) <= b.Stats.Range
 }
 
+func (b Bird) HasEnemyInRange(enemies []Enemy) bool {
+	for _, enemy := range enemies {
+		if b.TargetInRange(enemy) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Bird) Attack(target Enemy, enemies []Enemy, currentTick int64) []AttackHit {
-	if b == nil || b.AttackBehaviour == nil || !b.TargetInRange(target) {
+	if b == nil || b.AttackBehaviour == nil {
+		return nil
+	}
+	if b.AttackBehaviour.RequiresTarget() && !b.TargetInRange(target) {
+		return nil
+	}
+	if !b.AttackBehaviour.RequiresTarget() && !b.HasEnemyInRange(enemies) {
 		return nil
 	}
 	hits := b.AttackBehaviour.Attack(*b, target, enemies)

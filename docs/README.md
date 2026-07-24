@@ -2,6 +2,97 @@
 
 The public API contract is in `docs/openapi.yaml`.
 
+## Automated Testing
+
+The repository currently has automated unit and integration tests for the
+document service and game service.
+
+### Document Service
+
+Unit tests cover API-layer helpers and models:
+
+- deterministic database UUID generation
+- S3 directory path construction
+- document summary mapping
+- task status JSON serialization
+- queued document creation
+- safe path/filename normalization
+- game name normalization
+
+Integration tests exercise the real Gin router and controller flow while
+mocking external dependencies:
+
+- storage client
+- document store
+- task status store
+- RabbitMQ publisher
+
+### Game Service
+
+Unit tests cover pure game logic and helper functions:
+
+- enemy and bird stats
+- enemy health/speed scaling
+- deterministic map generation and path rules
+- enemy movement
+- projectile damage
+- quiz prompt formatting
+- quiz cooldown and answer validation
+
+Integration tests exercise connected game-service modules with fakes:
+
+- generation service creates generation records and publishes map/quiz jobs
+- generation service marks status failed when publishing fails
+- worker map jobs generate and cache maps
+- worker quiz jobs fetch source content, generate level data, cache quizzes,
+  and update generation status
+
+Run the current automated test suites from the repository root:
+
+```bash
+./scripts/test-go.sh
+```
+
+CI runs these tests on pull requests and pushes to `staging`. Production
+system testing will be added separately later.
+
+### Playwright System Tests
+
+Playwright system tests live in `system-tests/`. They run through the browser
+against a deployed URL and verify user-visible system behavior.
+The upload test uses `system-tests/testpdf.pdf` and waits up to five minutes
+for processing to complete. The delete check runs after upload in the same
+serial spec and removes the uploaded document.
+
+Required for all system tests:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://staging.example.com
+```
+
+Required for authenticated workflows:
+
+```bash
+PLAYWRIGHT_TEST_EMAIL=test@example.com
+PLAYWRIGHT_TEST_PASSWORD='test-password'
+```
+
+Required for game workflow tests that use an existing ready level:
+
+```bash
+PLAYWRIGHT_READY_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_SUB_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_QUIZ_FEEDBACK_LATENCY_MS=3000
+```
+
+Run in Docker from the repository root:
+
+```bash
+cp system-tests/.env.example system-tests/.env
+docker compose -f system-tests/docker-compose.yml up --build --abort-on-container-exit --exit-code-from playwright-system-tests
+```
+
 ## Environment Profiles
 
 Local compose runs use `.env.local` with `docker-compose.local.yml`:
@@ -60,8 +151,8 @@ it automatically to the reverse proxy, Nginx verifies it through user-service,
 and private services receive trusted user headers.
 
 Document uploads require multipart `file` and `game_name` fields. They return
-a durable `document_id`, the stored `game_name`, the main `task_id`, and
-`is_ready: false`. Clients can poll:
+a durable `document_id`, the stored `game_name`, the main `task_id`,
+`is_ready: false`, and `is_public: true`. Clients can poll:
 
 ```text
 GET /api/document-content/tasks/{task_id}/status
@@ -79,6 +170,27 @@ To delete a document and its generated content:
 
 ```text
 DELETE /api/document-content/documents/{document_id}
+```
+
+Games are public by default. To toggle a game between public and private:
+
+```text
+PATCH /api/document-content/documents/{document_id}/visibility
+```
+
+The shared library and starred-game lists are cursor-paginated with a fixed
+page size of 10:
+
+```text
+GET /api/document-content/library/games
+GET /api/document-content/library/starred
+```
+
+To star or unstar a game:
+
+```text
+POST /api/document-content/library/games/{document_id}/star
+DELETE /api/document-content/library/games/{document_id}/star
 ```
 
 To browse indexed document structure:
@@ -155,6 +267,48 @@ session for that user and level, including placed birds, active enemies, active
 projectiles, health, wave, tick, current essence, whether the loop has started,
 and whether the loop is paused, until the session expires.
 
+To start chapter-level free play instead of a normal sub-chapter level, send:
+
+```json
+{
+  "type": "game.freeplay.start",
+  "data": {
+    "chapter_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+The server replies with `freeplay.started`. When `status` is `ready`, use the
+returned `free_play_id` to load the generated free-play map:
+
+```json
+{
+  "type": "game.freeplay.load",
+  "data": {
+    "free_play_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+Then create the free-play gameplay session:
+
+```json
+{
+  "type": "game.freeplay.session.start",
+  "data": {
+    "free_play_id": "00000000-0000-0000-0000-000000000000",
+    "chapter_id": "00000000-0000-0000-0000-000000000000"
+  }
+}
+```
+
+Free play generates a fresh map, caches up to 15 random quizzes from ready
+sub-chapter levels in the chapter, and queues normal generation for missing
+sub-chapter levels. When the active quiz cache gets low, it refills from random
+ready sub-chapter quizzes. Free play sessions report `game_mode=free_play`,
+continue spawning increasingly difficult waves indefinitely, and only end by
+health reaching 0 or by client exit.
+
 The gameplay loop currently runs three smog waves. Each wave is split into
 three subwaves of grouped smog spawns, with larger gaps between individual
 smogs and a pause between subwaves. The first wave starts on the first gameplay
@@ -209,23 +363,30 @@ The server responds with `game.quiz.presented` containing only `quiz_id`,
 `quiz_type`, `question_markdown`, and `options_markdown`. Submit the selected
 zero-based option index with `game.quiz.answer`. The server validates the
 answer, deletes that quiz from Redis, and responds with `game.quiz.result`.
-Correct answers award 50 essence. Incorrect answers are saved with the selected
-wrong option for a later mistakes summary.
+Correct answers award 50 essence. Incorrect answers are saved in the Redis game
+session with the selected wrong option for a later mistakes summary.
 
 To retrieve the saved mistake summary for a completed or in-progress level, the
 frontend can call the game-service HTTP API:
 
 ```text
-GET /api/game-service/quiz-mistakes?level_id=00000000-0000-0000-0000-000000000000
+GET /api/game-service/quiz-mistakes?session_id=00000000-0000-0000-0000-000000000000
 ```
 
 The response includes only mistakes for the authenticated user and requested
-level, including the question, options, selected option, and correct option.
+game session, including the question, options, selected option, and correct
+option.
 
 Level generation is idempotent per user, sub-chapter, and map algorithm version.
 If the database already has quizzes for that user's sub-chapter, the game
 service reuses the saved level and skips quiz generation. Quizzes are persisted
 in PostgreSQL and copied into the dedicated `game-redis` container for in-game
-answer validation. New quiz generations request exactly 30 quizzes. Generated
-map data is also cached in `game-redis` and can be regenerated from the stored
-seed if the cache expires.
+answer validation. New quiz generations use the quiz-count constant in the
+game-service config, currently 5 for testing. During gameplay, when the cached
+remaining quiz count falls to the refill-threshold config constant, the server
+uses a short Redis lease to enqueue at most one async `quiz.refill` job for that
+level. The refill worker generates and verifies another quiz-count batch,
+appends it to PostgreSQL and the active Redis quiz cache, and stops appending
+when the max-quizzes-per-level config constant is reached. Generated map data is
+also cached in `game-redis` and can be regenerated from the stored seed if the
+cache expires.

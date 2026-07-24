@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -19,6 +18,13 @@ import (
 type LevelRepository struct {
 	db *gorm.DB
 }
+
+const (
+	documentsTable           = "private.documents"
+	levelsTable              = "private.levels"
+	quizzesTable             = "private.quizzes"
+	levelGenerationJobsTable = "private.level_generation_jobs"
+)
 
 type LevelBootstrap struct {
 	LevelID             string     `json:"level_id"`
@@ -42,32 +48,9 @@ type QuizItem struct {
 	AnswerIndex      int      `json:"answer_index"`
 }
 
-type QuizMistakeInput struct {
-	UserID           string
-	LevelID          string
-	GenerationID     string
-	QuizID           string
-	QuizIndex        int
-	QuizType         string
-	QuestionMarkdown string
-	OptionsMarkdown  []string
-	AnswerIndex      int
-	SelectedIndex    int
-}
-
-type QuizMistakeSummaryItem struct {
-	ID               string
-	UserID           string
-	LevelID          string
-	GenerationID     string
-	QuizID           string
-	QuizIndex        int
-	QuizType         string
-	QuestionMarkdown string
-	OptionsMarkdown  []string
-	AnswerIndex      int
-	SelectedIndex    int
-	CreatedAt        *time.Time
+type SubChapterSummary struct {
+	SubChapterID string `json:"sub_chapter_id"`
+	ChapterID    string `json:"chapter_id"`
 }
 
 type SavedLevel struct {
@@ -76,6 +59,13 @@ type SavedLevel struct {
 	DocumentID   string
 	QuizCount    int
 	Model        string
+}
+
+type QuizAppendResult struct {
+	LevelID      string
+	Appended     int
+	TotalQuizzes int
+	Quizzes      []QuizItem
 }
 
 type LevelInsertOptions struct {
@@ -91,7 +81,10 @@ func NewLevelRepository(db *gorm.DB) *LevelRepository {
 func (r *LevelRepository) GetBootstrap(ctx context.Context, levelID string, userID string) (LevelBootstrap, error) {
 	var level models.Level
 	err := r.db.WithContext(ctx).
-		Where("id = ? AND user_id = ?", levelID, userID).
+		Table(levelsTable).
+		Select("levels.*").
+		Joins("JOIN "+documentsTable+" AS documents ON documents.id = levels.document_id").
+		Where("levels.id = ? AND (levels.user_id = ? OR (documents.is_public = true AND documents.is_ready = true))", levelID, userID).
 		First(&level).
 		Error
 	if err == gorm.ErrRecordNotFound {
@@ -156,69 +149,6 @@ func (r *LevelRepository) Ping(ctx context.Context) error {
 	return sqlDB.PingContext(ctx)
 }
 
-func (r *LevelRepository) SaveQuizMistake(ctx context.Context, input QuizMistakeInput) error {
-	optionsJSON, err := json.Marshal(quiztext.SanitizeMarkdownSlice(input.OptionsMarkdown))
-	if err != nil {
-		return err
-	}
-	return r.db.WithContext(ctx).Create(&models.QuizMistake{
-		ID:               uuid.NewString(),
-		UserID:           input.UserID,
-		LevelID:          input.LevelID,
-		GenerationID:     input.GenerationID,
-		QuizID:           input.QuizID,
-		QuizIndex:        input.QuizIndex,
-		QuizType:         input.QuizType,
-		QuestionMarkdown: quiztext.SanitizeMarkdown(input.QuestionMarkdown),
-		OptionsMarkdown:  models.JSON(optionsJSON),
-		AnswerIndex:      input.AnswerIndex,
-		SelectedIndex:    input.SelectedIndex,
-	}).Error
-}
-
-func (r *LevelRepository) ClearQuizMistakes(ctx context.Context, userID string, levelID string) error {
-	return r.db.WithContext(ctx).
-		Where("user_id = ? AND level_id = ?", userID, levelID).
-		Delete(&models.QuizMistake{}).
-		Error
-}
-
-func (r *LevelRepository) ListQuizMistakes(ctx context.Context, userID string, levelID string) ([]QuizMistakeSummaryItem, error) {
-	var mistakes []models.QuizMistake
-	if err := r.db.WithContext(ctx).
-		Where("user_id = ? AND level_id = ?", userID, levelID).
-		Order("quiz_index ASC, created_at ASC, id ASC").
-		Find(&mistakes).
-		Error; err != nil {
-		return nil, err
-	}
-
-	items := make([]QuizMistakeSummaryItem, 0, len(mistakes))
-	for _, mistake := range mistakes {
-		var options []string
-		if len(mistake.OptionsMarkdown) > 0 {
-			if err := json.Unmarshal([]byte(mistake.OptionsMarkdown), &options); err != nil {
-				return nil, err
-			}
-		}
-		items = append(items, QuizMistakeSummaryItem{
-			ID:               mistake.ID,
-			UserID:           mistake.UserID,
-			LevelID:          mistake.LevelID,
-			GenerationID:     mistake.GenerationID,
-			QuizID:           mistake.QuizID,
-			QuizIndex:        mistake.QuizIndex,
-			QuizType:         mistake.QuizType,
-			QuestionMarkdown: quiztext.SanitizeMarkdown(mistake.QuestionMarkdown),
-			OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(options),
-			AnswerIndex:      mistake.AnswerIndex,
-			SelectedIndex:    mistake.SelectedIndex,
-			CreatedAt:        mistake.CreatedAt,
-		})
-	}
-	return items, nil
-}
-
 func (r *LevelRepository) CreateGeneration(ctx context.Context, generation models.LevelGenerationRecord) error {
 	return r.db.WithContext(ctx).Create(&generation).Error
 }
@@ -274,7 +204,7 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 		QuizCount              int
 	}
 	result := r.db.WithContext(ctx).
-		Table("levels").
+		Table(levelsTable).
 		Select(`
 			levels.id AS level_id,
 			levels.user_id AS user_id,
@@ -284,11 +214,11 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 			levels.map_seed AS map_seed,
 			levels.map_algorithm_version AS map_algorithm_version,
 			level_generation_jobs.id IS NOT NULL AS generation_record_exists,
-			(SELECT COUNT(*) FROM quizzes WHERE quizzes.level_id = levels.id) AS quiz_count
+			(SELECT COUNT(*) FROM private.quizzes AS quizzes WHERE quizzes.level_id = levels.id) AS quiz_count
 		`).
-		Joins("LEFT JOIN level_generation_jobs ON level_generation_jobs.id = levels.generation_id").
+		Joins("LEFT JOIN "+levelGenerationJobsTable+" AS level_generation_jobs ON level_generation_jobs.id = levels.generation_id").
 		Where("levels.user_id = ? AND levels.sub_chapter_id = ?", userID, subChapterID).
-		Where("EXISTS (SELECT 1 FROM quizzes WHERE quizzes.level_id = levels.id)").
+		Where("EXISTS (SELECT 1 FROM " + quizzesTable + " AS quizzes WHERE quizzes.level_id = levels.id)").
 		Order("levels.created_at DESC NULLS LAST, levels.id DESC").
 		Limit(1).
 		Scan(&row)
@@ -309,6 +239,24 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 		GenerationRecordExists: row.GenerationRecordExists,
 		QuizCount:              row.QuizCount,
 	}, nil
+}
+
+func (r *LevelRepository) ListChapterSubChapters(ctx context.Context, chapterID string, userID string) ([]SubChapterSummary, error) {
+	var rows []SubChapterSummary
+	err := r.db.WithContext(ctx).
+		Table("private.sub_chapters AS sc").
+		Select("sc.id AS sub_chapter_id, sc.chapter_id AS chapter_id").
+		Joins("JOIN private.chapters AS c ON c.id = sc.chapter_id").
+		Joins("JOIN "+documentsTable+" AS d ON d.id = c.document_id").
+		Where("sc.chapter_id = ?", chapterID).
+		Where("(d.user_id = ? OR (d.is_public = true AND d.is_ready = true))", userID).
+		Order("sc.sub_chapter_index ASC NULLS LAST, sc.created_at ASC").
+		Find(&rows).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *LevelRepository) AttachGenerationToLevel(ctx context.Context, generationID string, levelID string, options LevelInsertOptions) (SavedLevel, error) {
@@ -494,7 +442,6 @@ func (r *LevelRepository) Insert(
 				return nil
 			}
 
-			// Clean up any stale level/quiz records associated with this generation ID
 			var existingLevelIDs []string
 			if err := tx.Model(&models.Level{}).
 				Where("generation_id = ?", options.GenerationID).
@@ -544,6 +491,98 @@ func (r *LevelRepository) Insert(
 		return SavedLevel{}, err
 	}
 	return saved, nil
+}
+
+func (r *LevelRepository) AppendQuizzes(
+	ctx context.Context,
+	levelID string,
+	userID string,
+	generation generator.LevelGeneration,
+	maxQuizCount int,
+) (QuizAppendResult, error) {
+	var result QuizAppendResult
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var level models.Level
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ?", levelID, userID).
+			First(&level).
+			Error
+		if err == gorm.ErrRecordNotFound {
+			return models.ErrLevelNotFound
+		}
+		if err != nil {
+			return err
+		}
+
+		var existingCount int64
+		if err := tx.Model(&models.Quiz{}).Where("level_id = ?", levelID).Count(&existingCount).Error; err != nil {
+			return err
+		}
+		if maxQuizCount > 0 && int(existingCount) >= maxQuizCount {
+			result = QuizAppendResult{LevelID: levelID, TotalQuizzes: int(existingCount)}
+			return nil
+		}
+
+		remainingCapacity := len(generation.Quizzes)
+		if maxQuizCount > 0 && int(existingCount)+remainingCapacity > maxQuizCount {
+			remainingCapacity = maxQuizCount - int(existingCount)
+		}
+		if remainingCapacity <= 0 {
+			result = QuizAppendResult{LevelID: levelID, TotalQuizzes: int(existingCount)}
+			return nil
+		}
+
+		quizzes := make([]models.Quiz, 0, remainingCapacity)
+		for index := 0; index < remainingCapacity; index++ {
+			quiz := generation.Quizzes[index]
+			optionsJSON, err := json.Marshal(quiztext.SanitizeMarkdownSlice(quiz.OptionsMarkdown))
+			if err != nil {
+				return err
+			}
+			quizzes = append(quizzes, models.Quiz{
+				ID:               uuid.NewString(),
+				LevelID:          levelID,
+				QuizIndex:        int(existingCount) + index,
+				QuizType:         quiz.QuizType,
+				QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
+				OptionsMarkdown:  models.JSON(optionsJSON),
+				AnswerIndex:      quiz.AnswerIndex,
+			})
+		}
+		if len(quizzes) > 0 {
+			if err := tx.Create(&quizzes).Error; err != nil {
+				return err
+			}
+		}
+		items := make([]QuizItem, 0, len(quizzes))
+		for _, quiz := range quizzes {
+			var options []string
+			if len(quiz.OptionsMarkdown) > 0 {
+				if err := json.Unmarshal([]byte(quiz.OptionsMarkdown), &options); err != nil {
+					return err
+				}
+			}
+			items = append(items, QuizItem{
+				ID:               quiz.ID,
+				QuizIndex:        quiz.QuizIndex,
+				QuizType:         quiz.QuizType,
+				QuestionMarkdown: quiztext.SanitizeMarkdown(quiz.QuestionMarkdown),
+				OptionsMarkdown:  quiztext.SanitizeMarkdownSlice(options),
+				AnswerIndex:      quiz.AnswerIndex,
+			})
+		}
+		result = QuizAppendResult{
+			LevelID:      levelID,
+			Appended:     len(quizzes),
+			TotalQuizzes: int(existingCount) + len(quizzes),
+			Quizzes:      items,
+		}
+		return nil
+	})
+	if err != nil {
+		return QuizAppendResult{}, err
+	}
+	return result, nil
 }
 
 func savedLevel(db *gorm.DB, levelID string) (SavedLevel, error) {

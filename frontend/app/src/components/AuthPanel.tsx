@@ -9,6 +9,7 @@ import ButtonGreen from '@/components/ButtonGreen';
 import RetroInput from '@/components/RetroInput';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { clearAuthCookie, syncAuthCookie } from '@/lib/auth-cookie';
+import { upsertAuthenticatedUserProfile } from '@/lib/user-profile';
 
 function getDisplayName(session: Session) {
   const fullName = session.user.user_metadata?.full_name;
@@ -69,6 +70,13 @@ async function withSessionCheckTimeout<T>(promise: Promise<T>) {
   }
 }
 
+async function syncSessionAndProfile(session: Session | null) {
+  await syncAuthCookie(session);
+  await upsertAuthenticatedUserProfile(session).catch((error) => {
+    console.error('Failed to store user profile:', error);
+  });
+}
+
 export default function AuthPanel() {
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
@@ -98,14 +106,14 @@ export default function AuthPanel() {
 
         const {
           data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+        } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
           if (!isMounted) return;
           setSession(nextSession);
           setIsLoading(false);
           setAuthError(null);
           setIsSubmitting(false);
-          void syncAuthCookie(nextSession).catch((error) => {
-            console.error('Failed to sync auth cookie:', error);
+          await syncSessionAndProfile(nextSession).catch((error) => {
+            console.error('Failed to sync auth session:', error);
           });
           if (nextSession) {
             router.push('/dashboard');
@@ -127,8 +135,8 @@ export default function AuthPanel() {
         setSession(data.session);
         setIsLoading(false);
         if (data.session) {
-          void syncAuthCookie(data.session).catch((error) => {
-            console.error('Failed to sync auth cookie:', error);
+          await syncSessionAndProfile(data.session).catch((error) => {
+            console.error('Failed to sync auth session:', error);
           });
           router.push('/dashboard');
         }
@@ -171,7 +179,7 @@ export default function AuthPanel() {
     rememberAuthRedirectPath();
 
     if (authMode === 'signin') {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -179,6 +187,10 @@ export default function AuthPanel() {
       if (error) {
         setAuthError(error.message);
         setIsSubmitting(false);
+      } else if (data.session) {
+        await syncSessionAndProfile(data.session).catch((error) => {
+          console.error('Failed to sync auth session:', error);
+        });
       }
     } else {
       const { data, error } = await supabase.auth.signUp({

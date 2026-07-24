@@ -21,6 +21,9 @@ const (
 	InitialHealth  = 100
 	InitialEssence = 100
 	InitialWave    = 0
+
+	GameModeNormal   = "normal"
+	GameModeFreePlay = "free_play"
 )
 
 type StartOptions struct {
@@ -28,6 +31,8 @@ type StartOptions struct {
 	LevelID      string
 	GenerationID string
 	SubChapterID string
+	ChapterID    string
+	GameMode     string
 }
 
 type State struct {
@@ -36,6 +41,8 @@ type State struct {
 	LevelID      string    `json:"level_id"`
 	GenerationID string    `json:"generation_id"`
 	SubChapterID string    `json:"sub_chapter_id"`
+	ChapterID    string    `json:"chapter_id,omitempty"`
+	GameMode     string    `json:"game_mode"`
 	Health       int       `json:"health"`
 	Essence      int       `json:"essence"`
 	Wave         int       `json:"wave"`
@@ -73,21 +80,49 @@ type StoredProjectile struct {
 	HitRadius       float64                   `json:"hit_radius"`
 }
 
+type ConsumableInventory struct {
+	Airstrike ConsumableItemState `json:"airstrike"`
+}
+
+type ConsumableItemState struct {
+	Status        string `json:"status"`
+	Charges       int    `json:"charges"`
+	PendingQuizID string `json:"pending_quiz_id,omitempty"`
+}
+
 type RuntimeState struct {
-	GenerationID      string
-	Health            int
-	Essence           int
-	Wave              int
-	Tick              int64
-	LoopStarted       bool
-	LoopPaused        bool
-	WaveStartedAtTick int64
-	WaveSpawned       int
-	NextWaveTick      int64
-	LastQuizStartedAt time.Time
-	Birds             []StoredBird
-	Enemies           []StoredEnemy
-	Projectiles       []StoredProjectile
+	GenerationID            string
+	ChapterID               string
+	GameMode                string
+	Health                  int
+	Essence                 int
+	Wave                    int
+	Tick                    int64
+	LoopStarted             bool
+	LoopPaused              bool
+	WaveStartedAtTick       int64
+	WaveSpawned             int
+	NextWaveTick            int64
+	LastQuizStartedAt       time.Time
+	ConsumableCooldownUntil time.Time
+	Birds                   []StoredBird
+	Enemies                 []StoredEnemy
+	Projectiles             []StoredProjectile
+	Consumables             ConsumableInventory
+}
+
+type QuizMistake struct {
+	ID               string     `json:"id"`
+	LevelID          string     `json:"level_id"`
+	GenerationID     string     `json:"generation_id"`
+	QuizID           string     `json:"quiz_id"`
+	QuizIndex        int        `json:"quiz_index"`
+	QuizType         string     `json:"quiz_type"`
+	QuestionMarkdown string     `json:"question_markdown"`
+	OptionsMarkdown  []string   `json:"options_markdown"`
+	AnswerIndex      int        `json:"answer_index"`
+	SelectedIndex    int        `json:"selected_index"`
+	CreatedAt        *time.Time `json:"created_at"`
 }
 
 type Store struct {
@@ -130,6 +165,8 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		LevelID:      options.LevelID,
 		GenerationID: options.GenerationID,
 		SubChapterID: options.SubChapterID,
+		ChapterID:    strings.TrimSpace(options.ChapterID),
+		GameMode:     normalizedGameMode(options.GameMode),
 		Health:       InitialHealth,
 		Essence:      InitialEssence,
 		Wave:         InitialWave,
@@ -143,6 +180,8 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"level_id":             state.LevelID,
 		"generation_id":        state.GenerationID,
 		"sub_chapter_id":       state.SubChapterID,
+		"chapter_id":           state.ChapterID,
+		"game_mode":            state.GameMode,
 		"health":               state.Health,
 		"essence":              state.Essence,
 		"wave":                 state.Wave,
@@ -156,6 +195,7 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"birds":                "[]",
 		"enemies":              "[]",
 		"projectiles":          "[]",
+		"consumables":          "{}",
 		"started_at":           state.StartedAt.Format(time.RFC3339Nano),
 		"updated_at":           state.UpdatedAt.Format(time.RFC3339Nano),
 	}
@@ -195,26 +235,34 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 	if err := unmarshalStoredSlice(values["projectiles"], &projectiles); err != nil {
 		return RuntimeState{}, err
 	}
+	var consumables ConsumableInventory
+	if err := unmarshalStoredObject(values["consumables"], &consumables); err != nil {
+		return RuntimeState{}, err
+	}
 
 	state, err := parseState(values)
 	if err != nil {
 		return RuntimeState{}, err
 	}
 	return RuntimeState{
-		GenerationID:      state.GenerationID,
-		Health:            state.Health,
-		Essence:           state.Essence,
-		Wave:              state.Wave,
-		Tick:              state.Tick,
-		LoopStarted:       boolValue(values["loop_started"], false),
-		LoopPaused:        boolValue(values["loop_paused"], false),
-		WaveStartedAtTick: int64Value(values["wave_started_at_tick"], 0),
-		WaveSpawned:       intValue(values["wave_spawned"], 0),
-		NextWaveTick:      int64Value(values["next_wave_tick"], 0),
-		LastQuizStartedAt: timeValue(values["last_quiz_started_at"]),
-		Birds:             birds,
-		Enemies:           enemies,
-		Projectiles:       projectiles,
+		GenerationID:            state.GenerationID,
+		ChapterID:               state.ChapterID,
+		GameMode:                state.GameMode,
+		Health:                  state.Health,
+		Essence:                 state.Essence,
+		Wave:                    state.Wave,
+		Tick:                    state.Tick,
+		LoopStarted:             boolValue(values["loop_started"], false),
+		LoopPaused:              boolValue(values["loop_paused"], false),
+		WaveStartedAtTick:       int64Value(values["wave_started_at_tick"], 0),
+		WaveSpawned:             intValue(values["wave_spawned"], 0),
+		NextWaveTick:            int64Value(values["next_wave_tick"], 0),
+		LastQuizStartedAt:       timeValue(values["last_quiz_started_at"]),
+		ConsumableCooldownUntil: timeValue(values["consumable_cooldown_until"]),
+		Birds:                   birds,
+		Enemies:                 enemies,
+		Projectiles:             projectiles,
+		Consumables:             consumables,
 	}, nil
 }
 
@@ -246,6 +294,10 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 	if err != nil {
 		return err
 	}
+	consumablesBody, err := json.Marshal(runtime.Consumables)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	redisKey := key(sessionID)
 	args := []string{
@@ -273,12 +325,20 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 		strconv.FormatInt(runtime.NextWaveTick, 10),
 		"last_quiz_started_at",
 		formatOptionalTime(runtime.LastQuizStartedAt),
+		"consumable_cooldown_until",
+		formatOptionalTime(runtime.ConsumableCooldownUntil),
+		"game_mode",
+		normalizedGameMode(runtime.GameMode),
+		"chapter_id",
+		strings.TrimSpace(runtime.ChapterID),
 		"birds",
 		string(birdsBody),
 		"enemies",
 		string(enemiesBody),
 		"projectiles",
 		string(projectilesBody),
+		"consumables",
+		string(consumablesBody),
 		"updated_at",
 		now.Format(time.RFC3339Nano),
 	}
@@ -309,11 +369,102 @@ func (s *Store) Delete(ctx context.Context, sessionID string) error {
 		return err
 	}
 	values := hashValues(raw)
-	args := []string{"DEL", key(sessionID)}
+	args := []string{"DEL", key(sessionID), mistakesKey(sessionID)}
 	if values["user_id"] != "" && values["level_id"] != "" {
 		args = append(args, indexKey(values["user_id"], values["level_id"]))
 	}
 	_, err = s.client.Do(args...)
+	return err
+}
+
+func (s *Store) SaveQuizMistake(ctx context.Context, sessionID string, userID string, mistake QuizMistake) error {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return errors.New("game session store is not configured")
+	}
+	state, err := s.getBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if state.UserID != userID {
+		return ErrSessionNotFound
+	}
+	if mistake.ID == "" {
+		mistake.ID = uuid.NewString()
+	}
+	if mistake.LevelID == "" {
+		mistake.LevelID = state.LevelID
+	}
+	if mistake.GenerationID == "" {
+		mistake.GenerationID = state.GenerationID
+	}
+	now := time.Now().UTC()
+	mistake.CreatedAt = &now
+	body, err := json.Marshal(mistake)
+	if err != nil {
+		return err
+	}
+	redisKey := mistakesKey(sessionID)
+	if _, err := s.client.Do("RPUSH", redisKey, string(body)); err != nil {
+		return err
+	}
+	if _, err := s.client.Do("EXPIRE", redisKey, strconv.Itoa(int(s.ttl.Seconds()))); err != nil {
+		return err
+	}
+	return s.refreshTTL(sessionID, state.UserID, state.LevelID)
+}
+
+func (s *Store) ListQuizMistakes(ctx context.Context, sessionID string, userID string) ([]QuizMistake, error) {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return nil, errors.New("game session store is not configured")
+	}
+	state, err := s.getBySessionID(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if state.UserID != userID {
+		return nil, ErrSessionNotFound
+	}
+	raw, err := s.client.Do("LRANGE", mistakesKey(sessionID), "0", "-1")
+	if errors.Is(err, redisclient.ErrNil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected redis mistakes payload type %T", raw)
+	}
+	mistakes := make([]QuizMistake, 0, len(values))
+	for _, value := range values {
+		body, ok := value.(string)
+		if !ok || strings.TrimSpace(body) == "" {
+			continue
+		}
+		var mistake QuizMistake
+		if err := json.Unmarshal([]byte(body), &mistake); err != nil {
+			return nil, err
+		}
+		mistakes = append(mistakes, mistake)
+	}
+	return mistakes, nil
+}
+
+func (s *Store) ClearQuizMistakes(ctx context.Context, sessionID string, userID string) error {
+	_ = ctx
+	if s == nil || s.client == nil {
+		return errors.New("game session store is not configured")
+	}
+	state, err := s.getBySessionID(sessionID)
+	if err != nil {
+		return err
+	}
+	if state.UserID != userID {
+		return ErrSessionNotFound
+	}
+	_, err = s.client.Do("DEL", mistakesKey(sessionID))
 	return err
 }
 
@@ -326,6 +477,10 @@ func (s *Store) Close() error {
 
 func key(sessionID string) string {
 	return "game-session:v1:" + sessionID
+}
+
+func mistakesKey(sessionID string) string {
+	return key(sessionID) + ":mistakes"
 }
 
 func indexKey(userID string, levelID string) string {
@@ -378,6 +533,9 @@ func (s *Store) refreshTTL(sessionID string, userID string, levelID string) erro
 	if _, err := s.client.Do("SET", indexKey(userID, levelID), sessionID, "EX", seconds); err != nil {
 		return err
 	}
+	if _, err := s.client.Do("EXPIRE", mistakesKey(sessionID), seconds); err != nil && !strings.Contains(err.Error(), "no such key") {
+		return err
+	}
 	return nil
 }
 
@@ -417,6 +575,8 @@ func parseState(values map[string]string) (State, error) {
 		LevelID:      values["level_id"],
 		GenerationID: values["generation_id"],
 		SubChapterID: values["sub_chapter_id"],
+		ChapterID:    values["chapter_id"],
+		GameMode:     normalizedGameMode(values["game_mode"]),
 		Health:       health,
 		Essence:      essence,
 		Wave:         wave,
@@ -424,6 +584,15 @@ func parseState(values map[string]string) (State, error) {
 		StartedAt:    startedAt,
 		UpdatedAt:    updatedAt,
 	}, nil
+}
+
+func normalizedGameMode(value string) string {
+	switch strings.TrimSpace(value) {
+	case GameModeFreePlay:
+		return GameModeFreePlay
+	default:
+		return GameModeNormal
+	}
 }
 
 func hashValues(raw any) map[string]string {
@@ -445,6 +614,13 @@ func hashValues(raw any) map[string]string {
 func unmarshalStoredSlice(body string, target any) error {
 	if strings.TrimSpace(body) == "" {
 		body = "[]"
+	}
+	return json.Unmarshal([]byte(body), target)
+}
+
+func unmarshalStoredObject(body string, target any) error {
+	if strings.TrimSpace(body) == "" {
+		body = "{}"
 	}
 	return json.Unmarshal([]byte(body), target)
 }

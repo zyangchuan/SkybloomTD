@@ -8,6 +8,8 @@ type QuizState = {
   question: string;
   options: string[];
   type: string;
+  isConsumable?: boolean;
+  consumableType?: string;
 };
 
 type QuizPromptData = {
@@ -15,6 +17,8 @@ type QuizPromptData = {
   question_markdown: string;
   options_markdown?: string[];
   quiz_type?: string;
+  is_consumable?: boolean;
+  consumable_type?: string;
 };
 
 type QuizResult = {
@@ -27,6 +31,8 @@ type QuizResult = {
   essence_awarded?: number;
   essence?: number;
   remaining?: number;
+  is_consumable?: boolean;
+  consumable_type?: string;
 };
 
 type QuizOverlayMessage =
@@ -63,7 +69,9 @@ function quizStateFromSearchParams(searchParams: SearchParamsReader): QuizState 
     quizId: searchParams.get('quiz_id') || '',
     question: searchParams.get('question') || '',
     options: parseOptions(searchParams.get('options')),
-    type: searchParams.get('type') || 'mcq'
+    type: searchParams.get('type') || 'mcq',
+    isConsumable: searchParams.get('is_consumable') === 'true',
+    consumableType: searchParams.get('consumable_type') || ''
   };
 }
 
@@ -72,7 +80,9 @@ function quizStateFromPrompt(promptData: QuizPromptData): QuizState {
     quizId: promptData.quiz_id,
     question: promptData.question_markdown,
     options: promptData.options_markdown || [],
-    type: promptData.quiz_type === 'true_false' ? 'tf' : 'mcq'
+    type: promptData.quiz_type === 'true_false' ? 'tf' : 'mcq',
+    isConsumable: promptData.is_consumable,
+    consumableType: promptData.consumable_type
   };
 }
 
@@ -102,6 +112,7 @@ function QuizOverlayContent() {
   const [quizAnswered, setQuizAnswered] = useState(false);
   const [result, setResult] = useState<QuizResult | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const questionBoxRef = useRef<HTMLDivElement>(null);
 
   // Dynamically load KaTeX assets inside the iframe context
   useEffect(() => {
@@ -179,6 +190,13 @@ function QuizOverlayContent() {
       return () => clearTimeout(timer);
     }
   }, [result]);
+
+  // Reset question box scroll to top whenever a new question is loaded
+  useEffect(() => {
+    if (questionBoxRef.current) {
+      questionBoxRef.current.scrollTop = 0;
+    }
+  }, [currentQuestion]);
 
   const resultForCurrentQuiz = result && result.quiz_id === currentQuizId ? result : null;
 
@@ -425,7 +443,6 @@ function QuizOverlayContent() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
           background: #020617;
           box-sizing: border-box;
           padding: 8px 14px; /* Cozy padding */
@@ -496,18 +513,21 @@ function QuizOverlayContent() {
           aria-label="Close"
         />
 
-        {/* Math Question Box */}
+         {/* Math Question Box */}
         <div 
+          ref={questionBoxRef}
           className={isMobile
-            ? "question-9slice question-box font-concert text-center text-black select-text overflow-y-auto scroll-hide"
-            : "question-9slice flex flex-col items-center justify-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-hide mt-2"
+            ? "question-9slice question-box font-concert text-center text-black select-text overflow-y-auto scroll-custom"
+            : "question-9slice flex flex-col items-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-custom mt-2"
           }
           style={isMobile
             ? undefined
             : { boxSizing: 'border-box', padding: '24px' }
           }
         >
-          {currentQuestion}
+          <div className="my-auto w-full">
+            {currentQuestion}
+          </div>
         </div>
 
         {currentType === 'tf' ? (
@@ -580,10 +600,17 @@ function QuizOverlayContent() {
 
         {result && result.correct && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 animate-essence-float">
-            <div className="flex items-center gap-3 font-concert text-5xl text-[#fef08a] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
-              <span>+50 Sky Essence</span>
-              <img src="/essence.png" className="w-14 h-14 object-contain" alt="" />
-            </div>
+            {result.is_consumable ? (
+              <div className="flex items-center gap-3 font-concert text-5xl text-[#fef08a] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                <span>+1 Airstrike</span>
+                <img src="/game/assets/consumables/airstrike/icon.png" className="w-14 h-14 object-contain" alt="" />
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 font-concert text-5xl text-[#fef08a] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
+                <span>+50 Sky Essence</span>
+                <img src="/essence.png" className="w-14 h-14 object-contain" alt="" />
+              </div>
+            )}
           </div>
         )}
       </div>

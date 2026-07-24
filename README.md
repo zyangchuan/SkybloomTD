@@ -187,6 +187,62 @@ Stop and remove local volumes:
 docker compose -f docker-compose.yml -f docker-compose.local.yml down -v
 ```
 
+## Automated Testing
+
+The current automated tests cover the document service and game service with
+both unit tests and integration tests that use mocks/fakes instead of real
+Postgres, Redis, RabbitMQ, or S3 infrastructure.
+
+Document service tests:
+
+- Unit tests for model helpers, storage path construction, safe filenames,
+  game name normalization, task status JSON, and queued document mapping.
+- Integration tests for the real Gin router/controller flow with mocked
+  storage, document store, task status store, and RabbitMQ publisher.
+
+Game service tests:
+
+- Unit tests for enemy/bird stats, enemy scaling, map generation rules, enemy
+  movement, projectile damage, quiz prompt shape, cooldowns, and quiz answer
+  validation.
+- Integration tests for generation job publishing and worker map/quiz job
+  processing with fake repositories, status stores, caches, and publishers.
+
+Run all current Go tests from the repository root:
+
+```bash
+./scripts/test-go.sh
+```
+
+GitHub Actions runs these test suites on pull requests and on pushes to
+`staging`. The staging deployment workflow also runs the tests before
+deploying. Production system testing will be added separately later.
+
+### Playwright System Tests
+
+Playwright system tests live in `system-tests/` and run against a deployed app
+URL. They verify browser-visible workflows such as login, routing, document
+upload, document deletion, chapter navigation, game loading, and reconnect.
+The upload test uses `system-tests/testpdf.pdf` and waits up to five minutes
+for processing to complete. The delete check runs after upload in the same
+serial spec and removes the uploaded document.
+
+Game-specific tests also need IDs for a ready document/chapter/sub-chapter:
+
+```bash
+PLAYWRIGHT_READY_DOCUMENT_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_READY_SUB_CHAPTER_ID=00000000-0000-0000-0000-000000000000
+PLAYWRIGHT_QUIZ_FEEDBACK_LATENCY_MS=3000
+```
+
+Run the Playwright system suite in Docker from the repository root:
+
+```bash
+cp system-tests/.env.example system-tests/.env
+docker compose -f system-tests/docker-compose.yml up --build --abort-on-container-exit --exit-code-from playwright-system-tests
+```
+
 ## Common WSL Fixes
 
 If the OCR worker cannot see the GPU:

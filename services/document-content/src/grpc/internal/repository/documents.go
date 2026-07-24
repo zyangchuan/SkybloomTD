@@ -34,7 +34,7 @@ func NewDocumentRepository(db *gorm.DB) *DocumentRepository {
 func (r *DocumentRepository) LoadDocumentRow(ctx context.Context, subChapterID uuid.UUID, userID uuid.UUID) (DocumentRow, error) {
 	var row DocumentRow
 	err := r.db.WithContext(ctx).
-		Table("sub_chapters AS sc").
+		Table("private.sub_chapters AS sc").
 		Select(`
 			sc.id AS sub_chapter_id,
 			sc.document_id,
@@ -46,7 +46,7 @@ func (r *DocumentRepository) LoadDocumentRow(ctx context.Context, subChapterID u
 			d.user_id,
 			d.s3_bucket
 		`).
-		Joins("JOIN documents AS d ON sc.document_id = d.id").
+		Joins("JOIN private.documents AS d ON sc.document_id = d.id").
 		Where("sc.id = ? AND d.user_id = ?", subChapterID, userID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
