@@ -6,7 +6,7 @@ export default class Tower extends Phaser.GameObjects.Sprite {
   public gridX: number;
   public gridY: number;
   public range: number = 0;
-  public lifespan: number = 0;
+  public pierce: number = 0;
   public spread: number = 0;
 
   constructor(scene: Phaser.Scene, x: number, y: number, id: string, birdType: string, gridX: number, gridY: number) {

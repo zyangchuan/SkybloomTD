@@ -58,7 +58,7 @@ export class EntitySync {
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
         if (stats?.range) tower.range = stats.range;
-        if (stats?.lifespan) tower.lifespan = stats.lifespan;
+        if (stats?.pierce) tower.pierce = stats.pierce;
         if (stats?.spread) tower.spread = stats.spread;
         let scaleMultiplier = 1.2;
         if (type === 'sun_god') {
@@ -73,7 +73,7 @@ export class EntitySync {
       } else {
         const tower = this.towers.get(id)!;
         if (stats?.range) tower.range = stats.range;
-        if (stats?.lifespan) tower.lifespan = stats.lifespan;
+        if (stats?.pierce) tower.pierce = stats.pierce;
         if (stats?.spread) tower.spread = stats.spread;
       }
     });
@@ -290,16 +290,49 @@ export class EntitySync {
           .setDisplaySize(this.tileSize * 1.5, this.tileSize * 1.5);
       }
 
-      const hasLifespan = !!(sourceTower.lifespan || stats?.lifespan);
+      const hasPierce = !!(sourceTower.pierce || stats?.pierce);
       const targetAngle = Math.atan2(lastY - sourceTower.y, lastX - sourceTower.x) + angleOffset;
       const dirX = Math.cos(targetAngle);
       const dirY = Math.sin(targetAngle);
 
-      if (hasLifespan) {
+      if (hasPierce) {
         if (birdType === 'sun_god') {
           sprite.rotation = targetAngle + Math.PI;
         } else {
           sprite.rotation = targetAngle + Math.PI / 2;
+        }
+      }
+
+      let maxRange = (sourceTower.range || stats?.range || 3.0) * this.tileSize;
+      if (hasPierce) {
+        // Find all active enemies lying along the line of attack
+        const lineEnemies: Array<{ distance: number }> = [];
+        this.enemies.forEach((enemy) => {
+          if (enemy.isDying) return;
+          const dx = enemy.sprite.x - sourceTower.x;
+          const dy = enemy.sprite.y - sourceTower.y;
+          const dist = Math.hypot(dx, dy);
+          const screenLimit = Math.hypot(this.scene.scale.width, this.scene.scale.height);
+          if (dist <= 0 || dist > screenLimit) return;
+
+          const edx = dx / dist;
+          const edy = dy / dist;
+          const dot = dirX * edx + dirY * edy;
+
+          // angular tolerance (approx. 18 degrees)
+          if (dot >= 0.95) {
+            lineEnemies.push({ distance: dist });
+          }
+        });
+
+        const maxPierce = sourceTower.pierce || stats?.pierce || 5;
+        if (lineEnemies.length >= maxPierce) {
+          // Sort by distance ascending (closest first)
+          lineEnemies.sort((a, b) => a.distance - b.distance);
+          maxRange = lineEnemies[maxPierce - 1].distance;
+        } else {
+          // 5th enemy is not hit, so keep traveling off screen
+          maxRange = Math.hypot(this.scene.scale.width, this.scene.scale.height);
         }
       }
 
@@ -314,9 +347,9 @@ export class EntitySync {
         towerX: sourceTower.x,
         towerY: sourceTower.y,
         angleOffset,
-        maxRange: (sourceTower.lifespan || sourceTower.range || (stats?.lifespan) || (stats?.range) || 3.0) * this.tileSize,
+        maxRange,
         distanceTraveled: 0,
-        isDirectional: hasLifespan,
+        isDirectional: hasPierce,
         dirX,
         dirY,
       });

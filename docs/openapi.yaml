@@ -2321,7 +2321,7 @@ components:
         attack:
           type: string
           enum: [single, splash, ring]
-          description: Splash attacks resolve as three immediate attack lines evenly distributed across the configured spread, with two boundary lines and one center line toward the selected target. Each line damages at most one enemy. Ring attacks resolve immediate damage to every enemy within the bird tower radius without selecting a target.
+          description: Splash attacks resolve as three immediate attack lines evenly distributed across the configured spread, with two boundary lines and one center line toward the selected target. Each line damages one enemy by default, or up to the configured pierce count. Ring attacks resolve immediate damage to every enemy within the bird tower radius without selecting a target.
 
     PlacedBird:
       type: object
@@ -2508,10 +2508,9 @@ components:
           type: number
           format: double
           description: Splash attack projectile spread angle in radians. Omitted or zero uses the default splash spread.
-        lifespan:
-          type: number
-          format: double
-          description: Single and splash attack travel distance. Target acquisition still uses range. When set, the attack line damages every enemy it crosses within this distance. When omitted or zero, the attack line stops after its first hit.
+        pierce:
+          type: integer
+          description: Single and splash attack hit cap per attack line. Target acquisition still uses range. When set, the attack line damages up to this many enemies. When omitted or zero, the attack line stops after its first hit.
         cost:
           type: integer
 

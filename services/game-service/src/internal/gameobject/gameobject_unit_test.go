@@ -3,8 +3,6 @@ package gameobject
 import (
 	"math"
 	"testing"
-
-	"skybloom/game-service/internal/mapgen"
 )
 
 func TestEnemyStatsForType(t *testing.T) {
@@ -39,7 +37,7 @@ func TestBirdStatsForType(t *testing.T) {
 		{birdType: BirdTypeWoodpecker, want: BirdStats{Damage: 10, ProjectileSpeed: StandardProjectileSpeed, FireRate: 2.0, Range: 2.1, Cost: 65}},
 		{birdType: BirdTypeEagle, want: BirdStats{Damage: 50, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.5, Range: 3.2, Cost: 130}},
 		{birdType: BirdTypePhoenix, want: BirdStats{Damage: 25, ProjectileSpeed: StandardProjectileSpeed, FireRate: 0.8, Range: 2.0, Cost: 50}},
-		{birdType: BirdTypeSunGod, want: BirdStats{Damage: 18, ProjectileSpeed: StandardProjectileSpeed, FireRate: 3.2, Range: 4.5, Spread: math.Pi / 36, Lifespan: float64(mapgen.Width), Cost: 150}},
+		{birdType: BirdTypeSunGod, want: BirdStats{Damage: 18, ProjectileSpeed: StandardProjectileSpeed, FireRate: 3.2, Range: 4.5, Spread: math.Pi / 36, Pierce: 5, Cost: 150}},
 	}
 
 	for _, tt := range tests {
@@ -115,7 +113,7 @@ func TestProjectileDamageApplication(t *testing.T) {
 	}
 }
 
-func TestSingleAttackWithoutLifespanOnlyHitsTarget(t *testing.T) {
+func TestSingleAttackWithoutPierceOnlyHitsTarget(t *testing.T) {
 	bird := Bird{
 		Position:        Position{X: 0, Y: 0},
 		Stats:           BirdStats{Damage: 20, Range: 3},
@@ -127,39 +125,37 @@ func TestSingleAttackWithoutLifespanOnlyHitsTarget(t *testing.T) {
 	hits := bird.Attack(target, []Enemy{target, closerEnemy}, 1)
 
 	if len(hits) != 1 || hits[0].EnemyID != target.ID {
-		t.Fatalf("expected single attack without lifespan to stop at target, got %#v", hits)
+		t.Fatalf("expected single attack without pierce to stop at target, got %#v", hits)
 	}
 }
 
-func TestSingleAttackWithLifespanDamagesAllEnemiesOnAttackLine(t *testing.T) {
+func TestSingleAttackWithPierceDamagesUpToPierceEnemiesOnAttackLine(t *testing.T) {
 	bird := Bird{
 		Position:        Position{X: 0, Y: 0},
-		Stats:           BirdStats{Damage: 20, Range: 3, Lifespan: 4},
+		Stats:           BirdStats{Damage: 20, Range: 3, Pierce: 2},
 		AttackBehaviour: SingleAttack{},
 	}
 	target := Enemy{ID: "enemy-target", Health: 30, Position: Position{X: 2.5, Y: 0}, PathIndex: 2}
 	closerEnemy := Enemy{ID: "enemy-closer", Health: 30, Position: Position{X: 1.5, Y: 0}, PathIndex: 1}
 	farEnemy := Enemy{ID: "enemy-far", Health: 30, Position: Position{X: 3.5, Y: 0}, PathIndex: 3}
-	outsideLifespanEnemy := Enemy{ID: "enemy-too-far", Health: 30, Position: Position{X: 4.5, Y: 0}, PathIndex: 4}
 	targetBeyondRange := Enemy{ID: "enemy-out-of-range", Health: 30, Position: Position{X: 3.5, Y: 0}}
 
 	if hits := bird.Attack(targetBeyondRange, []Enemy{targetBeyondRange}, 1); len(hits) != 0 {
 		t.Fatalf("expected target beyond range to avoid targeting, got %#v", hits)
 	}
 
-	hits := bird.Attack(target, []Enemy{target, closerEnemy, farEnemy, outsideLifespanEnemy}, 1)
+	hits := bird.Attack(target, []Enemy{target, closerEnemy, farEnemy}, 1)
 
-	if len(hits) != 3 {
-		t.Fatalf("expected lifespan single attack to pierce 3 enemies, got %#v", hits)
+	if len(hits) != 2 {
+		t.Fatalf("expected pierce single attack to hit 2 enemies, got %#v", hits)
 	}
 	want := map[string]bool{
-		target.ID:      true,
-		closerEnemy.ID: true,
-		farEnemy.ID:    true,
+		target.ID:   true,
+		farEnemy.ID: true,
 	}
 	for _, hit := range hits {
 		if !want[hit.EnemyID] {
-			t.Fatalf("unexpected lifespan single hit %#v", hit)
+			t.Fatalf("unexpected pierce single hit %#v", hit)
 		}
 	}
 }
@@ -241,30 +237,28 @@ func TestSplashAttackOnlyHitsOneEnemyPerAttackLine(t *testing.T) {
 	}
 }
 
-func TestSplashAttackWithLifespanDamagesAllEnemiesOnAttackLines(t *testing.T) {
+func TestSplashAttackWithPierceDamagesUpToPierceEnemiesOnAttackLines(t *testing.T) {
 	target := Enemy{ID: "enemy-target", Health: 30, Position: Position{X: 2.5, Y: 0}, PathIndex: 2}
 	closerEnemy := Enemy{ID: "enemy-closer", Health: 30, Position: Position{X: 1.5, Y: 0}, PathIndex: 1}
 	farEnemy := Enemy{ID: "enemy-far", Health: 30, Position: Position{X: 3.5, Y: 0}, PathIndex: 3}
-	outsideLifespanEnemy := Enemy{ID: "enemy-too-far", Health: 30, Position: Position{X: 4.5, Y: 0}, PathIndex: 4}
 	bird := Bird{
 		Position:        Position{X: 0, Y: 0},
-		Stats:           BirdStats{Damage: 10, Range: 3, Lifespan: 4},
+		Stats:           BirdStats{Damage: 10, Range: 3, Pierce: 2},
 		AttackBehaviour: SplashAttack{},
 	}
 
-	hits := bird.Attack(target, []Enemy{target, closerEnemy, farEnemy, outsideLifespanEnemy}, 1)
+	hits := bird.Attack(target, []Enemy{target, closerEnemy, farEnemy}, 1)
 
-	if len(hits) != 3 {
-		t.Fatalf("expected splash line with lifespan to pierce 3 enemies, got %#v", hits)
+	if len(hits) != 2 {
+		t.Fatalf("expected splash line with pierce to hit 2 enemies, got %#v", hits)
 	}
 	want := map[string]bool{
-		target.ID:      true,
-		closerEnemy.ID: true,
-		farEnemy.ID:    true,
+		target.ID:   true,
+		farEnemy.ID: true,
 	}
 	for _, hit := range hits {
 		if !want[hit.EnemyID] {
-			t.Fatalf("unexpected lifespan splash hit %#v", hit)
+			t.Fatalf("unexpected pierce splash hit %#v", hit)
 		}
 	}
 }

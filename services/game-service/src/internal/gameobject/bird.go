@@ -18,7 +18,7 @@ type BirdStats struct {
 	FireRate        float64 `json:"fire_rate"`
 	Range           float64 `json:"range"`
 	Spread          float64 `json:"spread,omitempty"`
-	Lifespan        float64 `json:"lifespan,omitempty"`
+	Pierce          int     `json:"pierce,omitempty"`
 	Cost            int     `json:"cost"`
 }
 

@@ -17,14 +17,15 @@ func (a SingleAttack) Attack(bird Bird, target Enemy, enemies []Enemy) []AttackH
 	if !target.IsAlive() {
 		return nil
 	}
-	if !hasAttackLifespan(bird) {
+	if !hasAttackPierce(bird) {
 		return attackHit(bird, target)
 	}
 	lineDirection := bird.Position.DirectionTo(target.Position)
 	if lineDirection == (Vector{}) {
 		return nil
 	}
-	return attackHits(bird, enemiesOnAttackLine(bird.Position, lineDirection, bird.Stats.Lifespan, enemies, nil))
+	lineEnemies := enemiesOnAttackLine(bird.Position, lineDirection, math.Inf(1), enemies, nil)
+	return attackHits(bird, limitEnemiesByPierce(lineEnemies, bird.Stats.Pierce))
 }
 
 type SplashAttack struct{}
@@ -57,8 +58,10 @@ func (a SplashAttack) Attack(bird Bird, target Enemy, enemies []Enemy) []AttackH
 		if len(lineEnemies) == 0 {
 			continue
 		}
-		if !hasAttackLifespan(bird) {
+		if !hasAttackPierce(bird) {
 			lineEnemies = lineEnemies[:1]
+		} else {
+			lineEnemies = limitEnemiesByPierce(lineEnemies, bird.Stats.Pierce)
 		}
 		for _, enemy := range lineEnemies {
 			hitEnemyIDs[enemy.ID] = true
@@ -69,14 +72,21 @@ func (a SplashAttack) Attack(bird Bird, target Enemy, enemies []Enemy) []AttackH
 }
 
 func splashAttackLineRange(bird Bird) float64 {
-	if hasAttackLifespan(bird) {
-		return bird.Stats.Lifespan
+	if hasAttackPierce(bird) {
+		return math.Inf(1)
 	}
 	return bird.Stats.Range
 }
 
-func hasAttackLifespan(bird Bird) bool {
-	return bird.Stats.Lifespan > 0
+func hasAttackPierce(bird Bird) bool {
+	return bird.Stats.Pierce > 0
+}
+
+func limitEnemiesByPierce(enemies []Enemy, pierce int) []Enemy {
+	if pierce <= 0 || len(enemies) <= pierce {
+		return enemies
+	}
+	return enemies[:pierce]
 }
 
 func enemiesOnAttackLine(origin Position, direction Vector, maxRange float64, enemies []Enemy, excluded map[string]bool) []Enemy {

@@ -3,8 +3,6 @@ package gameobject
 import (
 	"errors"
 	"math"
-
-	"skybloom/game-service/internal/mapgen"
 )
 
 const (
@@ -134,7 +132,7 @@ var birdDefinitions = map[string]BirdDefinition{
 			FireRate:        3.2,
 			Range:           4.5,
 			Spread:          math.Pi / 36,
-			Lifespan:        float64(mapgen.Width),
+			Pierce:          5,
 			Cost:            150,
 		},
 		AttackType: AttackTypeSplash,
