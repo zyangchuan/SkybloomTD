@@ -7,6 +7,7 @@ import { GameOverlay } from '../ui/GameOverlay';
 import { DragController } from '../input/DragController';
 import { EntitySync } from '../game/EntitySync';
 import { AirstrikeManager } from '../ui/AirstrikeManager';
+import { PlaySpeedButton } from '../ui/PlaySpeedButton';
 
 export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
@@ -29,6 +30,7 @@ export default class GameScene extends Phaser.Scene {
   private drag!: DragController;
   private entities!: EntitySync;
   private airstrike!: AirstrikeManager;
+  private playSpeedButton!: PlaySpeedButton;
   private startBtn: Phaser.GameObjects.Sprite | null = null;
   private startLabel: Phaser.GameObjects.Text | null = null;
   private startArrow: Phaser.GameObjects.Sprite | null = null;
@@ -66,6 +68,11 @@ export default class GameScene extends Phaser.Scene {
       { tileSize: this.tileSize, offsetX: this.offsetX, offsetY: this.offsetY, gridWidth: this.gridWidth, gridHeight: this.gridHeight }
     );
     this.airstrike.createHUD();
+
+    this.playSpeedButton = new PlaySpeedButton(
+      this,
+      (type, data) => this.sendWs(type, data)
+    );
 
     new BirdTray(this, () => this.drag.isDragging());
     this.setupWebSocket(data.levelId);
@@ -143,6 +150,7 @@ export default class GameScene extends Phaser.Scene {
       this.entities.destroy();
       this.overlay.destroy();
       this.airstrike.destroy();
+      this.playSpeedButton.destroy();
     });
   }
 

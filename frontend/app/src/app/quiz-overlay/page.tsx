@@ -112,6 +112,7 @@ function QuizOverlayContent() {
   const [quizAnswered, setQuizAnswered] = useState(false);
   const [result, setResult] = useState<QuizResult | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const questionBoxRef = useRef<HTMLDivElement>(null);
 
   // Dynamically load KaTeX assets inside the iframe context
   useEffect(() => {
@@ -189,6 +190,13 @@ function QuizOverlayContent() {
       return () => clearTimeout(timer);
     }
   }, [result]);
+
+  // Reset question box scroll to top whenever a new question is loaded
+  useEffect(() => {
+    if (questionBoxRef.current) {
+      questionBoxRef.current.scrollTop = 0;
+    }
+  }, [currentQuestion]);
 
   const resultForCurrentQuiz = result && result.quiz_id === currentQuizId ? result : null;
 
@@ -435,7 +443,6 @@ function QuizOverlayContent() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          justify-content: center;
           background: #020617;
           box-sizing: border-box;
           padding: 8px 14px; /* Cozy padding */
@@ -506,18 +513,21 @@ function QuizOverlayContent() {
           aria-label="Close"
         />
 
-        {/* Math Question Box */}
+         {/* Math Question Box */}
         <div 
+          ref={questionBoxRef}
           className={isMobile
-            ? "question-9slice question-box font-concert text-center text-black select-text overflow-y-auto scroll-hide"
-            : "question-9slice flex flex-col items-center justify-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-hide mt-2"
+            ? "question-9slice question-box font-concert text-center text-black select-text overflow-y-auto scroll-custom"
+            : "question-9slice flex flex-col items-center w-[90%] max-w-[680px] h-[320px] bg-slate-950 font-concert text-2xl text-center text-black select-text overflow-y-auto scroll-custom mt-2"
           }
           style={isMobile
             ? undefined
             : { boxSizing: 'border-box', padding: '24px' }
           }
         >
-          {currentQuestion}
+          <div className="my-auto w-full">
+            {currentQuestion}
+          </div>
         </div>
 
         {currentType === 'tf' ? (

@@ -34,6 +34,12 @@ export class EntitySync {
     towerX: number;
     towerY: number;
     angleOffset: number;
+    isDirectional?: boolean;
+    dirX?: number;
+    dirY?: number;
+    maxRange?: number;
+    distanceTraveled?: number;
+    glowCircle?: Phaser.GameObjects.Image;
   }> = [];
 
   constructor(
@@ -52,6 +58,8 @@ export class EntitySync {
         const posY = this.offsetY + position.y * this.tileSize + this.tileSize / 2;
         const tower = new Tower(this.scene, posX, posY, id, type, position.x, position.y);
         if (stats?.range) tower.range = stats.range;
+        if (stats?.pierce) tower.pierce = stats.pierce;
+        if (stats?.spread) tower.spread = stats.spread;
         let scaleMultiplier = 1.2;
         if (type === 'sun_god') {
           scaleMultiplier = 2.0;
@@ -65,6 +73,8 @@ export class EntitySync {
       } else {
         const tower = this.towers.get(id)!;
         if (stats?.range) tower.range = stats.range;
+        if (stats?.pierce) tower.pierce = stats.pierce;
+        if (stats?.spread) tower.spread = stats.spread;
       }
     });
     for (const [id, tower] of this.towers.entries()) {
@@ -150,15 +160,185 @@ export class EntitySync {
     const lastY = targetEnemy ? targetEnemy.sprite.y : sourceTower.y;
 
     const birdType = sourceTower.birdType;
+
+    if (birdType === 'phoenix') {
+      const numDirections = 12;
+      const range = sourceTower.range * this.tileSize * 0.85;
+
+      // expanding outer red blast circle
+      const blast = this.scene.add.circle(sourceTower.x, sourceTower.y, 10, 0xef4444, 0.35).setDepth(19);
+      this.scene.tweens.add({
+        targets: blast,
+        radius: range,
+        alpha: 0,
+        duration: 250,
+        ease: 'Quad.easeOut',
+        onComplete: () => blast.destroy()
+      });
+
+      // expanding inner orange blast core
+      const blastCore = this.scene.add.circle(sourceTower.x, sourceTower.y, 5, 0xf97316, 0.5).setDepth(19);
+      this.scene.tweens.add({
+        targets: blastCore,
+        radius: range * 0.7,
+        alpha: 0,
+        duration: 150,
+        ease: 'Quad.easeOut',
+        onComplete: () => blastCore.destroy()
+      });
+
+
+
+      if (!this.scene.anims.exists('phoenix_fireball_fly')) {
+        this.scene.anims.create({
+          key: 'phoenix_fireball_fly',
+          frames: this.scene.anims.generateFrameNumbers('projectile_phoenix', { start: 0, end: 7 }),
+          frameRate: 15,
+          repeat: -1
+        });
+      }
+
+      if (!this.scene.textures.exists('soft_glow')) {
+        const canvas = this.scene.textures.createCanvas('soft_glow', 64, 64);
+        if (canvas) {
+          const ctx = canvas.context;
+          const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+          grad.addColorStop(0, 'rgba(249, 115, 22, 1)'); // Orange
+          grad.addColorStop(1, 'rgba(249, 115, 22, 0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 64, 64);
+          canvas.refresh();
+        }
+      }
+
+      for (let i = 0; i < numDirections; i++) {
+        const angle = (i * 2 * Math.PI) / numDirections;
+        const dirX = Math.cos(angle);
+        const dirY = Math.sin(angle);
+
+        const sprite = this.scene.add.sprite(sourceTower.x, sourceTower.y, 'projectile_phoenix');
+        // Note: sprite.width will be 640, since the spritesheet is loaded with frameWidth: 640
+        sprite.setScale((this.tileSize / 640) * 2.1).setDepth(20);
+        sprite.rotation = angle + Math.PI; // Face the direction of travel (offset by 180 degrees)
+        sprite.play('phoenix_fireball_fly');
+
+        // Create a soft feathered radial glow image behind the fireball
+        const glowCircle = this.scene.add.image(sourceTower.x, sourceTower.y, 'soft_glow')
+          .setDepth(19)
+          .setAlpha(0.6)
+          .setDisplaySize(this.tileSize * 2.4, this.tileSize * 2.4);
+
+        this.clientProjectiles.push({
+          sprite,
+          glowCircle,
+          targetId: '',
+          lastTargetX: sourceTower.x,
+          lastTargetY: sourceTower.y,
+          speed: 14 * this.tileSize, // Fireballs travel at a nice visible speed
+          birdType,
+          towerX: sourceTower.x,
+          towerY: sourceTower.y,
+          angleOffset: 0,
+          isDirectional: true,
+          dirX,
+          dirY,
+          maxRange: range,
+          distanceTraveled: 0,
+        });
+      }
+      return;
+    }
+
     const stats = BIRD_STATS[birdType];
-    const projectileScale = birdType === 'sun_god' ? 1.0 : 0.5;
+    const projectileScale = birdType === 'sun_god' ? 2.2 : 0.5;
+
+    if (birdType === 'sun_god') {
+      if (!this.scene.anims.exists('sun_god_arrow_fly')) {
+        this.scene.anims.create({
+          key: 'sun_god_arrow_fly',
+          frames: this.scene.anims.generateFrameNumbers('projectile_sun_god', { start: 0, end: 7 }),
+          frameRate: 15,
+          repeat: -1
+        });
+      }
+      if (!this.scene.textures.exists('yellow_glow')) {
+        const canvas = this.scene.textures.createCanvas('yellow_glow', 64, 64);
+        if (canvas) {
+          const ctx = canvas.context;
+          const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+          grad.addColorStop(0, 'rgba(254, 240, 138, 1)'); // Yellow
+          grad.addColorStop(1, 'rgba(254, 240, 138, 0)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 64, 64);
+          canvas.refresh();
+        }
+      }
+    }
 
     const createSingleProjectile = (angleOffset: number) => {
       const sprite = this.scene.add.sprite(sourceTower.x, sourceTower.y, `projectile_${birdType}`);
-      sprite.setScale(this.tileSize / sprite.width * projectileScale).setDepth(20);
+      const baseWidth = birdType === 'sun_god' ? 480 : sprite.width;
+      sprite.setScale(this.tileSize / baseWidth * projectileScale).setDepth(20);
+
+      let glowCircle: Phaser.GameObjects.Image | undefined;
+      if (birdType === 'sun_god') {
+        sprite.setTintFill(0xfffde7); // Fully solid light yellow arrow
+        sprite.play('sun_god_arrow_fly');
+        glowCircle = this.scene.add.image(sourceTower.x, sourceTower.y, 'yellow_glow')
+          .setDepth(19)
+          .setAlpha(0.65)
+          .setDisplaySize(this.tileSize * 1.5, this.tileSize * 1.5);
+      }
+
+      const hasPierce = !!(sourceTower.pierce || stats?.pierce);
+      const targetAngle = Math.atan2(lastY - sourceTower.y, lastX - sourceTower.x) + angleOffset;
+      const dirX = Math.cos(targetAngle);
+      const dirY = Math.sin(targetAngle);
+
+      if (hasPierce) {
+        if (birdType === 'sun_god') {
+          sprite.rotation = targetAngle + Math.PI;
+        } else {
+          sprite.rotation = targetAngle + Math.PI / 2;
+        }
+      }
+
+      let maxRange = (sourceTower.range || stats?.range || 3.0) * this.tileSize;
+      if (hasPierce) {
+        // Find all active enemies lying along the line of attack
+        const lineEnemies: Array<{ distance: number }> = [];
+        this.enemies.forEach((enemy) => {
+          if (enemy.isDying) return;
+          const dx = enemy.sprite.x - sourceTower.x;
+          const dy = enemy.sprite.y - sourceTower.y;
+          const dist = Math.hypot(dx, dy);
+          const screenLimit = Math.hypot(this.scene.scale.width, this.scene.scale.height);
+          if (dist <= 0 || dist > screenLimit) return;
+
+          const edx = dx / dist;
+          const edy = dy / dist;
+          const dot = dirX * edx + dirY * edy;
+
+          // angular tolerance (approx. 18 degrees)
+          if (dot >= 0.95) {
+            lineEnemies.push({ distance: dist });
+          }
+        });
+
+        const maxPierce = sourceTower.pierce || stats?.pierce || 5;
+        if (lineEnemies.length >= maxPierce) {
+          // Sort by distance ascending (closest first)
+          lineEnemies.sort((a, b) => a.distance - b.distance);
+          maxRange = lineEnemies[maxPierce - 1].distance;
+        } else {
+          // 5th enemy is not hit, so keep traveling off screen
+          maxRange = Math.hypot(this.scene.scale.width, this.scene.scale.height);
+        }
+      }
 
       this.clientProjectiles.push({
         sprite,
+        glowCircle,
         targetId: enemyId,
         lastTargetX: lastX,
         lastTargetY: lastY,
@@ -167,11 +347,17 @@ export class EntitySync {
         towerX: sourceTower.x,
         towerY: sourceTower.y,
         angleOffset,
+        maxRange,
+        distanceTraveled: 0,
+        isDirectional: hasPierce,
+        dirX,
+        dirY,
       });
     };
 
     if (stats && stats.attack === 'SPLASH') {
-      const offsets = [-0.22, 0, 0.22];
+      const spread = sourceTower.spread || stats.spread || (stats as any)?.Spread || (Math.PI / 12);
+      const offsets = [-spread, 0, spread];
       offsets.forEach(offset => createSingleProjectile(offset));
     } else {
       createSingleProjectile(0);
@@ -215,6 +401,34 @@ export class EntitySync {
     const active: any[] = [];
 
     this.clientProjectiles.forEach((p) => {
+      if (p.isDirectional) {
+        const moveStep = p.speed * dt;
+        p.distanceTraveled = (p.distanceTraveled || 0) + moveStep;
+
+        if (p.distanceTraveled >= (p.maxRange || 0)) {
+          p.sprite.destroy();
+          if (p.glowCircle) p.glowCircle.destroy();
+        } else {
+          p.sprite.x += (p.dirX || 0) * moveStep;
+          p.sprite.y += (p.dirY || 0) * moveStep;
+
+          if (p.glowCircle) {
+            p.glowCircle.x = p.sprite.x;
+            p.glowCircle.y = p.sprite.y;
+          }
+
+          // Fade out near the end of range (last 20%)
+          const remainingPct = 1 - (p.distanceTraveled / (p.maxRange || 1));
+          if (remainingPct < 0.2) {
+            const alpha = remainingPct / 0.2;
+            p.sprite.setAlpha(alpha);
+            if (p.glowCircle) p.glowCircle.setAlpha(alpha * 0.6);
+          }
+          active.push(p);
+        }
+        return;
+      }
+
       let tx = p.lastTargetX;
       let ty = p.lastTargetY;
 
@@ -240,13 +454,27 @@ export class EntitySync {
       const dist = Math.sqrt(dx * dx + dy * dy);
 
       if (dist > 0) {
-        p.sprite.rotation = Math.atan2(dy, dx) + Math.PI / 2;
+        if (p.birdType === 'sun_god') {
+          p.sprite.rotation = Math.atan2(dy, dx) + Math.PI;
+        } else {
+          p.sprite.rotation = Math.atan2(dy, dx) + Math.PI / 2;
+        }
       }
 
       const moveStep = p.speed * dt;
 
+      // Track distance traveled for normal projectiles
+      p.distanceTraveled = (p.distanceTraveled || 0) + moveStep;
+
+      if (p.maxRange && p.distanceTraveled >= p.maxRange) {
+        p.sprite.destroy();
+        if (p.glowCircle) p.glowCircle.destroy();
+        return;
+      }
+
       if (dist <= moveStep) {
         p.sprite.destroy();
+        if (p.glowCircle) p.glowCircle.destroy();
         const targetEnemy = this.enemies.get(p.targetId);
         if (targetEnemy && targetEnemy.isDying) {
           const otherProjectiles = this.clientProjectiles.some(other => other !== p && other.targetId === p.targetId);
@@ -260,6 +488,10 @@ export class EntitySync {
       } else {
         p.sprite.x += (dx / dist) * moveStep;
         p.sprite.y += (dy / dist) * moveStep;
+        if (p.glowCircle) {
+          p.glowCircle.x = p.sprite.x;
+          p.glowCircle.y = p.sprite.y;
+        }
         active.push(p);
       }
     });
@@ -275,7 +507,10 @@ export class EntitySync {
     this.enemyMaxHealth.clear();
     this.projectiles.forEach((p) => p.sprite.destroy());
     this.projectiles.clear();
-    this.clientProjectiles.forEach((p) => p.sprite.destroy());
+    this.clientProjectiles.forEach((p) => {
+      p.sprite.destroy();
+      if (p.glowCircle) p.glowCircle.destroy();
+    });
     this.clientProjectiles = [];
   }
 }

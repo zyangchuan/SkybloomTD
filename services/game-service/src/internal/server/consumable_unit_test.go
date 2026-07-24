@@ -263,6 +263,37 @@ func TestValidateAirstrikeAcquireRejectsCooldown(t *testing.T) {
 	}
 }
 
+func TestFireBirdsAllowsRingAttackWithoutTarget(t *testing.T) {
+	runtime := consumableTestRuntime()
+	runtime.birds = []placedBird{{
+		birdType: gameobject.BirdTypeSparrow,
+		bird: gameobject.Bird{
+			ID:              "bird-ring",
+			Position:        gameobject.Position{X: 0, Y: 0},
+			Stats:           gameobject.BirdStats{Damage: 10, Range: 2, FireRate: 1},
+			AttackBehaviour: gameobject.RingAttack{},
+			LastFiredAtTick: -1,
+		},
+	}}
+	runtime.enemies = []gameobject.Enemy{
+		{ID: "enemy-near", Type: gameobject.EnemyTypeSmog, Health: 20, Position: gameobject.Position{X: 1, Y: 0}},
+		{ID: "enemy-edge", Type: gameobject.EnemyTypeSmog, Health: 20, Position: gameobject.Position{X: 0, Y: 2}},
+		{ID: "enemy-far", Type: gameobject.EnemyTypeSmog, Health: 20, Position: gameobject.Position{X: 2.1, Y: 0}},
+	}
+
+	events := fireBirds(&runtime)
+
+	if len(events) != 3 {
+		t.Fatalf("expected attack plus 2 damage events, got %#v", events)
+	}
+	if events[0].Type != "bird.attack" || events[0].BirdID != "bird-ring" || events[0].EnemyID != "" {
+		t.Fatalf("expected targetless bird attack event, got %#v", events[0])
+	}
+	if runtime.enemies[0].Health != 10 || runtime.enemies[1].Health != 10 || runtime.enemies[2].Health != 20 {
+		t.Fatalf("unexpected enemy health after ring attack: %#v", runtime.enemies)
+	}
+}
+
 func consumableTestRuntime() runtimeSession {
 	return runtimeSession{
 		session: gamesession.State{

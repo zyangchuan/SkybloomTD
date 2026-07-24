@@ -107,12 +107,20 @@ export default class BootScene extends Phaser.Scene {
     this.load.image('projectile_peacock', '/game/assets/birds/peacock_projectile.png');
     this.load.image('projectile_falcon', '/game/assets/birds/falcon_projectile.png');
     this.load.image('projectile_kingfisher', '/game/assets/birds/kingfisher_projectile.png');
-    this.load.image('projectile_phoenix', '/game/assets/birds/pheonix_projectile.png');
-    this.load.image('projectile_sun_god', '/game/assets/birds/sun_god_projectile.png');
+    this.load.spritesheet('projectile_phoenix', '/game/assets/vfx/fireball.png', {
+      frameWidth: 640,
+      frameHeight: 360
+    });
+    this.load.spritesheet('projectile_sun_god', '/game/assets/vfx/water_arrow.png', {
+      frameWidth: 480,
+      frameHeight: 360
+    });
 
     // Preload airstrike consumable assets
     this.load.svg('btn_bg_circle', '/game/assets/gui/buttons_icons/IconButton_Large_Blue_Circle.svg', { width: 80, height: 80 });
     this.load.svg('btn_check', '/game/assets/gui/buttons_text/PremadeButtons_Check.svg', { width: 80, height: 80 });
+    this.load.svg('btn_green_square', '/game/assets/gui/buttons_icons/IconButton_Small_Green_Square.svg', { width: 80, height: 80 });
+    this.load.svg('scroll_pointer', '/game/assets/gui/sliders/ScrollBar_Blank_Pointer.svg', { width: 40, height: 40 });
     this.load.image('consumable_airstrike_icon', '/game/assets/consumables/airstrike/icon.png');
     this.load.image('consumable_airstrike_aim_marker', '/game/assets/consumables/airstrike/aim_marker.png');
     this.load.image('consumable_airstrike_plane', '/game/assets/consumables/airstrike/plane.png');
