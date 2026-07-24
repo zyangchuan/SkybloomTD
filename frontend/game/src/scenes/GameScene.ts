@@ -13,6 +13,8 @@ export default class GameScene extends Phaser.Scene {
   private ws: WebSocket | null = null;
   private levelId = '';
   private sessionId = '';
+  private isFreePlay = false;
+  private chapterId = '';
 
   // Grid params
   private tileSize = 0;
@@ -37,9 +39,11 @@ export default class GameScene extends Phaser.Scene {
 
   constructor() { super('GameScene'); }
 
-  create(data: { initialState: any, ws: WebSocket, levelId: string }) {
+  create(data: { initialState: any, ws: WebSocket, levelId: string, chapterId?: string, isFreePlay?: boolean }) {
     this.ws = data.ws;
     this.levelId = data.levelId;
+    this.chapterId = data.chapterId || '';
+    this.isFreePlay = data.isFreePlay || false;
     const mapData = data.initialState?.map;
     if (!mapData) { console.error('No map data in initial state.'); return; }
 
@@ -101,7 +105,17 @@ export default class GameScene extends Phaser.Scene {
       try { this.handleServerMessage(JSON.parse(event.data)); }
       catch (err) { console.error('Failed to parse WebSocket message:', err); }
     };
-    this.ws.send(JSON.stringify({ type: 'game.session.start', data: { level_id: levelId } }));
+    if (this.isFreePlay) {
+      this.ws.send(JSON.stringify({
+        type: 'game.freeplay.session.start',
+        data: {
+          free_play_id: levelId,
+          chapter_id: this.chapterId
+        }
+      }));
+    } else {
+      this.ws.send(JSON.stringify({ type: 'game.session.start', data: { level_id: levelId } }));
+    }
   }
 
   private handleServerMessage(msg: any) {

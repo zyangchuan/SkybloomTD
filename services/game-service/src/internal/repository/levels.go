@@ -48,6 +48,11 @@ type QuizItem struct {
 	AnswerIndex      int      `json:"answer_index"`
 }
 
+type SubChapterSummary struct {
+	SubChapterID string `json:"sub_chapter_id"`
+	ChapterID    string `json:"chapter_id"`
+}
+
 type SavedLevel struct {
 	LevelID      string
 	SubChapterID string
@@ -234,6 +239,24 @@ func (r *LevelRepository) FindReusableLevelWithQuizzes(ctx context.Context, user
 		GenerationRecordExists: row.GenerationRecordExists,
 		QuizCount:              row.QuizCount,
 	}, nil
+}
+
+func (r *LevelRepository) ListChapterSubChapters(ctx context.Context, chapterID string, userID string) ([]SubChapterSummary, error) {
+	var rows []SubChapterSummary
+	err := r.db.WithContext(ctx).
+		Table("private.sub_chapters AS sc").
+		Select("sc.id AS sub_chapter_id, sc.chapter_id AS chapter_id").
+		Joins("JOIN private.chapters AS c ON c.id = sc.chapter_id").
+		Joins("JOIN "+documentsTable+" AS d ON d.id = c.document_id").
+		Where("sc.chapter_id = ?", chapterID).
+		Where("(d.user_id = ? OR (d.is_public = true AND d.is_ready = true))", userID).
+		Order("sc.sub_chapter_index ASC NULLS LAST, sc.created_at ASC").
+		Find(&rows).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *LevelRepository) AttachGenerationToLevel(ctx context.Context, generationID string, levelID string, options LevelInsertOptions) (SavedLevel, error) {

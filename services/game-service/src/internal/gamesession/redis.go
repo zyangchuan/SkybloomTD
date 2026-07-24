@@ -21,6 +21,9 @@ const (
 	InitialHealth  = 100
 	InitialEssence = 100
 	InitialWave    = 0
+
+	GameModeNormal   = "normal"
+	GameModeFreePlay = "free_play"
 )
 
 type StartOptions struct {
@@ -28,6 +31,8 @@ type StartOptions struct {
 	LevelID      string
 	GenerationID string
 	SubChapterID string
+	ChapterID    string
+	GameMode     string
 }
 
 type State struct {
@@ -36,6 +41,8 @@ type State struct {
 	LevelID      string    `json:"level_id"`
 	GenerationID string    `json:"generation_id"`
 	SubChapterID string    `json:"sub_chapter_id"`
+	ChapterID    string    `json:"chapter_id,omitempty"`
+	GameMode     string    `json:"game_mode"`
 	Health       int       `json:"health"`
 	Essence      int       `json:"essence"`
 	Wave         int       `json:"wave"`
@@ -85,6 +92,8 @@ type ConsumableItemState struct {
 
 type RuntimeState struct {
 	GenerationID            string
+	ChapterID               string
+	GameMode                string
 	Health                  int
 	Essence                 int
 	Wave                    int
@@ -156,6 +165,8 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		LevelID:      options.LevelID,
 		GenerationID: options.GenerationID,
 		SubChapterID: options.SubChapterID,
+		ChapterID:    strings.TrimSpace(options.ChapterID),
+		GameMode:     normalizedGameMode(options.GameMode),
 		Health:       InitialHealth,
 		Essence:      InitialEssence,
 		Wave:         InitialWave,
@@ -169,6 +180,8 @@ func (s *Store) Start(ctx context.Context, options StartOptions) (State, error) 
 		"level_id":             state.LevelID,
 		"generation_id":        state.GenerationID,
 		"sub_chapter_id":       state.SubChapterID,
+		"chapter_id":           state.ChapterID,
+		"game_mode":            state.GameMode,
 		"health":               state.Health,
 		"essence":              state.Essence,
 		"wave":                 state.Wave,
@@ -233,6 +246,8 @@ func (s *Store) LoadRuntimeState(ctx context.Context, sessionID string) (Runtime
 	}
 	return RuntimeState{
 		GenerationID:            state.GenerationID,
+		ChapterID:               state.ChapterID,
+		GameMode:                state.GameMode,
 		Health:                  state.Health,
 		Essence:                 state.Essence,
 		Wave:                    state.Wave,
@@ -312,6 +327,10 @@ func (s *Store) SaveRuntimeState(ctx context.Context, sessionID string, runtime 
 		formatOptionalTime(runtime.LastQuizStartedAt),
 		"consumable_cooldown_until",
 		formatOptionalTime(runtime.ConsumableCooldownUntil),
+		"game_mode",
+		normalizedGameMode(runtime.GameMode),
+		"chapter_id",
+		strings.TrimSpace(runtime.ChapterID),
 		"birds",
 		string(birdsBody),
 		"enemies",
@@ -556,6 +575,8 @@ func parseState(values map[string]string) (State, error) {
 		LevelID:      values["level_id"],
 		GenerationID: values["generation_id"],
 		SubChapterID: values["sub_chapter_id"],
+		ChapterID:    values["chapter_id"],
+		GameMode:     normalizedGameMode(values["game_mode"]),
 		Health:       health,
 		Essence:      essence,
 		Wave:         wave,
@@ -563,6 +584,15 @@ func parseState(values map[string]string) (State, error) {
 		StartedAt:    startedAt,
 		UpdatedAt:    updatedAt,
 	}, nil
+}
+
+func normalizedGameMode(value string) string {
+	switch strings.TrimSpace(value) {
+	case GameModeFreePlay:
+		return GameModeFreePlay
+	default:
+		return GameModeNormal
+	}
 }
 
 func hashValues(raw any) map[string]string {
