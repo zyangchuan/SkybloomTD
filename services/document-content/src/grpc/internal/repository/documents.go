@@ -47,7 +47,7 @@ func (r *DocumentRepository) LoadDocumentRow(ctx context.Context, subChapterID u
 			d.s3_bucket
 		`).
 		Joins("JOIN private.documents AS d ON sc.document_id = d.id").
-		Where("sc.id = ? AND d.user_id = ?", subChapterID, userID).
+		Where("sc.id = ? AND (d.user_id = ? OR (d.is_public = true AND d.is_ready = true))", subChapterID, userID).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return DocumentRow{}, fmt.Errorf("%w: No sub_chapter found for the provided user_id and sub_chapter_id", ErrNotFound)
