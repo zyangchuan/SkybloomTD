@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, FileText, Info } from 'lucide-react';
+import { FileText, Info } from 'lucide-react';
 import axios from 'axios';
 import Modal from './Modal';
 import ButtonGreen from './ButtonGreen';
@@ -198,7 +198,7 @@ export default function UploadDocumentModal({ isOpen, onClose, onUploadSuccess }
         {uploadSuccess ? (
           <div className="flex flex-col items-center justify-center gap-4 py-6 text-center">
             <div className="flex items-center gap-2 text-2xl text-emerald-700 font-bold drop-shadow-[0_1px_0_rgba(255,255,255,0.4)]">
-              <Sparkles className="w-6 h-6 text-emerald-600 animate-pulse" /> Document Uploaded!
+              Document Uploaded!
             </div>
             <p className="text-[#4a1900] text-md max-w-sm leading-relaxed font-semibold text-center">
               The document is being processed and you may check the status of the document in the dashboard page.
