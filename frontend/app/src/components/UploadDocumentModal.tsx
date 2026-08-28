@@ -8,6 +8,8 @@ import RetroInput from './RetroInput';
 import { getSupabaseBrowserClient } from '@/lib/supabase';
 import { syncAuthCookie } from '@/lib/auth-cookie';
 
+const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024;
+
 interface UploadDocumentModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -97,9 +99,9 @@ export default function UploadDocumentModal({ isOpen, onClose, onUploadSuccess }
       return;
     }
 
-    // Limit size to 10MB just as a healthy precaution
-    if (selectedFile.size > 10 * 1024 * 1024) {
-      setError("File exceeds 10MB limit.");
+    // Keep the browser-side file limit aligned with the backend upload limit.
+    if (selectedFile.size > MAX_UPLOAD_SIZE_BYTES) {
+      setError("File exceeds 50MB limit.");
       setFile(null);
       return;
     }

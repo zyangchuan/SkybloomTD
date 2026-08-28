@@ -307,13 +307,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "400":
-          description: Invalid multipart upload or missing `file`/`game_name` field.
+          description: Invalid multipart upload, missing `file`/`game_name` field, or multipart request exceeds the 50 MiB backend limit.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "413":
-          description: Uploaded file exceeds proxy size limit.
+          description: Multipart upload exceeds the 100 MB reverse-proxy limit.
         "500":
           description: Source storage or document row creation failed.
           content:
@@ -379,13 +379,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "400":
-          description: Invalid multipart upload or missing `file`/`game_name` field.
+          description: Invalid multipart upload, missing `file`/`game_name` field, or multipart request exceeds the 50 MiB backend limit.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "413":
-          description: Uploaded file exceeds proxy size limit.
+          description: Multipart upload exceeds the 100 MB reverse-proxy limit.
         "500":
           description: Source storage or document row creation failed.
           content:
@@ -1199,7 +1199,7 @@ components:
         file:
           type: string
           format: binary
-          description: Document file to OCR. PDFs are expected by the current worker flow.
+          description: PDF document to OCR. The multipart request must be no larger than 50 MiB; PDFs are expected by the current worker flow.
         game_name:
           type: string
           maxLength: 120

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	maxUploadBytes     = 5 << 20 // max upload size is 5MB
+	maxUploadBytes     = 50 << 20 // max upload size is 50MB
 	maxGameNameLength  = 120
 	gameNameField      = "game_name"
 	gameNameMissingErr = "game_name is required"

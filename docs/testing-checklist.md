@@ -83,12 +83,17 @@ Fill in **Actual Result** after running the step. Mark **Status** as `PASS`, `FA
 
 ## 2. PDF Upload
 
-### TC-UPLOAD-01 — Upload a valid PDF under 10 MB
+The backend accepts multipart upload requests up to 50 MiB, including multipart
+form overhead. The browser UI accepts PDF files up to 50 MiB. The reverse proxy
+allows request bodies up to 100 MB. Because multipart overhead counts toward the
+backend limit, a file exactly 50 MiB may exceed the backend request limit.
+
+### TC-UPLOAD-01 — Upload a valid PDF under 50 MiB
 
 | Field | Detail |
 |---|---|
 | **Scenario** | Standard successful PDF upload |
-| **Precondition** | User is logged in. A PDF file smaller than 10 MB is available. |
+| **Precondition** | User is logged in. A PDF file smaller than 50 MiB is available. |
 | **Steps** | 1. Click **Upload PDF** on the dashboard. <br>2. Select or drag-and-drop a valid PDF (e.g. 2 MB). <br>3. Enter a game name and click **Upload PDF**. |
 | **Expected Result** | Upload succeeds. A new game card appears on the dashboard with status `processing` or `successful`. No error message is shown. |
 | **Actual Result** | |
@@ -96,27 +101,27 @@ Fill in **Actual Result** after running the step. Mark **Status** as `PASS`, `FA
 
 ---
 
-### TC-UPLOAD-02 — Upload a PDF exactly 10 MB
+### TC-UPLOAD-02 — Upload a PDF exactly 50 MiB
 
 | Field | Detail |
 |---|---|
 | **Scenario** | Boundary value — exactly at the size limit |
-| **Precondition** | A PDF file of exactly 10,485,760 bytes (10 × 1024 × 1024) is available. |
-| **Steps** | 1. Open the upload modal. <br>2. Select the 10 MB PDF. <br>3. Click **Upload PDF**. |
+| **Precondition** | A multipart request of exactly 52,428,800 bytes (50 × 1024 × 1024), including form overhead, is available. |
+| **Steps** | 1. Submit the 50 MiB multipart request to the upload endpoint. <br>2. Verify the request is accepted by the backend. |
 | **Expected Result** | File is accepted (no client-side validation error). Upload proceeds normally. |
 | **Actual Result** | |
 | **Status** | |
 
 ---
 
-### TC-UPLOAD-03 — Upload a PDF larger than 10 MB
+### TC-UPLOAD-03 — Upload a PDF larger than 50 MiB
 
 | Field | Detail |
 |---|---|
 | **Scenario** | File exceeds size limit — error must be shown |
-| **Precondition** | A PDF file larger than 10 MB is available. |
-| **Steps** | 1. Open the upload modal. <br>2. Select or drop a PDF > 10 MB. |
-| **Expected Result** | Client-side validation fires immediately. Error message **"File exceeds 10MB limit."** is displayed in red. Upload button is not enabled. No network request is made. |
+| **Precondition** | A PDF file larger than 50 MiB is available. |
+| **Steps** | 1. Open the upload modal. <br>2. Select or drop a PDF > 50 MiB. |
+| **Expected Result** | Browser validation fires immediately. Error message **"File exceeds 50MB limit."** is displayed in red. Upload button is not enabled. No network request is made. |
 | **Actual Result** | |
 | **Status** | |
 
@@ -477,9 +482,9 @@ Fill in **Actual Result** after running the step. Mark **Status** as `PASS`, `FA
 | TC-AUTH-03 | Logout | | |
 | TC-AUTH-04 | Unauthorised access blocked | | |
 | TC-AUTH-05 | Session persists on refresh | | |
-| TC-UPLOAD-01 | Upload valid PDF < 10 MB | | |
-| TC-UPLOAD-02 | Upload PDF exactly 10 MB | | |
-| TC-UPLOAD-03 | Upload PDF > 10 MB blocked | | |
+| TC-UPLOAD-01 | Upload valid PDF < 50 MiB | | |
+| TC-UPLOAD-02 | Upload PDF exactly 50 MiB | | |
+| TC-UPLOAD-03 | Upload PDF > 50 MiB blocked | | |
 | TC-UPLOAD-04 | Upload non-PDF blocked | | |
 | TC-UPLOAD-05 | PDF processed and accessible | | |
 | TC-LEVEL-01 | All levels accessible | | |
