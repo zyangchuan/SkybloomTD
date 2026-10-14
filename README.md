@@ -3,8 +3,9 @@
 ## Project Poster
 ![Project Poster](/img/poster.png)
 
-## Project Video
-[![Project Video](https://drive.google.com/file/d/1ZZhSmEtrJNYUkeOzxKJRFIJUaZ_JVx8i/view?usp=share_link)]
+## Demo Video
+
+[Demo Video](https://drive.google.com/file/d/1ZZhSmEtrJNYUkeOzxKJRFIJUaZ_JVx8i/preview)
 
 ## Project Description
 
@@ -36,9 +37,7 @@ Designed to make short study breaks both enjoyable and productive, it combines s
 
 ## Full README
 
-You can read the full README of the project in the link below. This README includes more details on the implementation of the key features, design decisions and testing methodologies used.
-
-![README](https://docs.google.com/document/d/1tDSZdt9yYMRP3i6dL1M2G_dkdF1flpWNvl7TBZXNVak/edit?usp=sharing)
+You can read the [full README](https://docs.google.com/document/d/1tDSZdt9yYMRP3i6dL1M2G_dkdF1flpWNvl7TBZXNVak/edit?usp=sharing) of the project in the link below. This README includes more details on the implementation of the key features, design decisions and testing methodologies used.
 
 ## Assets Used
 
