@@ -1,8 +1,59 @@
-# SkybloomTD Docker Setup
+# SkyBloomTD - NUS Orbital 2026 Judge's Choice Winner
+
+## Project Poster
+![Project Poster](/img/poster.png)
+
+## Project Video
+[![Project Video](https://drive.google.com/file/d/1ZZhSmEtrJNYUkeOzxKJRFIJUaZ_JVx8i/view?usp=share_link)]
+
+## Project Description
+
+SkyBloomTD is a browser-based educational tower defence game that turns study materials into playable levels.
+
+Designed to make short study breaks both enjoyable and productive, it combines strategic tower defence with interactive quizzes generated from the player's own PDF notes or textbooks.
+
+## Key Features
+
+- **Turn PDFs into games:** Upload notes or textbooks and let the OCR and AI indexing pipeline organise them into chapters and playable levels. Track processing progress and manage uploaded games from a personal dashboard.
+
+![Chapters](/img/screenshot_chapters.png)
+
+- **Personalised AI quizzes:** Practise multiple-choice and true/false questions generated from the selected study material. Correct answers reward Sky Essence to support your defences.
+
+![Personalized Quizzes](/img/screenshot_quiz.png)
+
+- **Strategic tower defence:** Place bird towers with different damage, range, attack speed, and attack behaviours to counter increasingly challenging waves of Smog, Noise, and Junk enemies.
+
+![Gameplay](/img/screenshot_game.png)
+
+- **Tower upgrades and evolution:** Strengthen existing towers and merge compatible birds into evolved forms such as Falcon, Kingfisher, Phoenix, and Sun God.
+- **Public shared game library:** Explore and play games generated from other users' study materials.
+- **Mistake review:** Review incorrect quiz answers after each run, including the original question, your selected answer, and the correct answer.
+
+## System Architecture
+
+![System Architecture](/img/architecture.png)
+
+## Full README
+
+You can read the full README of the project in the link below. This README includes more details on the implementation of the key features, design decisions and testing methodologies used.
+
+![README](https://docs.google.com/document/d/1tDSZdt9yYMRP3i6dL1M2G_dkdF1flpWNvl7TBZXNVak/edit?usp=sharing)
+
+## Assets Used
+
+| Asset | Source |
+| --- | --- |
+| Penzilla Design - Basic GUI Bundle | [Penzilla](https://penzilla.itch.io/basic-gui-bundle) |
+| Craftpix - Simple Summer Top-down Vector Tileset | [Craftpix](https://craftpix.net/freebies/free-simple-summer-top-down-vector-tileset) |
+| Craftpix - Free Water and Fire Magic Sprite Vector Pack | [Craftpix](https://craftpix.net/freebies/free-water-and-fire-magic-sprite-vector-pack) |
+| Other art assets | ChatGPT |
+
+## Try It Yourself
 
 This guide covers the current Docker Compose setup for local development and shared dev, staging, and production deployments. Local GPU OCR notes assume Windows WSL 2, but the compose profiles are the same on Linux servers.
 
-## What Runs In Compose
+## What Runs In Docker Compose
 
 The root compose stack starts these shared services:
 
